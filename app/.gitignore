@@ -28,6 +28,7 @@ wheels/
 # Environment Variables
 .env
 .env.*
+.env.example
 
 # IDE specific files
 .idea/
