@@ -92,10 +92,6 @@ if not OPENAI_API_KEY:
         'Missing the OpenAI API key. Please set it in the .env file.')
 
 
-# Include authentication router
-app.include_router(auth_router)
-
-
 # Pydantic Schemas
 
 
@@ -143,7 +139,8 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 @app.post("/token", response_model=TokenResponse)
 async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
 ):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user:
@@ -228,38 +225,35 @@ async def schedule_call(
 
 
 @app.get("/make-call/{phone_number}/{scenario}")
-async def make_call(phone_number: str, scenario: str):
+async def make_call(
+    phone_number: str,
+    scenario: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     try:
-        # Get and validate PUBLIC_URL
-        public_url = os.getenv('PUBLIC_URL')
-        if not public_url:
-            raise ValueError("PUBLIC_URL environment variable not set")
-
-        # Log the URL we're using
+        # Get the public URL from environment and ensure it's clean
+        public_url = os.getenv('PUBLIC_URL', '').strip()
         logger.info(f"Using PUBLIC_URL from environment: {public_url}")
 
-        # Clean and construct the webhook URL
-        base_url = public_url
-        incoming_call_url = f"{base_url}/incoming-call/{scenario}"
+        # Construct the complete webhook URL with https://
+        webhook_url = f"https://{public_url}/incoming-call/{scenario}"
+        logger.info(f"Constructed webhook URL: {webhook_url}")
 
-        logger.info(f"Constructed webhook URL: {incoming_call_url}")
+        # Initialize Twilio client
+        # twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
+        # Make the call using Twilio
         call = twilio_client.calls.create(
-            url=incoming_call_url,
-            to=phone_number,
-            from_=TWILIO_PHONE_NUMBER
+            to=f"+1{phone_number}",  # Ensure proper phone number formatting
+            from_=TWILIO_PHONE_NUMBER,
+            url=webhook_url,
+            record=True
         )
 
-        return JSONResponse(content={
-            "message": f"Call initiated with SID: {call.sid}",
-            "scenario": scenario,
-            "webhook_url": incoming_call_url
-        })
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return {"message": "Call initiated", "call_sid": call.sid}
     except Exception as e:
-        logger.error(f"Error initiating call: {e}")
+        logger.error(f"Error initiating call: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Webhook Endpoint for Incoming Calls
@@ -278,17 +272,18 @@ async def handle_incoming_call(request: Request, scenario: str):
         form_data = await request.form()
         logger.info(f"Received form data: {form_data}")
 
+        """Handle incoming call and return TwiML response."""
+
         response = VoiceResponse()
-        response.say("what Up motha F'er.")
+        response.say("what up son, can you talk.")
         response.pause(length=1)
         response.say("y'all ready to talk some shit?")
 
-        # Construct WebSocket URL
-        public_url = os.getenv('PUBLIC_URL', '').strip()
-        base_url = public_url
-        ws_url = f"wss://{base_url}/media-stream/{scenario}"
+        # Get the host from the request
+        host = request.url.hostname
 
-        logger.info(f"Constructed WebSocket URL: {ws_url}")
+        # Construct WebSocket URL
+        ws_url = f"wss://{host}/media-stream/{scenario}"
 
         connect = Connect()
         connect.stream(url=ws_url)
@@ -300,7 +295,7 @@ async def handle_incoming_call(request: Request, scenario: str):
         return Response(content=twiml, media_type="application/xml")
     except Exception as e:
         logger.error(f"Error in handle_incoming_call: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        raise
 
 # Placeholder for WebSocket Endpoint (Implement as Needed)
 
@@ -411,7 +406,7 @@ async def send_session_update(openai_ws, scenario):
 
 
 @app.websocket("/media-stream/{scenario}")
-async def media_stream(websocket: WebSocket, scenario: str):
+async def handle_media_stream(websocket: WebSocket, scenario: str):
     logger.info(f"WebSocket connection attempt for scenario: {scenario}")
     try:
         await websocket.accept()
@@ -421,65 +416,127 @@ async def media_stream(websocket: WebSocket, scenario: str):
         if scenario not in SCENARIOS:
             await websocket.close(code=4000, reason="Invalid scenario")
             logger.error(f"Invalid scenario: {scenario}")
-
             return
 
-        # Fetch scenario details
         selected_scenario = SCENARIOS[scenario]
         logger.info(f"Using scenario: {selected_scenario}")
 
-        # Connect to OpenAI Realtime API
-        openai_ws_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
-        try:
-            async with websockets.connect(
-                openai_ws_url,
-                extra_headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "OpenAI-Beta": "realtime=v1"
-                }
-            ) as openai_ws:
-                logger.info("Connected to OpenAI WebSocket")
+        async with websockets.connect(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',  # Updated URL
+            extra_headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "OpenAI-Beta": "realtime=v1"  # Added required beta header
+            }
+        ) as openai_ws:
+            logger.info("Connected to OpenAI WebSocket")
 
-                # Initialize response.create
-                initial_message = {
-                    "type": "response.create",
-                    "response": {
-                        "modalities": ["text", "audio"],
-                        "audio_format": {
-                            "type": "mulaw",
-                            "sample_rate": 8000
-                        }
-                    }
-                }
-                await openai_ws.send(json.dumps(initial_message))
-                logger.info("Sent initial response.create message")
+            # Connection specific state
+            stream_sid = None
+            latest_media_timestamp = 0
+            last_assistant_item = None
+            mark_queue = []
+            response_start_timestamp_twilio = None
 
-                # Send session update
-                # await send_session_update(openai_ws, selected_scenario)
-                # logger.info("Session update sent, starting audio handlers")
+            # Initialize session
+            await initialize_session(openai_ws, selected_scenario)
 
-                # Run both audio handlers concurrently
-                await asyncio.gather(
-                    receive_from_twilio(websocket, openai_ws),
-                    send_to_twilio(websocket, openai_ws)
-                )
-        except Exception as e:
-            logger.error(f"Error in OpenAI WebSocket connection: {e}")
-            await websocket.close(code=1011, reason="OpenAI connection failed")
+            async def receive_from_twilio():
+                """Receive audio data from Twilio and send it to OpenAI."""
+                nonlocal stream_sid, latest_media_timestamp
+                try:
+                    async for message in websocket.iter_text():
+                        data = json.loads(message)
+                        if data['event'] == 'media' and openai_ws.open:
+                            latest_media_timestamp = int(
+                                data['media']['timestamp'])
+                            audio_append = {
+                                "type": "input_audio_buffer.append",
+                                "audio": data['media']['payload']
+                            }
+                            await openai_ws.send(json.dumps(audio_append))
+                        elif data['event'] == 'start':
+                            stream_sid = data['start']['streamSid']
+                            logger.info(f"Stream started: {stream_sid}")
+                            response_start_timestamp_twilio = None
+                            latest_media_timestamp = 0
+                            last_assistant_item = None
+                        elif data['event'] == 'mark':
+                            if mark_queue:
+                                mark_queue.pop(0)
+                except WebSocketDisconnect:
+                    logger.info("Twilio WebSocket disconnected")
+                    if openai_ws.open:
+                        await openai_ws.close()
+
+            async def send_to_twilio():
+                """Receive events from OpenAI and send audio back to Twilio."""
+                nonlocal stream_sid, last_assistant_item, response_start_timestamp_twilio
+                try:
+                    async for openai_message in openai_ws:
+                        response = json.loads(openai_message)
+
+                        if response.get('type') == 'error':
+                            logger.error(f"Error from OpenAI: {response}")
+                            continue
+
+                        if response.get('type') == 'response.audio.delta' and 'delta' in response:
+                            audio_payload = base64.b64encode(
+                                base64.b64decode(response['delta'])).decode('utf-8')
+                            audio_delta = {
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": {
+                                    "payload": audio_payload
+                                }
+                            }
+                            await websocket.send_json(audio_delta)
+
+                            if response_start_timestamp_twilio is None:
+                                response_start_timestamp_twilio = latest_media_timestamp
+
+                            if response.get('item_id'):
+                                last_assistant_item = response['item_id']
+
+                            await send_mark(websocket, stream_sid)
+
+                        elif response.get('type') == 'input_audio_buffer.speech_started':
+                            logger.info("Speech started detected")
+                            if last_assistant_item:
+                                logger.info(
+                                    f"Interrupting response: {last_assistant_item}")
+                                await handle_speech_started_event(
+                                    websocket, openai_ws, stream_sid,
+                                    last_assistant_item, response_start_timestamp_twilio,
+                                    latest_media_timestamp, mark_queue
+                                )
+                                last_assistant_item = None
+                                response_start_timestamp_twilio = None
+
+                except Exception as e:
+                    logger.error(
+                        f"Error in send_to_twilio: {e}", exc_info=True)
+
+            # Run both handlers concurrently
+            await asyncio.gather(
+                receive_from_twilio(),
+                send_to_twilio()
+            )
+
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected normally")
     except Exception as e:
-        logger.error(f"Error in WebSocket connection: {e}")
+        logger.error(f"Error in WebSocket connection: {e}", exc_info=True)
         await websocket.close(code=1011)
 
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected normally")
-    except Exception as e:
-        logger.error(f"Error in WebSocket connection: {e}")
-        await websocket.close(code=1011)
+# Start Background Thread on Server Startup
+
+
+@app.on_event("startup")
+async def startup_event():
+    threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
+
 
 # Background Task to Initiate Scheduled Calls
-
 
 def initiate_scheduled_calls():
     while True:
@@ -532,7 +589,7 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
     await websocket.accept()
     try:
         async with websockets.connect(
-            'wss: // api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
@@ -545,12 +602,6 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
     finally:
         await websocket.close()
 
-# Start Background Thread on Server Startup
-
-
-@app.on_event("startup")
-async def startup_event():
-    threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
 
 # Handle Server Shutdown
 
@@ -574,9 +625,11 @@ async def print_routes():
 
 def clean_url(url: str) -> str:
     """Clean URL by removing protocol prefixes and trailing slashes."""
+    logger.info(f"clean_url input: {url}")  # Debug log
     url = url.strip()
     url = url.replace('https://', '').replace('http://', '')
     url = url.rstrip('/')
+    logger.info(f"clean_url output: {url}")  # Debug log
     return url
 
 
@@ -596,6 +649,67 @@ async def incoming_call(request: Request, scenario: str):
     response = VoiceResponse()
     response.say("Hello! This is your speech assistant powered by OpenAI.")
     return Response(content=str(response), media_type="application/xml")
+
+
+async def initialize_session(openai_ws, scenario):
+    """Control initial session with OpenAI."""
+    session_update = {
+        "type": "session.update",
+        "session": {
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.6,
+                "prefix_padding_ms": 1000,
+                "silence_duration_ms": 700
+            },
+            "input_audio_format": "g711_ulaw",  # Twilio's format
+            "output_audio_format": "g711_ulaw",  # Twilio's format
+            "voice": VOICE,
+            "instructions": scenario['persona'],
+            "modalities": ["text", "audio"],
+            "temperature": 0.8,
+            "tools": []  # Optional: Add any tools/functions here
+        }
+    }
+    logger.info(f'Sending session update: {json.dumps(session_update)}')
+    await openai_ws.send(json.dumps(session_update))
+
+
+async def send_mark(connection, stream_sid):
+    """Send mark event to Twilio."""
+    if stream_sid:
+        mark_event = {
+            "event": "mark",
+            "streamSid": stream_sid,
+            "mark": {"name": "responsePart"}
+        }
+        await connection.send_json(mark_event)
+        return 'responsePart'
+
+
+async def handle_speech_started_event(websocket, openai_ws, stream_sid,
+                                      last_assistant_item, response_start_timestamp_twilio,
+                                      latest_media_timestamp, mark_queue):
+    """Handle interruption when caller starts speaking."""
+    if mark_queue and response_start_timestamp_twilio is not None:
+        elapsed_time = latest_media_timestamp - response_start_timestamp_twilio
+
+        if last_assistant_item:
+            truncate_event = {
+                "type": "conversation.item.truncate",
+                "item_id": last_assistant_item,
+                "content_index": 0,
+                "audio_end_ms": elapsed_time
+            }
+            await openai_ws.send(json.dumps(truncate_event))
+
+        await websocket.send_json({
+            "event": "clear",
+            "streamSid": stream_sid
+        })
+
+        mark_queue.clear()
+        return None, None  # Reset last_assistant_item and response_start_timestamp
 
 if __name__ == "__main__":
     import uvicorn
