@@ -43,3 +43,19 @@ wheels/
 
 # Logs
 *.log
+
+# Environment files
+.env*
+*.env
+
+# Server configuration
+nginx.conf
+*.service
+aifriendchat.service
+
+# Logs
+logs/
+*.log
+
+# System files
+.DS_Store

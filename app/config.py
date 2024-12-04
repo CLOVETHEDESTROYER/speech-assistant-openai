@@ -25,6 +25,10 @@ TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./local.db' if ENVIRONMENT ==
                          'development' else 'sqlite:///./production.db')
 
+print(f"Current environment: {ENVIRONMENT}")
+print(f"Loading from file: {ENV_FILE}")
+print(f"PUBLIC_URL loaded as: {PUBLIC_URL}")
+
 
 def get_webhook_url(path: str) -> str:
     """Generate full webhook URL based on environment"""
