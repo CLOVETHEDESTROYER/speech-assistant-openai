@@ -272,18 +272,18 @@ async def handle_incoming_call(request: Request, scenario: str):
         form_data = await request.form()
         logger.info(f"Received form data: {form_data}")
 
-        """Handle incoming call and return TwiML response."""
-
         response = VoiceResponse()
         response.say("what up son, can you talk.")
         response.pause(length=1)
         response.say("y'all ready to talk some shit?")
 
-        # Get the host from the request
-        host = request.url.hostname
+        # Get environment and URLs
+        env = os.getenv('ENVIRONMENT', 'development')
+        public_url = os.getenv('PUBLIC_URL', '').strip()
 
-        # Construct WebSocket URL
-        ws_url = f"wss://{host}/media-stream/{scenario}"
+        # Construct WebSocket URL using the same URL that Twilio used to reach us
+        ws_url = f"wss://{public_url}/media-stream/{scenario}"
+        logger.info(f"Constructed WebSocket URL: {ws_url}")
 
         connect = Connect()
         connect.stream(url=ws_url)
@@ -642,13 +642,6 @@ def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
     if add_protocol:
         return f"https://{cleaned_url}"
     return cleaned_url
-
-
-@app.post("/incoming-call", response_class=Response)
-async def incoming_call(request: Request, scenario: str):
-    response = VoiceResponse()
-    response.say("Hello! This is your speech assistant powered by OpenAI.")
-    return Response(content=str(response), media_type="application/xml")
 
 
 async def initialize_session(openai_ws, scenario):

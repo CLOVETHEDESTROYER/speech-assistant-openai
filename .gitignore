@@ -1,4 +1,23 @@
+# Environment files
 .env
+.env.development
+.env.production
 .env.example
-.env
-.env.example
+
+# Database files
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
