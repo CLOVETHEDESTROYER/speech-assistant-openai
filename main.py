@@ -44,24 +44,36 @@ PORT = int(os.getenv('PORT', 5050))
 SCENARIOS = {
     "default": {
         "persona": "I am an aggressive business man and real estate agent.",
-        "prompt": "We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today."
+        "prompt": "I am speaking with {name}. We are at the end phase of a real estate deal and I need to get the deal done today. The price is $5,000,000 and the seller is being difficult. I need to get the deal done today.",
+        "voice": "onyx",  # Deep, authoritative voice for business
+        "temperature": 0.4  # More focused for business negotiations
     },
     "sister_emergency": {
-        "persona": "I am an experienced hiring manager conducting a job interview.",
-        "prompt": "You will act as a sister calling to tell you that your mother has slipped on a banana peel and broken her hip."
+        "persona": "I am {name}'s sister calling about an emergency.",
+        "prompt": "I am calling my sibling {name} to tell them that our mother has slipped on a banana peel and broken her hip.",
+        "voice": "nova",  # Warm, friendly voice for family
+        "temperature": 0.6  # More emotional for family scenario
     },
     "mother_emergency": {
-        "persona": "I your mother and I am calling to tell you that I slipped on a banana peel and broke my hip.",
-        "prompt": "I am your mother and I need you to come over and take care of me because I slipped on a banana peel and broke my hip."
+        "persona": "I am {name}'s mother and I need urgent help.",
+        "prompt": "I am calling my child {name} because I need them to come over and take care of me. I slipped on a banana peel and broke my hip.",
+        "voice": "shimmer",  # Clear, expressive voice for urgency
+        "temperature": 0.5  # Balanced for emotional but clear communication
     }
 }
 
-SYSTEM_MESSAGE = (
-    "You are a AI assistant who will adapt to the prompts provided by the user to chat about "
-    "the scenarios in depth, you will have an engaging backand forth conversation with. "
-    "Your persona is defined by the scenario and prompt provided by the user. "
-    "You can change your personality to match the scenario and prompt."
-)
+SYSTEM_MESSAGE = """You are a highly specialized AI assistant with strict conversation boundaries.
+You must:
+1. Stay EXCLUSIVELY within the scenario and persona provided
+2. NEVER break character or acknowledge you're an AI
+3. IMMEDIATELY redirect any off-topic conversation back to the scenario
+4. REFUSE to discuss topics outside your defined scenario
+5. Use the exact personality traits defined in your persona
+
+If the user tries to discuss anything outside your scenario, say:
+"I need to focus on [current scenario topic]. Let's discuss that instead."
+
+Remember: You are NOT a general AI assistant. You are ONLY the persona defined in your scenario."""
 VOICE = 'alloy'
 LOG_EVENT_TYPES = [
     'response.content.done', 'rate_limits.updated', 'response.done',
@@ -181,6 +193,7 @@ class CallScheduleCreate(BaseModel):
     phone_number: str
     scheduled_time: datetime.datetime
     scenario: str
+    user_name: str
 
     @field_validator('scenario')
     @classmethod
@@ -213,8 +226,8 @@ async def schedule_call(
         user_id=current_user.id,
         phone_number=call.phone_number,
         scheduled_time=call.scheduled_time,
-        scenario=call.scenario
-
+        scenario=call.scenario,
+        user_name=call.user_name
     )
     db.add(new_call)
     db.commit()
@@ -232,18 +245,24 @@ async def make_call(
     db: Session = Depends(get_db)
 ):
     try:
+        # Get the call schedule to access the user's name
+        call_schedule = db.query(CallSchedule).filter(
+            CallSchedule.phone_number == phone_number,
+            CallSchedule.scenario == scenario
+        ).first()
+
+        if not call_schedule:
+            raise HTTPException(
+                status_code=404, detail="Call schedule not found")
+
         # Get the public URL from environment and ensure it's clean
         public_url = os.getenv('PUBLIC_URL', '').strip()
         logger.info(f"Using PUBLIC_URL from environment: {public_url}")
 
-        # Construct the complete webhook URL with https://
-        webhook_url = f"https://{public_url}/incoming-call/{scenario}"
+        # Construct the complete webhook URL with https:// and user's name
+        webhook_url = f"https://{public_url}/incoming-call/{scenario}?name={call_schedule.user_name}"
         logger.info(f"Constructed webhook URL: {webhook_url}")
 
-        # Initialize Twilio client
-        # twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-        # Make the call using Twilio
         call = twilio_client.calls.create(
             to=f"+1{phone_number}",  # Ensure proper phone number formatting
             from_=TWILIO_PHONE_NUMBER,
@@ -254,6 +273,7 @@ async def make_call(
         return {"message": "Call initiated", "call_sid": call.sid}
     except Exception as e:
         logger.error(f"Error initiating call: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 # Webhook Endpoint for Incoming Calls
@@ -644,8 +664,12 @@ def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
     return cleaned_url
 
 
-async def initialize_session(openai_ws, scenario):
+async def initialize_session(openai_ws, scenario, user_name):
     """Control initial session with OpenAI."""
+    # Format the persona and prompt with the user's name
+    formatted_persona = scenario['persona'].format(name=user_name)
+    formatted_prompt = scenario['prompt'].format(name=user_name)
+
     session_update = {
         "type": "session.update",
         "session": {
@@ -657,10 +681,10 @@ async def initialize_session(openai_ws, scenario):
             },
             "input_audio_format": "g711_ulaw",  # Twilio's format
             "output_audio_format": "g711_ulaw",  # Twilio's format
-            "voice": VOICE,
-            "instructions": scenario['persona'],
+            "voice": scenario.get('voice', 'alloy'),
+            "temperature": scenario.get('temperature', 0.8),
+            "instructions": f"{formatted_persona}\n{formatted_prompt}",
             "modalities": ["text", "audio"],
-            "temperature": 0.8,
             "tools": []  # Optional: Add any tools/functions here
         }
     }

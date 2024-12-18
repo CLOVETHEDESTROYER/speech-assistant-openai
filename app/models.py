@@ -26,6 +26,7 @@ class CallSchedule(Base):
     scheduled_time = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     scenario = Column(String, nullable=False)
+    user_name = Column(String, nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="call_schedules")
