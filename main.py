@@ -442,7 +442,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         logger.info(f"Using scenario: {selected_scenario}")
 
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',  # Updated URL
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',  # Updated URL
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"  # Added required beta header
