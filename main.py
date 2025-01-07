@@ -29,6 +29,7 @@ from app.utils import verify_password, create_access_token
 from app.schemas import TokenResponse
 from app.db import engine, get_db, SessionLocal, Base
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from starlette.websockets import WebSocketState  # Add this at the top
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -415,7 +416,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             return
 
         async with websockets.connect(
-            'wss://api.openai.com/v1/audio/speech',
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
@@ -492,7 +493,7 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
     await websocket.accept()
     try:
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
