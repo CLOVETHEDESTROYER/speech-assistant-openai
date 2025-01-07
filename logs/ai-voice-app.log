@@ -1,0 +1,1125 @@
+2024-12-03 10:22:48,393 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 10:22:48,394 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 10:22:48,394 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 10:22:48,394 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 10:22:48,394 - main - INFO - Route: /register -> register
+2024-12-03 10:22:48,394 - main - INFO - Route: /login -> login
+2024-12-03 10:22:48,394 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 10:22:48,394 - main - INFO - Route: /logout -> logout
+2024-12-03 10:22:48,394 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 10:22:48,394 - main - INFO - Route: /protected -> protected_route
+2024-12-03 10:22:48,394 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 10:22:48,394 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 10:22:48,394 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 10:22:48,394 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 10:22:48,394 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 10:22:48,394 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 10:22:48,394 - main - INFO - Route: /health -> health_check
+2024-12-03 10:22:48,394 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 10:22:48,394 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 10:24:15,797 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 10:50:09,155 - main - INFO - Using PUBLIC_URL from environment: localhost
+2024-12-03 10:50:09,156 - main - INFO - Constructed webhook URL: https://localhost/incoming-call/default
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - Headers:
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 10:50:09,199 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 10:50:09,579 - twilio.http_client - INFO - Response Status Code: 400
+2024-12-03 10:50:09,579 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '165', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 17:50:09 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ4a9369d3d3cf4be922496712a47d72f1', 'Twilio-Request-Duration': '0.013', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Error from cloudfront', 'Via': '1.1 bd570b43eaed44365882fda303fb189c.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'uBhwpMNV9yHzpWFxwo6iWcDK7FI_mo5_2fPzzeDFa3nDI0wWhJTX9Q==', 'Vary': 'Origin'}
+2024-12-03 10:50:09,579 - main - ERROR - Error initiating call: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: https://localhost/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 10:50:09,579 - main - ERROR - Database connection error: 500: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: https://localhost/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 10:59:41,924 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 10:59:41,924 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 10:59:41,924 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 10:59:41,925 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 10:59:41,925 - main - INFO - Route: /register -> register
+2024-12-03 10:59:41,925 - main - INFO - Route: /login -> login
+2024-12-03 10:59:41,925 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 10:59:41,925 - main - INFO - Route: /logout -> logout
+2024-12-03 10:59:41,925 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 10:59:41,925 - main - INFO - Route: /protected -> protected_route
+2024-12-03 10:59:41,925 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 10:59:41,925 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 10:59:41,925 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 10:59:41,925 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 10:59:41,925 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 10:59:41,925 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 10:59:41,925 - main - INFO - Route: /health -> health_check
+2024-12-03 10:59:41,925 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 10:59:41,925 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 10:59:52,349 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 11:00:02,569 - main - INFO - Using PUBLIC_URL from environment: localhost
+2024-12-03 11:00:02,569 - main - INFO - Constructed webhook URL: https://localhost/incoming-call/default
+2024-12-03 11:00:02,619 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 11:00:02,619 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 11:00:02,619 - twilio.http_client - INFO - Headers:
+2024-12-03 11:00:02,619 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 11:00:02,620 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 11:00:02,620 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 11:00:02,620 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 11:00:02,620 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 11:00:02,620 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 11:00:03,027 - twilio.http_client - INFO - Response Status Code: 400
+2024-12-03 11:00:03,027 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '165', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 18:00:03 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ572c8cab786e5c4facaeedddd029880a', 'Twilio-Request-Duration': '0.012', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Error from cloudfront', 'Via': '1.1 5ca5d4f769888ca013d817040942ebf2.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'VTdAiQXZP3EB4nwqEnnd7gx7CXiOl6ozzU-cXM_PDMc7UxmBNx7uJw==', 'Vary': 'Origin'}
+2024-12-03 11:00:03,027 - main - ERROR - Error initiating call: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: https://localhost/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 11:00:03,027 - main - ERROR - Database connection error: 500: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: https://localhost/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 11:02:26,284 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 11:02:26,285 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 11:02:26,285 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 11:02:26,285 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 11:02:26,285 - main - INFO - Route: /register -> register
+2024-12-03 11:02:26,285 - main - INFO - Route: /login -> login
+2024-12-03 11:02:26,285 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 11:02:26,285 - main - INFO - Route: /logout -> logout
+2024-12-03 11:02:26,285 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 11:02:26,285 - main - INFO - Route: /protected -> protected_route
+2024-12-03 11:02:26,285 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 11:02:26,291 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 11:02:26,291 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 11:02:26,291 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 11:02:26,291 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 11:02:26,291 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 11:02:26,291 - main - INFO - Route: /health -> health_check
+2024-12-03 11:02:26,291 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 11:02:26,291 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 11:02:46,774 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 11:03:06,341 - main - INFO - Using PUBLIC_URL from environment: affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app
+2024-12-03 11:03:06,342 - main - INFO - Constructed webhook URL: https://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/incoming-call/default
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - Headers:
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 11:03:06,386 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 11:03:06,761 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 11:03:06,761 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 18:03:06 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ99c60684f6e0a75c8e57971941d4678c', 'Twilio-Request-Duration': '0.068', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 935c1dbe2a77979e8997ab720ef1b816.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'reIxapgscmFyQaqfWYhXfa3oW683PLOcB0xErkwP02U1FqD7OLmayQ==', 'Vary': 'Origin'}
+2024-12-03 11:03:13,598 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 11:03:13,599 - main - INFO - Received form data: FormData([('Called', '+15055535929'), ('ToState', 'NM'), ('CallerCountry', 'US'), ('Direction', 'outbound-api'), ('CallerState', ''), ('ToZip', '87106'), ('StirStatus', 'B'), ('CallSid', 'CA1e284ee464c80c269fdd398b633816e3'), ('To', '+15055535929'), ('CallerZip', ''), ('ToCountry', 'US'), ('StirVerstat', 'TN-Validation-Passed-B'), ('CalledZip', '87106'), ('ApiVersion', '2010-04-01'), ('CalledCity', 'ALBUQUERQUE'), ('CallStatus', 'in-progress'), ('From', '+18667630512'), ('AccountSid', 'ACd9953f24e090ac0f9a522daaf92f9355'), ('CalledCountry', 'US'), ('CallerCity', ''), ('ToCity', 'ALBUQUERQUE'), ('FromCountry', 'US'), ('Caller', '+18667630512'), ('FromCity', ''), ('CalledState', 'NM'), ('FromZip', ''), ('FromState', '')])
+2024-12-03 11:03:13,599 - main - INFO - Constructed WebSocket URL: wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default
+2024-12-03 11:03:13,599 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default" /></Connect></Response>
+2024-12-03 11:03:18,601 - main - INFO - WebSocket connection attempt for scenario: default
+2024-12-03 11:03:18,602 - main - INFO - WebSocket connection accepted
+2024-12-03 11:03:18,602 - main - INFO - Using scenario: {'persona': 'I am an aggressive business man and real estate agent.', 'prompt': 'We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.'}
+2024-12-03 11:03:19,683 - main - INFO - Connected to OpenAI WebSocket
+2024-12-03 11:03:19,683 - main - INFO - Sending session update: {"type": "session.update", "session": {"turn_detection": {"type": "server_vad", "threshold": 0.6, "prefix_padding_ms": 1000, "silence_duration_ms": 700}, "input_audio_format": "g711_ulaw", "output_audio_format": "g711_ulaw", "voice": "alloy", "instructions": "I am an aggressive business man and real estate agent.", "modalities": ["text", "audio"], "temperature": 0.8, "tools": []}}
+2024-12-03 11:03:19,683 - main - INFO - Stream started: MZf95bd85267019a0282f4c7745be28a0e
+2024-12-03 11:03:19,866 - main - INFO - Speech started detected
+2024-12-03 11:18:19,730 - main - ERROR - Error from OpenAI: {'type': 'error', 'event_id': 'event_AaRlTlwjgB6Phi7DphM7x', 'error': {'type': 'invalid_request_error', 'code': 'session_expired', 'message': 'Your session hit the maximum duration of 15 minutes.', 'param': None, 'event_id': None}}
+2024-12-03 12:08:30,577 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 12:08:30,577 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 12:08:30,577 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 12:08:30,577 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 12:08:30,577 - main - INFO - Route: /register -> register
+2024-12-03 12:08:30,577 - main - INFO - Route: /login -> login
+2024-12-03 12:08:30,577 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 12:08:30,577 - main - INFO - Route: /logout -> logout
+2024-12-03 12:08:30,577 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 12:08:30,577 - main - INFO - Route: /protected -> protected_route
+2024-12-03 12:08:30,577 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 12:08:30,577 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 12:08:30,577 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 12:08:30,577 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 12:08:30,578 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 12:08:30,578 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 12:08:30,578 - main - INFO - Route: /health -> health_check
+2024-12-03 12:08:30,578 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 12:08:30,578 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 12:08:30,578 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 12:29:34,223 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 12:29:34,225 - main - INFO - Received form data: FormData([])
+2024-12-03 12:29:34,225 - main - INFO - Constructed WebSocket URL: wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default
+2024-12-03 12:29:34,226 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default" /></Connect></Response>
+2024-12-03 12:32:55,776 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 12:32:55,777 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 12:32:55,777 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 12:32:55,777 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 12:32:55,777 - main - INFO - Route: /register -> register
+2024-12-03 12:32:55,777 - main - INFO - Route: /login -> login
+2024-12-03 12:32:55,777 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 12:32:55,777 - main - INFO - Route: /logout -> logout
+2024-12-03 12:32:55,777 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 12:32:55,777 - main - INFO - Route: /protected -> protected_route
+2024-12-03 12:32:55,777 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 12:32:55,777 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 12:32:55,777 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 12:32:55,777 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 12:32:55,777 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 12:32:55,777 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 12:32:55,777 - main - INFO - Route: /health -> health_check
+2024-12-03 12:32:55,777 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 12:32:55,777 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 12:32:55,777 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 12:35:26,566 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 12:35:26,566 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 12:35:26,566 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 12:35:26,566 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 12:35:26,566 - main - INFO - Route: /register -> register
+2024-12-03 12:35:26,566 - main - INFO - Route: /login -> login
+2024-12-03 12:35:26,566 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 12:35:26,566 - main - INFO - Route: /logout -> logout
+2024-12-03 12:35:26,566 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 12:35:26,566 - main - INFO - Route: /protected -> protected_route
+2024-12-03 12:35:26,566 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 12:35:26,566 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 12:35:26,566 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 12:35:26,566 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 12:35:26,566 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 12:35:26,566 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 12:35:26,566 - main - INFO - Route: /health -> health_check
+2024-12-03 12:35:26,566 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 12:35:26,566 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 12:35:26,566 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:14:43,073 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:14:43,076 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:14:43,076 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:14:43,076 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:14:43,076 - main - INFO - Route: /register -> register
+2024-12-03 13:14:43,076 - main - INFO - Route: /login -> login
+2024-12-03 13:14:43,076 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:14:43,076 - main - INFO - Route: /logout -> logout
+2024-12-03 13:14:43,076 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:14:43,076 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:14:43,076 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:14:43,076 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:14:43,076 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:14:43,076 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:14:43,076 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:14:43,076 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:14:43,076 - main - INFO - Route: /health -> health_check
+2024-12-03 13:14:43,076 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:14:43,076 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 13:14:43,076 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:18:27,207 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:18:27,208 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:18:27,208 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:18:27,208 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:18:27,208 - main - INFO - Route: /register -> register
+2024-12-03 13:18:27,208 - main - INFO - Route: /login -> login
+2024-12-03 13:18:27,208 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:18:27,208 - main - INFO - Route: /logout -> logout
+2024-12-03 13:18:27,208 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:18:27,208 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:18:27,208 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:18:27,208 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:18:27,208 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:18:27,208 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:18:27,208 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:18:27,208 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:18:27,208 - main - INFO - Route: /health -> health_check
+2024-12-03 13:18:27,208 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:18:27,208 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 13:18:27,209 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:18:55,488 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:18:55,488 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:18:55,488 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:18:55,488 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:18:55,488 - main - INFO - Route: /register -> register
+2024-12-03 13:18:55,488 - main - INFO - Route: /login -> login
+2024-12-03 13:18:55,488 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:18:55,488 - main - INFO - Route: /logout -> logout
+2024-12-03 13:18:55,489 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:18:55,489 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:18:55,489 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:18:55,489 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:18:55,489 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:18:55,489 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:18:55,489 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:18:55,489 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:18:55,489 - main - INFO - Route: /health -> health_check
+2024-12-03 13:18:55,489 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:18:55,489 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 13:18:55,489 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:19:06,611 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:19:06,611 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:19:06,611 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:19:06,611 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:19:06,611 - main - INFO - Route: /register -> register
+2024-12-03 13:19:06,611 - main - INFO - Route: /login -> login
+2024-12-03 13:19:06,611 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:19:06,611 - main - INFO - Route: /logout -> logout
+2024-12-03 13:19:06,611 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:19:06,611 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:19:06,612 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:19:06,612 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:19:06,612 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:19:06,612 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:19:06,612 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:19:06,612 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:19:06,612 - main - INFO - Route: /health -> health_check
+2024-12-03 13:19:06,612 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:19:06,612 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 13:19:06,612 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:19:55,166 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:19:55,166 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:19:55,166 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:19:55,166 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:19:55,166 - main - INFO - Route: /register -> register
+2024-12-03 13:19:55,166 - main - INFO - Route: /login -> login
+2024-12-03 13:19:55,166 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:19:55,166 - main - INFO - Route: /logout -> logout
+2024-12-03 13:19:55,167 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:19:55,167 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:19:55,167 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:19:55,167 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:19:55,167 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:19:55,167 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:19:55,167 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:19:55,167 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:19:55,167 - main - INFO - Route: /health -> health_check
+2024-12-03 13:19:55,167 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:19:55,167 - main - INFO - Route: /incoming-call -> incoming_call
+2024-12-03 13:19:55,167 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:22:45,335 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 13:22:58,485 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 13:22:58,486 - main - INFO - Constructed webhook URL: https://164.92.71.74/incoming-call/default
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - Headers:
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 13:22:58,522 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 13:22:58,957 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 13:22:58,957 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 20:22:58 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ0dfc215fc08ff0bc7d73d76f35422f91', 'Twilio-Request-Duration': '0.056', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 c29cc996206d7483aa0efdd00191d936.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': '2ceJJyi5JBM1BNjxSqUnMGiQY5X8FRErpSpPAD1BP1wIw4MRpW7JzA==', 'Vary': 'Origin'}
+2024-12-03 13:26:35,291 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:26:35,291 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:26:35,291 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:26:35,291 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:26:35,291 - main - INFO - Route: /register -> register
+2024-12-03 13:26:35,291 - main - INFO - Route: /login -> login
+2024-12-03 13:26:35,291 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:26:35,291 - main - INFO - Route: /logout -> logout
+2024-12-03 13:26:35,291 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:26:35,291 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:26:35,291 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:26:35,291 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:26:35,291 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:26:35,291 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:26:35,291 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:26:35,291 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:26:35,291 - main - INFO - Route: /health -> health_check
+2024-12-03 13:26:35,291 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:26:35,292 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:28:08,733 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:28:08,734 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:28:08,734 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:28:08,734 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:28:08,734 - main - INFO - Route: /register -> register
+2024-12-03 13:28:08,734 - main - INFO - Route: /login -> login
+2024-12-03 13:28:08,734 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:28:08,734 - main - INFO - Route: /logout -> logout
+2024-12-03 13:28:08,734 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:28:08,734 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:28:08,734 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:28:08,734 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:28:08,734 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:28:08,734 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:28:08,734 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:28:08,734 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:28:08,734 - main - INFO - Route: /health -> health_check
+2024-12-03 13:28:08,734 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:28:08,734 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:53:34,371 - main - INFO - Loading environment from development.env
+2024-12-03 13:53:34,371 - main - WARNING - Environment file development.env not found, using default .env
+2024-12-03 13:53:34,393 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:53:34,393 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:53:34,393 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:53:34,393 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:53:34,393 - main - INFO - Route: /register -> register
+2024-12-03 13:53:34,393 - main - INFO - Route: /login -> login
+2024-12-03 13:53:34,393 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:53:34,393 - main - INFO - Route: /logout -> logout
+2024-12-03 13:53:34,393 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:53:34,393 - main - INFO - Route: /protected -> protected_route
+2024-12-03 13:53:34,393 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:53:34,393 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:53:34,393 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:53:34,393 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:53:34,393 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:53:34,393 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:53:34,393 - main - INFO - Route: /health -> health_check
+2024-12-03 13:53:34,393 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 13:53:34,393 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:55:47,260 - __main__ - INFO - Loading environment from development.env
+2024-12-03 13:55:47,261 - __main__ - WARNING - Environment file development.env not found, using default .env
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /openapi.json -> openapi
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /redoc -> redoc_html
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /register -> register
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /login -> login
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /logout -> logout
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /token -> login_for_access_token
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /protected -> protected_route
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /users/me -> read_users_me
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 13:55:47,342 - __main__ - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 13:55:47,343 - __main__ - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 13:55:47,343 - __main__ - INFO - Route: /health -> health_check
+2024-12-03 13:55:47,343 - __main__ - INFO - Route: /test -> test_endpoint
+2024-12-03 13:55:47,343 - __main__ - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 13:56:01,240 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 13:56:11,055 - __main__ - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 13:56:11,056 - __main__ - INFO - Constructed webhook URL: https://164.92.71.74/incoming-call/default
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - Headers:
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 13:56:11,104 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 13:56:11,492 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 13:56:11,493 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 20:56:11 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQb6d0727e9a16db5e7c2c9d9339b4f31a', 'Twilio-Request-Duration': '0.059', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 ebee7985d4830e80d4035a7dc7425a68.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'rR-AWv3IfG9qgh1oVy_4_uu691cEfCXsFwWbzv3VZ6DDhnefg7JGEQ==', 'Vary': 'Origin'}
+2024-12-03 15:36:57,454 - main - INFO - Loading environment from development.env
+2024-12-03 15:36:57,454 - main - INFO - Loaded environment from development.env
+2024-12-03 15:36:57,473 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:36:57,474 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:36:57,474 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:36:57,474 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:36:57,474 - main - INFO - Route: /register -> register
+2024-12-03 15:36:57,474 - main - INFO - Route: /login -> login
+2024-12-03 15:36:57,474 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:36:57,474 - main - INFO - Route: /logout -> logout
+2024-12-03 15:36:57,474 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:36:57,474 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:36:57,474 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:36:57,474 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:36:57,474 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:36:57,474 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:36:57,474 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:36:57,474 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:36:57,474 - main - INFO - Route: /health -> health_check
+2024-12-03 15:36:57,474 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:36:57,474 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:38:05,495 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 15:38:09,769 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 15:38:09,769 - main - INFO - Constructed webhook URL: https://164.92.71.74/incoming-call/default
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - Headers:
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 15:38:09,821 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 15:38:10,390 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 15:38:10,390 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 22:38:10 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQdb8c1c747c9d575ddd5f8c4a02ac8cae', 'Twilio-Request-Duration': '0.062', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 b4700b9a7dfcbdb388dd2a5d94e86ffc.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'rYsmBPT1eHu_csxNr8mYG22-dZOosykrNC5qHx4P7Ejc1vBaCLShUA==', 'Vary': 'Origin'}
+2024-12-03 15:43:08,947 - main - INFO - Loading environment from development.env
+2024-12-03 15:43:08,947 - main - INFO - Loaded environment from development.env
+2024-12-03 15:43:08,968 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:43:08,968 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:43:08,968 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:43:08,968 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:43:08,968 - main - INFO - Route: /register -> register
+2024-12-03 15:43:08,968 - main - INFO - Route: /login -> login
+2024-12-03 15:43:08,968 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:43:08,968 - main - INFO - Route: /logout -> logout
+2024-12-03 15:43:08,968 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:43:08,968 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:43:08,968 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:43:08,968 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:43:08,968 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:43:08,969 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:43:08,969 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:43:08,969 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:43:08,969 - main - INFO - Route: /health -> health_check
+2024-12-03 15:43:08,969 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:43:08,969 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:43:28,575 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 15:43:38,838 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 15:43:38,838 - main - INFO - Constructed webhook URL: https://164.92.71.74/incoming-call/default
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - Headers:
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 15:43:38,882 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 15:43:38,883 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 15:43:38,883 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 15:43:38,883 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 15:43:39,301 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 15:43:39,302 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 22:43:39 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ17553f74ea09d3efc919e413b5ac0431', 'Twilio-Request-Duration': '0.066', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 91881fdae44078e1c95546f3cb1e2366.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'Zp09GJSYUU3HZaAMZuUJS5Cft1wqmXPWNZrR2JamnZmyH6YOP4IK1A==', 'Vary': 'Origin'}
+2024-12-03 15:47:00,323 - main - INFO - Loading environment from development.env
+2024-12-03 15:47:00,324 - main - INFO - Loaded environment from development.env
+2024-12-03 15:47:00,344 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:47:00,344 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:47:00,344 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:47:00,344 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:47:00,345 - main - INFO - Route: /register -> register
+2024-12-03 15:47:00,345 - main - INFO - Route: /login -> login
+2024-12-03 15:47:00,345 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:47:00,345 - main - INFO - Route: /logout -> logout
+2024-12-03 15:47:00,345 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:47:00,345 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:47:00,345 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:47:00,345 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:47:00,345 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:47:00,345 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:47:00,345 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:47:00,345 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:47:00,345 - main - INFO - Route: /health -> health_check
+2024-12-03 15:47:00,345 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:47:00,345 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:47:56,712 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 15:48:06,993 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 15:48:06,995 - main - INFO - Constructed webhook URL: https://164.92.71.74/incoming-call/default
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - Headers:
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 15:48:07,035 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 15:48:07,036 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 15:48:07,461 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 15:48:07,461 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 22:48:07 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ0821b7c75a9ce1798137b3ba340c51be', 'Twilio-Request-Duration': '0.056', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 f88732a3c07912cb33374b1e2ce03f84.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': '0Oq-zMllr4vSWrQgrj8T7aTFSl-x7KarETqBhpdkgbmj9cyiOnr1Yg==', 'Vary': 'Origin'}
+2024-12-03 15:50:05,083 - main - INFO - Loading environment from development.env
+2024-12-03 15:50:05,084 - main - INFO - Loaded environment from development.env
+2024-12-03 15:50:05,106 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:50:05,106 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:50:05,106 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:50:05,106 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:50:05,106 - main - INFO - Route: /register -> register
+2024-12-03 15:50:05,106 - main - INFO - Route: /login -> login
+2024-12-03 15:50:05,106 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:50:05,106 - main - INFO - Route: /logout -> logout
+2024-12-03 15:50:05,107 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:50:05,107 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:50:05,107 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:50:05,107 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:50:05,107 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:50:05,107 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:50:05,107 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:50:05,107 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:50:05,107 - main - INFO - Route: /health -> health_check
+2024-12-03 15:50:05,107 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:50:05,107 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:50:37,620 - main - INFO - Loading environment from development.env
+2024-12-03 15:50:37,621 - main - INFO - Loaded environment from development.env
+2024-12-03 15:50:37,649 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:50:37,649 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:50:37,649 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:50:37,649 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:50:37,650 - main - INFO - Route: /register -> register
+2024-12-03 15:50:37,650 - main - INFO - Route: /login -> login
+2024-12-03 15:50:37,650 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:50:37,650 - main - INFO - Route: /logout -> logout
+2024-12-03 15:50:37,650 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:50:37,650 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:50:37,650 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:50:37,650 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:50:37,650 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:50:37,650 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:50:37,650 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:50:37,650 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:50:37,650 - main - INFO - Route: /health -> health_check
+2024-12-03 15:50:37,650 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:50:37,650 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:51:01,703 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 15:51:13,131 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 15:51:13,132 - main - INFO - Constructed webhook URL: https://164.92.71.74/webhook-router?scenario=default
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - Headers:
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 15:51:13,178 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 15:51:13,594 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 15:51:13,594 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 22:51:13 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ36e745161fa930cf7e66a932a6da8c29', 'Twilio-Request-Duration': '0.050', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 cb4937748c19bcccb40a5a5875f01552.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': '3MlUS4J1oB3sjgMyjoCSLLxpAfWASOtr03wZCRf3-NqkCVimosvlBg==', 'Vary': 'Origin'}
+2024-12-03 15:54:59,406 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 15:54:59,406 - main - INFO - Constructed webhook URL: https://164.92.71.74/webhook-router?scenario=default
+2024-12-03 15:54:59,406 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - Headers:
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 15:54:59,407 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 15:54:59,688 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 15:54:59,688 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 22:54:59 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQba86740cce87d24615eb02b7daf4ee95', 'Twilio-Request-Duration': '0.056', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 cb4937748c19bcccb40a5a5875f01552.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': '_cfrk7kAmRkj_DdfUWFnxQNcWG8bFUjJqw-HB61dtJ28BdQ0xrKywQ==', 'Vary': 'Origin'}
+2024-12-03 15:57:47,891 - main - INFO - Loading environment from development.env
+2024-12-03 15:57:47,891 - main - INFO - Loaded environment from development.env
+2024-12-03 15:57:47,917 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:57:47,918 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:57:47,918 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:57:47,918 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:57:47,918 - main - INFO - Route: /register -> register
+2024-12-03 15:57:47,918 - main - INFO - Route: /login -> login
+2024-12-03 15:57:47,919 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:57:47,919 - main - INFO - Route: /logout -> logout
+2024-12-03 15:57:47,919 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:57:47,919 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:57:47,920 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:57:47,920 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:57:47,920 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:57:47,920 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:57:47,920 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:57:47,920 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:57:47,921 - main - INFO - Route: /health -> health_check
+2024-12-03 15:57:47,921 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:57:47,921 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 15:58:35,767 - main - INFO - Loading environment from development.env
+2024-12-03 15:58:35,767 - main - INFO - Loaded environment from development.env
+2024-12-03 15:58:35,790 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 15:58:35,791 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 15:58:35,791 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 15:58:35,791 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 15:58:35,791 - main - INFO - Route: /register -> register
+2024-12-03 15:58:35,791 - main - INFO - Route: /login -> login
+2024-12-03 15:58:35,791 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 15:58:35,791 - main - INFO - Route: /logout -> logout
+2024-12-03 15:58:35,791 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 15:58:35,791 - main - INFO - Route: /protected -> protected_route
+2024-12-03 15:58:35,791 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 15:58:35,792 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 15:58:35,792 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 15:58:35,792 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 15:58:35,792 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 15:58:35,792 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 15:58:35,792 - main - INFO - Route: /health -> health_check
+2024-12-03 15:58:35,792 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 15:58:35,792 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 16:22:00,572 - main - INFO - Loading environment from development.env
+2024-12-03 16:22:00,575 - main - INFO - Loaded environment from development.env
+2024-12-03 16:22:00,621 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:22:00,625 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:22:00,625 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:22:00,625 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:22:00,625 - main - INFO - Route: /register -> register
+2024-12-03 16:22:00,625 - main - INFO - Route: /login -> login
+2024-12-03 16:22:00,627 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:22:00,627 - main - INFO - Route: /logout -> logout
+2024-12-03 16:22:00,627 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:22:00,627 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:22:00,627 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:22:00,627 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:22:00,627 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:22:00,627 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:22:00,627 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:22:00,627 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:22:00,628 - main - INFO - Route: /health -> health_check
+2024-12-03 16:22:00,628 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:22:00,628 - main - INFO - Route: /webhook-router -> webhook_router
+2024-12-03 16:22:19,424 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 16:22:30,941 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 16:22:30,942 - main - INFO - Constructed webhook URL: http://164.92.71.74/webhook-router?scenario=default
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - Headers:
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 16:22:30,980 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 16:22:31,350 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 16:22:31,350 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 23:22:31 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ6eb80ff91f6ec091031ff794b755e564', 'Twilio-Request-Duration': '0.051', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 382c1ac99264c38b9320835b20f5260e.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'f947nLCMqT4YlkotzdpOXTsVHFF5zjyYFfr6dpzaIv6F2aanHsXgfQ==', 'Vary': 'Origin'}
+2024-12-03 16:32:24,339 - main - INFO - Loading environment from development.env
+2024-12-03 16:32:24,340 - main - INFO - Loaded environment from development.env
+2024-12-03 16:32:24,362 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:32:24,362 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:32:24,362 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:32:24,362 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:32:24,362 - main - INFO - Route: /register -> register
+2024-12-03 16:32:24,362 - main - INFO - Route: /login -> login
+2024-12-03 16:32:24,362 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:32:24,362 - main - INFO - Route: /logout -> logout
+2024-12-03 16:32:24,362 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:32:24,362 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:32:24,362 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:32:24,362 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:32:24,362 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:32:24,362 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:32:24,362 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:32:24,362 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:32:24,362 - main - INFO - Route: /health -> health_check
+2024-12-03 16:32:24,362 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:32:24,362 - main - INFO - Route: /webhook-router/{scenario} -> webhook_router
+2024-12-03 16:35:12,352 - main - INFO - Loading environment from development.env
+2024-12-03 16:35:12,353 - main - INFO - Loaded environment from development.env
+2024-12-03 16:35:12,374 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:35:12,374 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:35:12,374 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:35:12,374 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:35:12,374 - main - INFO - Route: /register -> register
+2024-12-03 16:35:12,374 - main - INFO - Route: /login -> login
+2024-12-03 16:35:12,374 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:35:12,375 - main - INFO - Route: /logout -> logout
+2024-12-03 16:35:12,375 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:35:12,375 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:35:12,375 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:35:12,375 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:35:12,375 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:35:12,375 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:35:12,375 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:35:12,375 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:35:12,375 - main - INFO - Route: /health -> health_check
+2024-12-03 16:35:12,375 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:35:12,375 - main - INFO - Route: /webhook-router/{scenario} -> webhook_router
+2024-12-03 16:35:39,185 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 16:35:50,973 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 16:35:50,973 - main - INFO - Constructed webhook URL: http://164.92.71.74/webhook-router/default
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - Headers:
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 16:35:51,012 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 16:35:51,362 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 16:35:51,362 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 23:35:51 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ6723478cb25389d4aad93ec3cb8b8b27', 'Twilio-Request-Duration': '0.090', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 94d9d221defc9832eeda31acd3f6f552.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'JmjJ4vjLe4HtydyQW_WPfal_54RIrvypSWJ3wbZ2RRS4xmidfc64Cw==', 'Vary': 'Origin'}
+2024-12-03 16:37:27,221 - main - INFO - Loading environment from development.env
+2024-12-03 16:37:27,222 - main - INFO - Loaded environment from development.env
+2024-12-03 16:37:27,246 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:37:27,247 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:37:27,247 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:37:27,247 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:37:27,247 - main - INFO - Route: /register -> register
+2024-12-03 16:37:27,247 - main - INFO - Route: /login -> login
+2024-12-03 16:37:27,247 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:37:27,247 - main - INFO - Route: /logout -> logout
+2024-12-03 16:37:27,247 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:37:27,247 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:37:27,247 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:37:27,247 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:37:27,247 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:37:27,247 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:37:27,247 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:37:27,247 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:37:27,247 - main - INFO - Route: /health -> health_check
+2024-12-03 16:37:27,247 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:37:27,247 - main - INFO - Route: /webhook-router/{scenario} -> webhook_router
+2024-12-03 16:39:42,404 - main - INFO - Loading environment from development.env
+2024-12-03 16:39:42,404 - main - INFO - Loaded environment from development.env
+2024-12-03 16:39:42,431 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:39:42,431 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:39:42,431 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:39:42,431 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:39:42,431 - main - INFO - Route: /register -> register
+2024-12-03 16:39:42,431 - main - INFO - Route: /login -> login
+2024-12-03 16:39:42,432 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:39:42,432 - main - INFO - Route: /logout -> logout
+2024-12-03 16:39:42,432 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:39:42,432 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:39:42,432 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:39:42,432 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:39:42,432 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:39:42,432 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:39:42,432 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:39:42,432 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:39:42,432 - main - INFO - Route: /health -> health_check
+2024-12-03 16:39:42,432 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:39:42,432 - main - INFO - Route: /webhook-router/{scenario} -> webhook_router
+2024-12-03 16:40:15,301 - main - INFO - Loading environment from development.env
+2024-12-03 16:40:15,302 - main - INFO - Loaded environment from development.env
+2024-12-03 16:40:15,329 - main - INFO - Route: /openapi.json -> openapi
+2024-12-03 16:40:15,329 - main - INFO - Route: /docs -> swagger_ui_html
+2024-12-03 16:40:15,329 - main - INFO - Route: /docs/oauth2-redirect -> swagger_ui_redirect
+2024-12-03 16:40:15,329 - main - INFO - Route: /redoc -> redoc_html
+2024-12-03 16:40:15,329 - main - INFO - Route: /register -> register
+2024-12-03 16:40:15,329 - main - INFO - Route: /login -> login
+2024-12-03 16:40:15,329 - main - INFO - Route: /refresh -> refresh_token_route
+2024-12-03 16:40:15,329 - main - INFO - Route: /logout -> logout
+2024-12-03 16:40:15,329 - main - INFO - Route: /token -> login_for_access_token
+2024-12-03 16:40:15,329 - main - INFO - Route: /protected -> protected_route
+2024-12-03 16:40:15,329 - main - INFO - Route: /users/me -> read_users_me
+2024-12-03 16:40:15,329 - main - INFO - Route: /schedule-call -> schedule_call
+2024-12-03 16:40:15,329 - main - INFO - Route: /make-call/{phone_number}/{scenario} -> make_call
+2024-12-03 16:40:15,329 - main - INFO - Route: /incoming-call/{scenario} -> handle_incoming_call
+2024-12-03 16:40:15,329 - main - INFO - Route: /media-stream/{scenario} -> handle_media_stream
+2024-12-03 16:40:15,329 - main - INFO - Route: /update-scenario/{scenario} -> handle_scenario_update
+2024-12-03 16:40:15,329 - main - INFO - Route: /health -> health_check
+2024-12-03 16:40:15,330 - main - INFO - Route: /test -> test_endpoint
+2024-12-03 16:40:15,330 - main - INFO - Route: /webhook-router/{scenario} -> webhook_router
+2024-12-03 16:42:46,149 - main - INFO - Loading environment from development.env
+2024-12-03 16:42:46,149 - main - INFO - Loaded environment from development.env
+2024-12-03 16:45:24,498 - main - INFO - Loading environment from development.env
+2024-12-03 16:45:24,499 - main - INFO - Loaded environment from development.env
+2024-12-03 16:45:43,479 - main - INFO - Loading environment from development.env
+2024-12-03 16:45:43,479 - main - INFO - Loaded environment from development.env
+2024-12-03 16:47:29,759 - main - INFO - Webhook router called with scenario: default
+2024-12-03 16:47:29,760 - main - INFO - Request method: POST
+2024-12-03 16:47:29,760 - main - INFO - Request URL: http://localhost:5050/webhook-router/default
+2024-12-03 16:47:29,760 - main - INFO - Request headers: {'host': 'localhost:5050', 'connection': 'keep-alive', 'content-length': '0', 'sec-ch-ua-platform': '"macOS"', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', 'accept': 'application/json', 'sec-ch-ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"', 'sec-ch-ua-mobile': '?0', 'origin': 'http://localhost:5050', 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty', 'referer': 'http://localhost:5050/docs', 'accept-encoding': 'gzip, deflate, br, zstd', 'accept-language': 'en-US,en;q=0.9'}
+2024-12-03 16:47:44,683 - main - INFO - Webhook router called with scenario: default
+2024-12-03 16:47:44,685 - main - INFO - Request method: GET
+2024-12-03 16:47:44,691 - main - INFO - Request URL: http://localhost:5050/webhook-router/default
+2024-12-03 16:47:44,691 - main - INFO - Request headers: {'host': 'localhost:5050', 'connection': 'keep-alive', 'sec-ch-ua-platform': '"macOS"', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', 'accept': 'application/json', 'sec-ch-ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"', 'sec-ch-ua-mobile': '?0', 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty', 'referer': 'http://localhost:5050/docs', 'accept-encoding': 'gzip, deflate, br, zstd', 'accept-language': 'en-US,en;q=0.9'}
+2024-12-03 16:48:16,232 - main - INFO - Loading environment from development.env
+2024-12-03 16:48:16,232 - main - INFO - Loaded environment from development.env
+2024-12-03 16:48:37,735 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 16:48:57,268 - main - INFO - Using PUBLIC_URL from environment: 164.92.71.74
+2024-12-03 16:48:57,268 - main - INFO - Constructed webhook URL: http://164.92.71.74/webhook-router/default
+2024-12-03 16:48:57,312 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 16:48:57,312 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 16:48:57,312 - twilio.http_client - INFO - Headers:
+2024-12-03 16:48:57,312 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 16:48:57,313 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 16:48:57,313 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 16:48:57,313 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 16:48:57,313 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 16:48:57,313 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 16:48:57,763 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 16:48:57,763 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 23:48:57 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ69182272a2f29c7a014465bf8462a377', 'Twilio-Request-Duration': '0.059', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 9079b3d6f14ce041c9c213a2fad4d5a4.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'lEA_PtR2M8BkL7pFAeDC86bGbR70I-M65r1PUFVRRCOSM9TksZDLVQ==', 'Vary': 'Origin'}
+2024-12-03 16:49:17,528 - main - INFO - Webhook router called with scenario: default
+2024-12-03 16:49:17,528 - main - INFO - Request method: POST
+2024-12-03 16:49:17,529 - main - INFO - Request URL: http://localhost:5050/webhook-router/default
+2024-12-03 16:49:17,529 - main - INFO - Request headers: {'host': 'localhost:5050', 'connection': 'keep-alive', 'content-length': '0', 'sec-ch-ua-platform': '"macOS"', 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36', 'accept': 'application/json', 'sec-ch-ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"', 'sec-ch-ua-mobile': '?0', 'origin': 'http://localhost:5050', 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty', 'referer': 'http://localhost:5050/docs', 'accept-encoding': 'gzip, deflate, br, zstd', 'accept-language': 'en-US,en;q=0.9'}
+2024-12-03 16:49:31,248 - main - INFO - Webhook router called with scenario: default
+2024-12-03 16:49:31,249 - main - INFO - Request method: POST
+2024-12-03 16:49:31,249 - main - INFO - Request URL: http://localhost:5050/webhook-router/default
+2024-12-03 16:49:31,249 - main - INFO - Request headers: {'host': 'localhost:5050', 'user-agent': 'curl/8.7.1', 'accept': 'application/json', 'content-length': '0', 'content-type': 'application/x-www-form-urlencoded'}
+2024-12-03 16:52:58,431 - main - INFO - Loading environment from development.env
+2024-12-03 16:52:58,431 - main - INFO - Loaded environment from development.env
+2024-12-03 16:55:24,364 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 16:55:38,286 - main - INFO - Environment: development, PUBLIC_URL: 164.92.71.74
+2024-12-03 16:55:38,286 - main - INFO - Constructed webhook URL: http://localhost:8000/incoming-call/default
+2024-12-03 16:55:38,325 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - Headers:
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 16:55:38,326 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 16:55:38,747 - twilio.http_client - INFO - Response Status Code: 400
+2024-12-03 16:55:38,747 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '169', 'Connection': 'keep-alive', 'Date': 'Tue, 03 Dec 2024 23:55:38 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ14bdd8f2907f28d2abcfceba362d4210', 'Twilio-Request-Duration': '0.013', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Error from cloudfront', 'Via': '1.1 eeecd5966c3b521525359cbb7c6d9088.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'Uw_qTkbjwPAmw_kRYl1bX3WwZa81ymoG6fDLb8G__jMc6BSyEU2cuA==', 'Vary': 'Origin'}
+2024-12-03 16:55:38,747 - main - ERROR - Error initiating call: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: http://localhost:8000/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 16:55:38,748 - main - ERROR - Database connection error: 500: 
+[31m[49mHTTP Error[0m [37m[49mYour request was:[0m
+
+[36m[49mPOST /Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json[0m
+
+[37m[49mTwilio returned the following information:[0m
+
+[34m[49mUnable to create record: Url is not a valid URL: http://localhost:8000/incoming-call/default[0m
+
+[37m[49mMore information may be available here:[0m
+
+[34m[49mhttps://www.twilio.com/docs/errors/21205[0m
+
+
+2024-12-03 16:57:16,988 - main - INFO - Loading environment from development.env
+2024-12-03 16:57:16,989 - main - INFO - Loaded environment from development.env
+2024-12-03 16:58:26,679 - main - INFO - Loading environment from development.env
+2024-12-03 16:58:26,681 - main - INFO - Loaded environment from development.env
+2024-12-03 16:59:53,608 - main - INFO - Loading environment from development.env
+2024-12-03 16:59:53,609 - main - INFO - Loaded environment from development.env
+2024-12-03 17:00:52,204 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 17:01:03,074 - main - INFO - Environment: development, PUBLIC_URL: 164.92.71.74, NGROK_URL: affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app
+2024-12-03 17:01:03,074 - main - INFO - Constructed webhook URL: https://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/incoming-call/default
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - Headers:
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 17:01:03,120 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 17:01:03,522 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 17:01:03,522 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Wed, 04 Dec 2024 00:01:03 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ9e9da4c2203ec777987928c84e8f36a8', 'Twilio-Request-Duration': '0.055', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 91881fdae44078e1c95546f3cb1e2366.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'RtWHlE_fEx49zLGv8Fr0a-d5YXm1uiT6Rs6c6qyPBTxPm-h0W0t5JQ==', 'Vary': 'Origin'}
+2024-12-03 17:01:08,887 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 17:01:08,888 - main - INFO - Received form data: FormData([('Called', '+15055535929'), ('ToState', 'NM'), ('CallerCountry', 'US'), ('Direction', 'outbound-api'), ('CallerState', ''), ('ToZip', '87106'), ('StirStatus', 'B'), ('CallSid', 'CA2cff649ff7157fa4af857ab490b2b545'), ('To', '+15055535929'), ('CallerZip', ''), ('ToCountry', 'US'), ('StirVerstat', 'TN-Validation-Passed-B'), ('CalledZip', '87106'), ('ApiVersion', '2010-04-01'), ('CalledCity', 'ALBUQUERQUE'), ('CallStatus', 'in-progress'), ('From', '+18667630512'), ('AccountSid', 'ACd9953f24e090ac0f9a522daaf92f9355'), ('CalledCountry', 'US'), ('CallerCity', ''), ('ToCity', 'ALBUQUERQUE'), ('FromCountry', 'US'), ('Caller', '+18667630512'), ('FromCity', ''), ('CalledState', 'NM'), ('FromZip', ''), ('FromState', '')])
+2024-12-03 17:01:08,888 - main - INFO - Using PUBLIC_URL: 164.92.71.74
+2024-12-03 17:01:08,888 - main - INFO - Constructed WebSocket URL: wss://164.92.71.74/media-stream/default
+2024-12-03 17:01:08,889 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://164.92.71.74/media-stream/default" /></Connect></Response>
+2024-12-03 17:02:40,623 - main - INFO - Loading environment from development.env
+2024-12-03 17:02:40,624 - main - INFO - Loaded environment from development.env
+2024-12-03 17:03:09,932 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 17:03:26,110 - main - INFO - Environment: development, PUBLIC_URL: 164.92.71.74, NGROK_URL: affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app
+2024-12-03 17:03:26,110 - main - INFO - Constructed webhook URL: https://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/incoming-call/default
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - Headers:
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 17:03:26,150 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 17:03:26,482 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 17:03:26,482 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Wed, 04 Dec 2024 00:03:26 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ4ce50682cbc36476dfca0ad55cf6f5ed', 'Twilio-Request-Duration': '0.059', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 f88732a3c07912cb33374b1e2ce03f84.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'Upd51TyQXZ-5QPmSftXRfmDAIzn8juO7UzPst-oxs61rQjziw7KOVg==', 'Vary': 'Origin'}
+2024-12-03 17:03:30,198 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 17:03:30,198 - main - INFO - Received form data: FormData([('Called', '+15055535929'), ('ToState', 'NM'), ('CallerCountry', 'US'), ('Direction', 'outbound-api'), ('CallerState', ''), ('ToZip', '87106'), ('StirStatus', 'B'), ('CallSid', 'CA68733a492c7637ad6b557b3bd4ea29ef'), ('To', '+15055535929'), ('CallerZip', ''), ('ToCountry', 'US'), ('StirVerstat', 'TN-Validation-Passed-B'), ('CalledZip', '87106'), ('ApiVersion', '2010-04-01'), ('CalledCity', 'ALBUQUERQUE'), ('CallStatus', 'in-progress'), ('From', '+18667630512'), ('AccountSid', 'ACd9953f24e090ac0f9a522daaf92f9355'), ('CalledCountry', 'US'), ('CallerCity', ''), ('ToCity', 'ALBUQUERQUE'), ('FromCountry', 'US'), ('Caller', '+18667630512'), ('FromCity', ''), ('CalledState', 'NM'), ('FromZip', ''), ('FromState', '')])
+2024-12-03 17:03:30,198 - main - INFO - Constructed WebSocket URL: wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default
+2024-12-03 17:03:30,198 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default" /></Connect></Response>
+2024-12-03 17:03:35,186 - main - INFO - WebSocket connection attempt for scenario: default
+2024-12-03 17:03:35,187 - main - INFO - WebSocket connection accepted
+2024-12-03 17:03:35,187 - main - INFO - Using scenario: {'persona': 'I am an aggressive business man and real estate agent.', 'prompt': 'We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.'}
+2024-12-03 17:03:36,197 - main - INFO - Connected to OpenAI WebSocket
+2024-12-03 17:03:36,258 - main - ERROR - Error in WebSocket connection: name 'initialize_session' is not defined
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/main.py", line 495, in handle_media_stream
+    await initialize_session(openai_ws, selected_scenario)
+NameError: name 'initialize_session' is not defined
+2024-12-03 17:05:03,356 - main - INFO - Loading environment from development.env
+2024-12-03 17:05:03,358 - main - INFO - Loaded environment from development.env
+2024-12-03 17:05:22,365 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 17:05:36,407 - main - INFO - Environment: development, PUBLIC_URL: 164.92.71.74, NGROK_URL: affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app
+2024-12-03 17:05:36,407 - main - INFO - Constructed webhook URL: https://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/incoming-call/default
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - Headers:
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 17:05:36,450 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 17:05:36,451 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 17:05:36,850 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 17:05:36,851 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Wed, 04 Dec 2024 00:05:36 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ1ca04af24e064adc73c151785288c672', 'Twilio-Request-Duration': '0.054', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 b4700b9a7dfcbdb388dd2a5d94e86ffc.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'xHczoGV0yvAcQIWCPKiRhypl5870g6JhtRqNFLXhyi9h5CJueq8L6Q==', 'Vary': 'Origin'}
+2024-12-03 17:05:41,875 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 17:05:41,875 - main - INFO - Received form data: FormData([('Called', '+15055535929'), ('ToState', 'NM'), ('CallerCountry', 'US'), ('Direction', 'outbound-api'), ('CallerState', ''), ('ToZip', '87106'), ('StirStatus', 'B'), ('CallSid', 'CA850d0a6809eb588b59031ce0bd4f4531'), ('To', '+15055535929'), ('CallerZip', ''), ('ToCountry', 'US'), ('StirVerstat', 'TN-Validation-Passed-B'), ('CalledZip', '87106'), ('ApiVersion', '2010-04-01'), ('CalledCity', 'ALBUQUERQUE'), ('CallStatus', 'in-progress'), ('From', '+18667630512'), ('AccountSid', 'ACd9953f24e090ac0f9a522daaf92f9355'), ('CalledCountry', 'US'), ('CallerCity', ''), ('ToCity', 'ALBUQUERQUE'), ('FromCountry', 'US'), ('Caller', '+18667630512'), ('FromCity', ''), ('CalledState', 'NM'), ('FromZip', ''), ('FromState', '')])
+2024-12-03 17:05:41,875 - main - INFO - Constructed WebSocket URL: wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default
+2024-12-03 17:05:41,875 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default" /></Connect></Response>
+2024-12-03 17:05:46,872 - main - INFO - WebSocket connection attempt for scenario: default
+2024-12-03 17:05:46,872 - main - INFO - WebSocket connection accepted
+2024-12-03 17:05:46,872 - main - INFO - Using scenario: {'persona': 'I am an aggressive business man and real estate agent.', 'prompt': 'We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.'}
+2024-12-03 17:05:47,955 - main - INFO - Connected to OpenAI WebSocket
+2024-12-03 17:05:47,955 - main - INFO - Sending session update: {
+  "type": "session.update",
+  "session": {
+    "instructions": "You are a AI assistant who will adapt to the prompts provided by the user to chat about the scenarios in depth, you will have an engaging backand forth conversation with. Your persona is defined by the scenario and prompt provided by the user. You can change your personality to match the scenario and prompt.\n\nPersona: I am an aggressive business man and real estate agent.\n\nScenario: We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.",
+    "voice": "alloy",
+    "audio_format": {
+      "type": "mulaw",
+      "sample_rate": 8000
+    }
+  }
+}
+2024-12-03 17:05:47,955 - main - INFO - Session update sent for persona: I am an aggressive business man and real estate agent.
+2024-12-03 17:05:47,955 - main - INFO - Stream started: MZ170a3741156c3772fdd3f01fc3fdbbdc
+2024-12-03 17:05:48,013 - main - ERROR - Error from OpenAI: {'type': 'error', 'event_id': 'event_AaXBkWpMXXiEUGmsQQf7R', 'error': {'type': 'invalid_request_error', 'code': 'unknown_parameter', 'message': "Unknown parameter: 'session.audio_format'.", 'param': 'session.audio_format', 'event_id': None}}
+2024-12-03 17:27:51,330 - main - ERROR - Error in send_to_twilio: sent 1011 (internal error) keepalive ping timeout; no close frame received
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 953, in transfer_data
+    message = await self.read_message()
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 1023, in read_message
+    frame = await self.read_data_frame(max_size=self.max_size)
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 1098, in read_data_frame
+    frame = await self.read_frame(max_size)
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 1155, in read_frame
+    frame = await Frame.read(
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/framing.py", line 70, in read
+    data = await reader(2)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/streams.py", line 723, in readexactly
+    await self._wait_for_data('readexactly')
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/streams.py", line 517, in _wait_for_data
+    await self._waiter
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/main.py", line 529, in send_to_twilio
+    async for openai_message in openai_ws:
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 492, in __aiter__
+    yield await self.recv()
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 562, in recv
+    await self.ensure_open()
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/websockets/legacy/protocol.py", line 938, in ensure_open
+    raise self.connection_closed_exc()
+websockets.exceptions.ConnectionClosedError: sent 1011 (internal error) keepalive ping timeout; no close frame received
+2024-12-03 21:48:57,815 - main - INFO - Loading environment from development.env
+2024-12-03 21:48:57,816 - main - INFO - Loaded environment from development.env
+2024-12-03 21:51:51,516 - passlib.handlers.bcrypt - WARNING - (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/venv/lib/python3.9/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2024-12-03 21:52:04,596 - main - INFO - Environment: development, PUBLIC_URL: 164.92.71.74, NGROK_URL: affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app
+2024-12-03 21:52:04,596 - main - INFO - Constructed webhook URL: https://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/incoming-call/default
+2024-12-03 21:52:04,632 - twilio.http_client - INFO - -- BEGIN Twilio API Request --
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - POST Request: https://api.twilio.com/2010-04-01/Accounts/ACd9953f24e090ac0f9a522daaf92f9355/Calls.json
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - Headers:
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - Content-Type : application/x-www-form-urlencoded
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - User-Agent : twilio-python/9.3.3 (Darwin arm64) Python/3.9.6
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - X-Twilio-Client : python-9.3.3
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - Accept-Charset : utf-8
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - Accept : application/json
+2024-12-03 21:52:04,633 - twilio.http_client - INFO - -- END Twilio API Request --
+2024-12-03 21:52:05,045 - twilio.http_client - INFO - Response Status Code: 201
+2024-12-03 21:52:05,046 - twilio.http_client - INFO - Response Headers: {'Content-Type': 'application/json; charset=utf-8', 'Content-Length': '2011', 'Connection': 'keep-alive', 'Date': 'Wed, 04 Dec 2024 04:52:05 GMT', 'X-API-Domain': 'api.twilio.com', 'Twilio-Request-Id': 'RQ244718e53b0398918e72704861030cce', 'Twilio-Request-Duration': '0.056', 'Twilio-Concurrent-Requests': '1', 'X-Shenanigans': 'none', 'X-Powered-By': 'AT-5000', 'X-Home-Region': 'us1', 'X-Cache': 'Miss from cloudfront', 'Via': '1.1 01d835ea37857868734425d8c45ea35c.cloudfront.net (CloudFront)', 'X-Amz-Cf-Pop': 'DEN53-P1', 'X-Amz-Cf-Id': 'ddgeu3L4fYajPOsHh0FgcQB8ILdTMNMzUbrY-CKymoqs8tjXED92BQ==', 'Vary': 'Origin'}
+2024-12-03 21:52:08,721 - main - INFO - Incoming call webhook received for scenario: default
+2024-12-03 21:52:08,723 - main - INFO - Received form data: FormData([('Called', '+15055535929'), ('ToState', 'NM'), ('CallerCountry', 'US'), ('Direction', 'outbound-api'), ('CallerState', ''), ('ToZip', '87106'), ('StirStatus', 'B'), ('CallSid', 'CAcb3efb8c310d3590c567d07e7f95635c'), ('To', '+15055535929'), ('CallerZip', ''), ('ToCountry', 'US'), ('StirVerstat', 'TN-Validation-Passed-B'), ('CalledZip', '87106'), ('ApiVersion', '2010-04-01'), ('CalledCity', 'ALBUQUERQUE'), ('CallStatus', 'in-progress'), ('From', '+18667630512'), ('AccountSid', 'ACd9953f24e090ac0f9a522daaf92f9355'), ('CalledCountry', 'US'), ('CallerCity', ''), ('ToCity', 'ALBUQUERQUE'), ('FromCountry', 'US'), ('Caller', '+18667630512'), ('FromCity', ''), ('CalledState', 'NM'), ('FromZip', ''), ('FromState', '')])
+2024-12-03 21:52:08,724 - main - INFO - Constructed WebSocket URL: wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default
+2024-12-03 21:52:08,725 - main - INFO - Generated TwiML response: <?xml version="1.0" encoding="UTF-8"?><Response><Say>what up son, can you talk.</Say><Pause length="1" /><Say>y'all ready to talk some shit?</Say><Connect><Stream url="wss://affe-2601-8c0-800-e2c0-6cfc-7079-3299-acd1.ngrok-free.app/media-stream/default" /></Connect></Response>
+2024-12-03 21:52:13,731 - main - INFO - WebSocket connection attempt for scenario: default
+2024-12-03 21:52:13,731 - main - INFO - WebSocket connection accepted
+2024-12-03 21:52:13,731 - main - INFO - Using scenario: {'persona': 'I am an aggressive business man and real estate agent.', 'prompt': 'We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.'}
+2024-12-03 21:52:14,889 - main - INFO - Connected to OpenAI WebSocket
+2024-12-03 21:52:14,890 - main - INFO - Sending session update: {
+  "type": "session.update",
+  "session": {
+    "instructions": "You are a AI assistant who will adapt to the prompts provided by the user to chat about the scenarios in depth, you will have an engaging backand forth conversation with. Your persona is defined by the scenario and prompt provided by the user. You can change your personality to match the scenario and prompt.\n\nPersona: I am an aggressive business man and real estate agent.\n\nScenario: We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today.",
+    "voice": "alloy",
+    "audio_format": {
+      "type": "mulaw",
+      "sample_rate": 8000
+    }
+  }
+}
+2024-12-03 21:52:14,890 - main - INFO - Session update sent for persona: I am an aggressive business man and real estate agent.
+2024-12-03 21:52:14,890 - main - INFO - Stream started: MZd5755536c5df178e7a2210be3f5fd906
+2024-12-03 21:52:14,966 - main - ERROR - Error from OpenAI: {'type': 'error', 'event_id': 'event_AabexpP9PAFxxBObn6q9i', 'error': {'type': 'invalid_request_error', 'code': 'unknown_parameter', 'message': "Unknown parameter: 'session.audio_format'.", 'param': 'session.audio_format', 'event_id': None}}
+2024-12-03 21:52:18,709 - main - INFO - Speech started detected
+2024-12-03 21:52:20,839 - main - ERROR - Error in send_to_twilio: name 'send_mark' is not defined
+Traceback (most recent call last):
+  File "/Users/carlosalvarez/speech-assistant-openai-realtime-api-python/main.py", line 554, in send_to_twilio
+    await send_mark(websocket, stream_sid)
+NameError: name 'send_mark' is not defined
