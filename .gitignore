@@ -1,0 +1,12 @@
+# Environment and credential files
+.env
+
+# Python cache files
+__pycache__/
+
+# Virtual environment
+venv/
+
+# Logs and temporary files
+*.log
+*.db
