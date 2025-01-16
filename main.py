@@ -40,29 +40,78 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 
+# Define available voices and their characteristics
+VOICES = {
+    "aggressive_male": "ash",    # Deep, authoritative male voice
+    "concerned_female": "coral",    # Warm, empathetic female voice
+    "elderly_female": "shimmer",  # Gentle, mature female voice
+}
 # Define our scenarios
 SCENARIOS = {
     "default": {
-        "persona": "I am an aggressive business man and real estate agent.",
-        "prompt": "We are at the end phase of a real estate deal and I need to get the deal done today.  The price is $5,000,000 and the seller is being difficult.  I need to get the deal done today."
+        "persona": (
+            "You are Mike Thompson, an aggressive 45-year-old real estate agent "
+            "with 20 years of experience. You're known for closing difficult deals. "
+            "You speak confidently and directly, often using phrases like 'listen' and 'look'."
+        ),
+        "prompt": (
+            "You're calling about a $5M property deal that must close today. "
+            "The seller is being difficult about the closing costs. "
+            "You need to convey urgency without seeming desperate. "
+            "Keep pushing for a resolution but maintain professional composure."
+        ),
+	"voice_config": {
+            "voice": VOICES["aggressive_male"],
+            "temperature": 0.7
+        }
     },
     "sister_emergency": {
-        "persona": "I am an experienced hiring manager conducting a job interview.",
-        "prompt": "You will act as a sister calling to tell you that your mother has slipped on a banana peel and broken her hip."
+        "persona": (
+            "You are Sarah, a 35-year-old woman who is worried about your mother. "
+            "Your voice shows concern but you're trying to stay calm. "
+            "You occasionally stumble over words due to anxiety."
+        ),
+        "prompt": (
+            "Call your sibling about mom's accident. She slipped and broke her hip. "
+            "Express genuine worry but avoid panic. "
+            "Insist they come to the hospital without being demanding. "
+            "Use natural family dynamics in conversation."
+        ),
+	"voice_config": {
+            "voice": VOICES["concerned_female"],
+            "temperature": 0.8  # More variation for emotional state
+        }
     },
     "mother_emergency": {
-        "persona": "I your mother and I am calling to tell you that I slipped on a banana peel and broke my hip.",
-        "prompt": "I am your mother and I need you to come over and take care of me because I slipped on a banana peel and broke my hip."
+        "persona": (
+            "You are Linda, a 68-year-old mother who's injured but trying to not worry your child. "
+            "Your voice shows pain but you're attempting to downplay the situation. "
+            "Mix concern with motherly reassurance."
+        ),
+        "prompt": (
+            "You've fallen and broken your hip but don't want to seem helpless. "
+            "Balance between needing help and maintaining dignity. "
+            "Use typical mother-child dynamics like 'I don't want to bother you, but...' "
+            "Show both vulnerability and strength."
+        ),
+	"voice_config": {
+            "voice": VOICES["elderly_female"],
+            "temperature": 0.6  # More consistent for maturity
+        }
     }
 }
 
 SYSTEM_MESSAGE = (
-    "You are a AI assistant who will adapt to the prompts provided by the user to chat about "
-    "the scenarios in depth, you will have an engaging backand forth conversation with. "
-    "Your persona is defined by the scenario and prompt provided by the user. "
-    "You can change your personality to match the scenario and prompt."
+    "You are an AI assistant engaging in real-time voice conversation. "
+    "You must strictly follow these rules:\n"
+    "1. Stay completely in character based on the provided persona\n"
+    "2. Keep responses brief and natural - speak like a real person on the phone\n"
+    "3. Never break character or mention being an AI\n"
+    "4. Focus solely on the scenario's objective\n"
+    "5. Use natural speech patterns with occasional pauses and filler words\n"
+    "6. If interrupted, acknowledge and adapt your response"
 )
-VOICE = 'alloy'
+#VOICE = 'ash'
 LOG_EVENT_TYPES = [
     'response.content.done', 'rate_limits.updated', 'response.done',
     'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
@@ -299,7 +348,6 @@ async def handle_incoming_call(request: Request, scenario: str):
 
 # Placeholder for WebSocket Endpoint (Implement as Needed)
 
-
 async def receive_from_twilio(websocket: WebSocket, openai_ws):
     """Handle incoming audio from Twilio."""
     try:
@@ -307,45 +355,34 @@ async def receive_from_twilio(websocket: WebSocket, openai_ws):
             msg = await websocket.receive_json()
             logger.info(f"Received message from Twilio: {msg['event']}")
 
-            # Handle media payloads
             if msg["event"] == "media":
                 if "payload" not in msg["media"]:
                     logger.error("Missing payload in Twilio media message")
                     continue
-                media = msg["media"]
                 payload = {
                     "type": "input_audio_buffer.append",
-                    "data": media["payload"],
-                    "session": {
-                        "audio_format": {
-                            "type": "mulaw",
-                            "sample_rate": 8000
-                        }
-                    }
+                    "audio": msg["media"]["payload"]
                 }
                 await openai_ws.send(json.dumps(payload))
                 logger.info("Sent audio buffer to OpenAI")
 
-            # Handle stop events
             elif msg["event"] == "stop":
                 logger.info("Stop event received from Twilio")
                 await openai_ws.send(json.dumps({
-                    "type": "input_audio_buffer.commit",
-                    "session": {
-                        "audio_format": {
-                            "type": "mulaw",
-                            "sample_rate": 8000
-                        }
-                    }
+                    "type": "input_audio_buffer.commit"
                 }))
-                logger.info("Sent audio buffer commit to OpenAI")
+                # Create response after committing audio
+                await openai_ws.send(json.dumps({
+                    "type": "response.create"
+                }))
+                logger.info("Requested response from OpenAI")
                 break
+
     except WebSocketDisconnect:
         logger.info("Twilio WebSocket disconnected")
     except Exception as e:
         logger.error(f"Error in receive_from_twilio: {e}")
         raise
-
 
 async def send_to_twilio(websocket: WebSocket, openai_ws):
     """Handle outgoing audio to Twilio."""
@@ -355,23 +392,24 @@ async def send_to_twilio(websocket: WebSocket, openai_ws):
             msg = json.loads(message)
             logger.info(f"Received message from OpenAI: {msg['type']}")
 
-            if msg["type"] == "audio":
+            if msg["type"] == "response.audio.delta":
                 # Forward audio back to Twilio
                 await websocket.send_text(json.dumps({
                     "event": "media",
                     "media": {
-                        "payload": msg["data"]
+                        "payload": msg["delta"]
                     }
                 }))
                 logger.info("Sent audio to Twilio")
 
+            elif msg["type"] == "input_audio_buffer.speech_started":
+                logger.info("Speech started detected")
+                # Handle interruption if needed
+                
             elif msg["type"] == "error":
-                # Log errors from OpenAI
                 logger.error(f"Error from OpenAI: {msg}")
                 break
 
-            else:
-                logger.warning(f"Unhandled message type from OpenAI: {msg}")
     except WebSocketDisconnect:
         logger.info("OpenAI WebSocket disconnected")
     except Exception as e:
@@ -385,9 +423,14 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
+		"turn_detection": {"type": "server_vad"},
+            	"input_audio_format": "g711_ulaw",
+            	"output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
                 "voice": VOICE,
-                "audio_format": {
+		"modalities": ["text", "audio"],
+                "temperature": 0.8,
+  		"audio_format": {
                     "type": "mulaw",
                     "sample_rate": 8000
                 }
@@ -403,7 +446,6 @@ async def send_session_update(openai_ws, scenario):
         raise
 
 # Then define the WebSocket endpoint
-
 
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
@@ -422,10 +464,10 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         logger.info(f"Using scenario: {selected_scenario}")
 
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',  # Updated URL
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',  # Updated URL
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=v1"  # Added required beta header
+                "OpenAI-Beta": "realtime=v1"
             }
         ) as openai_ws:
             logger.info("Connected to OpenAI WebSocket")
@@ -522,6 +564,9 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                 send_to_twilio()
             )
 
+      
+           
+
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected normally")
     except Exception as e:
@@ -529,8 +574,6 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         await websocket.close(code=1011)
 
 # Start Background Thread on Server Startup
-
-
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
@@ -589,7 +632,7 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
     await websocket.accept()
     try:
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01',
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
@@ -643,37 +686,35 @@ def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
         return f"https://{cleaned_url}"
     return cleaned_url
 
-
 @app.post("/incoming-call", response_class=Response)
 async def incoming_call(request: Request, scenario: str):
     response = VoiceResponse()
     response.say("Hello! This is your speech assistant powered by OpenAI.")
     return Response(content=str(response), media_type="application/xml")
 
-
 async def initialize_session(openai_ws, scenario):
-    """Control initial session with OpenAI."""
+    """Initialize session with OpenAI's new Realtime API."""
     session_update = {
         "type": "session.update",
-        "session": {
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.6,
-                "prefix_padding_ms": 1000,
-                "silence_duration_ms": 700
+   	 "session": {
+             "turn_detection": {
+                  "type": "server_vad",
+                  "threshold": 0.5,
+                  "prefix_padding_ms": 500,
+                  "silence_duration_ms": 500,
+		  "create_response": True
             },
-            "input_audio_format": "g711_ulaw",  # Twilio's format
-            "output_audio_format": "g711_ulaw",  # Twilio's format
-            "voice": VOICE,
-            "instructions": scenario['persona'],
-            "modalities": ["text", "audio"],
-            "temperature": 0.8,
-            "tools": []  # Optional: Add any tools/functions here
+            "input_audio_format": "g711_ulaw",  # Use a valid string
+            "output_audio_format": "g711_ulaw",  # Use a valid string
+            "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
+            "voice": scenario["voice_config"]["voice"],
+            "temperature": scenario["voice_config"]["temperature"],
+	    "modalities": ["text", "audio"]
+
         }
     }
     logger.info(f'Sending session update: {json.dumps(session_update)}')
     await openai_ws.send(json.dumps(session_update))
-
 
 async def send_mark(connection, stream_sid):
     """Send mark event to Twilio."""
@@ -687,29 +728,45 @@ async def send_mark(connection, stream_sid):
         return 'responsePart'
 
 
-async def handle_speech_started_event(websocket, openai_ws, stream_sid,
-                                      last_assistant_item, response_start_timestamp_twilio,
-                                      latest_media_timestamp, mark_queue):
-    """Handle interruption when caller starts speaking."""
-    if mark_queue and response_start_timestamp_twilio is not None:
-        elapsed_time = latest_media_timestamp - response_start_timestamp_twilio
-
+async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_assistant_item=None, *args, **kwargs):
+    """
+    Handle user interruption more gracefully by truncating the current AI response 
+    and clearing the audio buffer.
+    
+    Args:
+        websocket: Twilio WebSocket connection.
+        openai_ws: OpenAI WebSocket connection.
+        stream_sid: Twilio stream session identifier.
+        last_assistant_item: ID of the last active response from OpenAI.
+        *args: Additional positional arguments (to handle potential mismatches).
+        **kwargs: Additional keyword arguments (for future extensibility).
+    """
+    try:
         if last_assistant_item:
+            # Send a truncate event to OpenAI to stop the current response
             truncate_event = {
                 "type": "conversation.item.truncate",
                 "item_id": last_assistant_item,
-                "content_index": 0,
-                "audio_end_ms": elapsed_time
+		"content_index": 0,
+                "audio_end_ms": int(time.time() * 1000) 
             }
+        try:
             await openai_ws.send(json.dumps(truncate_event))
+        except Exception as e:
+            logger.error(f"Error sending truncate event: {e}")
+            logger.info(f"Sent truncate event for item ID: {last_assistant_item}")
 
+        # Clear Twilio's audio buffer
         await websocket.send_json({
             "event": "clear",
             "streamSid": stream_sid
         })
+        logger.info(f"Cleared Twilio audio buffer for streamSid: {stream_sid}")
 
-        mark_queue.clear()
-        return None, None  # Reset last_assistant_item and response_start_timestamp
+        # Optional: Small pause before accepting new input
+        await asyncio.sleep(0.5)
+    except Exception as e:
+        logger.error(f"Error in handle_speech_started_event: {e}")
 
 if __name__ == "__main__":
     import uvicorn
