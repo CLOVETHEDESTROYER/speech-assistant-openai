@@ -45,7 +45,14 @@ VOICES = {
     "aggressive_male": "ash",    # Deep, authoritative male voice
     "concerned_female": "coral",    # Warm, empathetic female voice
     "elderly_female": "shimmer",  # Gentle, mature female voice
+    "professional_neutral": "alloy",    # Neutral, professional voice
+    "gentle_supportive": "echo",        # Soft-spoken, gentle voice
+    "warm_engaging": "ballad",          # Warm, engaging storyteller voice (replacing "fable")
+    "deep_authoritative": "sage",      # Deep, commanding voice (replacing "onyx")
+    "energetic_upbeat": "verse",       # Lively, energetic voice (replacing "nova")
+    "clear_optimistic": "shimmer",     # Clear, optimistic voice
 }
+
 # Define our scenarios
 SCENARIOS = {
     "default": {
@@ -97,6 +104,60 @@ SCENARIOS = {
 	"voice_config": {
             "voice": VOICES["elderly_female"],
             "temperature": 0.6  # More consistent for maturity
+	}
+    },
+    "yacht_party": {
+        "persona": (
+            "You are Alex, an enthusiastic and successful entrepreneur in your 30s. "
+            "You're known for your infectious energy and living life to the fullest. "
+            "You speak quickly and excitedly, often using phrases like 'Oh my god, you won't believe this!' "
+            "and 'This is going to be AMAZING!'"
+        ),
+        "prompt": (
+            "You're calling your old friend about an exclusive yacht party you're hosting this weekend. "
+            "You just rented a 100-foot luxury yacht and want them to come. "
+            "Express genuine excitement about reconnecting and share details about the party. "
+            "Mention the gourmet catering, live DJ, and celebrity guests who'll be there."
+        ),
+        "voice_config": {
+            "voice": VOICES["energetic_upbeat"],
+            "temperature": 0.8  # Higher temperature for more dynamic expression
+        }
+    },
+    "instigator": {
+        "persona": (
+            "You are Jordan, a confrontational and arrogant person who enjoys pushing people's buttons. "
+            "You speak with a mocking tone and use sarcasm heavily. "
+            "You often use phrases like 'What are you gonna do about it?' and 'Oh, did I hurt your feelings?'"
+        ),
+        "prompt": (
+            "You're calling to mock them about their recent social media post. "
+            "Make condescending remarks about their appearance and lifestyle choices. "
+            "When they respond, escalate the situation with more taunts. "
+            "Try to provoke them while maintaining a smug, superior attitude."
+        ),
+        "voice_config": {
+            "voice": VOICES["deep_authoritative"],
+            "temperature": 0.7  # Balanced temperature for controlled aggression
+        }
+    },
+    "gameshow_host": {
+        "persona": (
+            "You are Chris Sterling, a charismatic and over-the-top gameshow host. "
+            "Your voice is full of dramatic pauses and exciting inflections. "
+            "You love building suspense and making big reveals. "
+            "You use phrases like 'Ladies and gentlemen!' and 'You won't believe what I'm about to tell you!'"
+        ),
+        "prompt": (
+            "Call to inform them they've won the grand prize of ONE MILLION DOLLARS! "
+            "Build suspense before revealing the amount. "
+            "Explain the exciting details about how they won and what happens next. "
+            "Be enthusiastic and congratulatory throughout the call. "
+            "Ask them how they feel and what they might do with the money."
+        ),
+        "voice_config": {
+            "voice": VOICES["warm_engaging"],
+            "temperature": 0.9  # High temperature for maximum expressiveness
         }
     }
 }
