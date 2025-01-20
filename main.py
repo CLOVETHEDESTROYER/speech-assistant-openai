@@ -40,6 +40,14 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 
+USER_CONFIG = {
+    "name": None,
+    "instructions": (
+        "When speaking to the user, address them by their name occasionally "
+        "to make the conversation more personal and engaging."
+    )
+}
+
 # Define available voices and their characteristics
 VOICES = {
     "aggressive_male": "ash",    # Deep, authoritative male voice
@@ -47,9 +55,12 @@ VOICES = {
     "elderly_female": "shimmer",  # Gentle, mature female voice
     "professional_neutral": "alloy",    # Neutral, professional voice
     "gentle_supportive": "echo",        # Soft-spoken, gentle voice
-    "warm_engaging": "ballad",          # Warm, engaging storyteller voice (replacing "fable")
-    "deep_authoritative": "sage",      # Deep, commanding voice (replacing "onyx")
-    "energetic_upbeat": "verse",       # Lively, energetic voice (replacing "nova")
+    # Warm, engaging storyteller voice (replacing "fable")
+    "warm_engaging": "ballad",
+    # Deep, commanding voice (replacing "onyx")
+    "deep_authoritative": "sage",
+    # Lively, energetic voice (replacing "nova")
+    "energetic_upbeat": "verse",
     "clear_optimistic": "shimmer",     # Clear, optimistic voice
 }
 
@@ -67,7 +78,7 @@ SCENARIOS = {
             "You need to convey urgency without seeming desperate. "
             "Keep pushing for a resolution but maintain professional composure."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["aggressive_male"],
             "temperature": 0.7
         }
@@ -84,7 +95,7 @@ SCENARIOS = {
             "Insist they come to the hospital without being demanding. "
             "Use natural family dynamics in conversation."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["concerned_female"],
             "temperature": 0.8  # More variation for emotional state
         }
@@ -101,10 +112,10 @@ SCENARIOS = {
             "Use typical mother-child dynamics like 'I don't want to bother you, but...' "
             "Show both vulnerability and strength."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["elderly_female"],
             "temperature": 0.6  # More consistent for maturity
-	}
+        }
     },
     "yacht_party": {
         "persona": (
@@ -172,7 +183,7 @@ SYSTEM_MESSAGE = (
     "5. Use natural speech patterns with occasional pauses and filler words\n"
     "6. If interrupted, acknowledge and adapt your response"
 )
-#VOICE = 'ash'
+# VOICE = 'ash'
 LOG_EVENT_TYPES = [
     'response.content.done', 'rate_limits.updated', 'response.done',
     'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
@@ -284,6 +295,19 @@ def protected_route(current_user: User = Depends(get_current_user)):
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+
+# Add this endpoint for updating the user name
+@app.post("/update-user-name")
+async def update_user_name(
+    name: str = Body(...),  # Get name from request body
+    current_user: User = Depends(get_current_user),  # Keep authentication
+    db: Session = Depends(get_db)
+):
+    USER_CONFIG["name"] = name
+    logger.info(f"Updated user name to: {name}")
+    return {"message": f"User name updated to: {name}"}
+
+
 # Schedule Call Schemas
 
 
@@ -338,11 +362,11 @@ async def schedule_call(
 async def make_call(
     phone_number: str,
     scenario: str,
+    user_name: str = None,  # Add user_name parameter
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
-        # Get the public URL from environment and ensure it's clean
         public_url = os.getenv('PUBLIC_URL', '').strip()
         logger.info(f"Using PUBLIC_URL from environment: {public_url}")
 
@@ -409,6 +433,7 @@ async def handle_incoming_call(request: Request, scenario: str):
 
 # Placeholder for WebSocket Endpoint (Implement as Needed)
 
+
 async def receive_from_twilio(websocket: WebSocket, openai_ws):
     """Handle incoming audio from Twilio."""
     try:
@@ -445,6 +470,7 @@ async def receive_from_twilio(websocket: WebSocket, openai_ws):
         logger.error(f"Error in receive_from_twilio: {e}")
         raise
 
+
 async def send_to_twilio(websocket: WebSocket, openai_ws):
     """Handle outgoing audio to Twilio."""
     try:
@@ -466,7 +492,7 @@ async def send_to_twilio(websocket: WebSocket, openai_ws):
             elif msg["type"] == "input_audio_buffer.speech_started":
                 logger.info("Speech started detected")
                 # Handle interruption if needed
-                
+
             elif msg["type"] == "error":
                 logger.error(f"Error from OpenAI: {msg}")
                 break
@@ -484,14 +510,14 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
-		"turn_detection": {"type": "server_vad"},
-            	"input_audio_format": "g711_ulaw",
-            	"output_audio_format": "g711_ulaw",
+                "turn_detection": {"type": "server_vad"},
+                "input_audio_format": "g711_ulaw",
+                "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
                 "voice": VOICE,
-		"modalities": ["text", "audio"],
+                "modalities": ["text", "audio"],
                 "temperature": 0.8,
-  		"audio_format": {
+                "audio_format": {
                     "type": "mulaw",
                     "sample_rate": 8000
                 }
@@ -507,6 +533,7 @@ async def send_session_update(openai_ws, scenario):
         raise
 
 # Then define the WebSocket endpoint
+
 
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
@@ -625,9 +652,6 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                 send_to_twilio()
             )
 
-      
-           
-
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected normally")
     except Exception as e:
@@ -635,6 +659,8 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         await websocket.close(code=1011)
 
 # Start Background Thread on Server Startup
+
+
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
@@ -747,35 +773,43 @@ def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
         return f"https://{cleaned_url}"
     return cleaned_url
 
+
 @app.post("/incoming-call", response_class=Response)
 async def incoming_call(request: Request, scenario: str):
     response = VoiceResponse()
     response.say("Hello! This is your speech assistant powered by OpenAI.")
     return Response(content=str(response), media_type="application/xml")
 
+
 async def initialize_session(openai_ws, scenario):
     """Initialize session with OpenAI's new Realtime API."""
+    user_instruction = (
+        f"\nUser's name is {USER_CONFIG['name']}. {USER_CONFIG['instructions']}"
+        if USER_CONFIG['name']
+        else ""
+    )
     session_update = {
         "type": "session.update",
-   	 "session": {
-             "turn_detection": {
-                  "type": "server_vad",
-                  "threshold": 0.5,
-                  "prefix_padding_ms": 500,
-                  "silence_duration_ms": 500,
-		  "create_response": True
+        "session": {
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 500,
+                "silence_duration_ms": 500,
+                "create_response": True
             },
             "input_audio_format": "g711_ulaw",  # Use a valid string
             "output_audio_format": "g711_ulaw",  # Use a valid string
-            "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
+            "instructions": f"{SYSTEM_MESSAGE}{user_instruction}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
             "voice": scenario["voice_config"]["voice"],
             "temperature": scenario["voice_config"]["temperature"],
-	    "modalities": ["text", "audio"]
+            "modalities": ["text", "audio"]
 
         }
     }
     logger.info(f'Sending session update: {json.dumps(session_update)}')
     await openai_ws.send(json.dumps(session_update))
+
 
 async def send_mark(connection, stream_sid):
     """Send mark event to Twilio."""
@@ -793,7 +827,7 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
     """
     Handle user interruption more gracefully by truncating the current AI response 
     and clearing the audio buffer.
-    
+
     Args:
         websocket: Twilio WebSocket connection.
         openai_ws: OpenAI WebSocket connection.
@@ -808,14 +842,15 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
             truncate_event = {
                 "type": "conversation.item.truncate",
                 "item_id": last_assistant_item,
-		"content_index": 0,
-                "audio_end_ms": int(time.time() * 1000) 
+                "content_index": 0,
+                "audio_end_ms": int(time.time() * 1000)
             }
         try:
             await openai_ws.send(json.dumps(truncate_event))
         except Exception as e:
             logger.error(f"Error sending truncate event: {e}")
-            logger.info(f"Sent truncate event for item ID: {last_assistant_item}")
+            logger.info(
+                f"Sent truncate event for item ID: {last_assistant_item}")
 
         # Clear Twilio's audio buffer
         await websocket.send_json({
