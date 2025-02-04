@@ -26,9 +26,10 @@ import time
 from app.auth import router as auth_router, get_current_user
 from app.models import User, Token, CallSchedule
 from app.utils import verify_password, create_access_token
-from app.schemas import TokenResponse
+from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
 from app.db import engine, get_db, SessionLocal, Base
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from app.realtime_manager import OpenAIRealtimeManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -683,7 +684,8 @@ def initiate_scheduled_calls():
                         'https://', '').replace('http://', '')
 
                     # Construct the webhook URL
-                    incoming_call_url = f"https://{public_url}/incoming-call/{call.scenario}"
+                    incoming_call_url = f"https://{
+                        public_url}/incoming-call/{call.scenario}"
 
                     twilio_client.calls.create(
                         url=incoming_call_url,
@@ -738,7 +740,12 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    pass  # Add any cleanup logic if necessary
+    """Clean up active sessions on shutdown."""
+    for session_id in list(realtime_manager.active_sessions.keys()):
+        try:
+            await realtime_manager.close_session(session_id)
+        except Exception as e:
+            logger.error(f"Error closing session {session_id}: {str(e)}")
 
 
 @app.get("/test")
@@ -784,7 +791,8 @@ async def incoming_call(request: Request, scenario: str):
 async def initialize_session(openai_ws, scenario):
     """Initialize session with OpenAI's new Realtime API."""
     user_instruction = (
-        f"\nUser's name is {USER_CONFIG['name']}. {USER_CONFIG['instructions']}"
+        f"\nUser's name is {USER_CONFIG['name']}. {
+            USER_CONFIG['instructions']}"
         if USER_CONFIG['name']
         else ""
     )
@@ -863,6 +871,90 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
         await asyncio.sleep(0.5)
     except Exception as e:
         logger.error(f"Error in handle_speech_started_event: {e}")
+
+# Initialize the OpenAIRealtimeManager
+realtime_manager = OpenAIRealtimeManager(OPENAI_API_KEY)
+
+# New realtime endpoints
+
+
+@app.post("/realtime/session", response_model=RealtimeSessionResponse)
+async def create_realtime_session(
+    session_data: RealtimeSessionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new realtime session for WebRTC communication."""
+    try:
+        if session_data.scenario not in SCENARIOS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid scenario"
+            )
+
+        # Use the current user's ID if not specified
+        user_id = session_data.user_id or current_user.id
+
+        # Create session with OpenAI
+        session_info = await realtime_manager.create_session(
+            str(user_id),
+            SCENARIOS[session_data.scenario]
+        )
+
+        return session_info
+
+    except Exception as e:
+        logger.error(f"Error creating realtime session: {
+                     str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.post("/realtime/signal", response_model=SignalingResponse)
+async def handle_signaling(
+    signal: SignalingMessage,
+    current_user: User = Depends(get_current_user)
+):
+    """Handle WebRTC signaling messages."""
+    try:
+        # Verify session belongs to user
+        session = realtime_manager.get_session(signal.session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+
+        if str(session["user_id"]) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this session"
+            )
+
+        # Handle signaling message
+        response = await realtime_manager.handle_signaling(
+            signal.session_id,
+            {
+                "type": signal.type,
+                "sdp": signal.sdp,
+                "candidate": signal.candidate
+            }
+        )
+
+        return response
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error handling signaling: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 if __name__ == "__main__":
     import uvicorn
