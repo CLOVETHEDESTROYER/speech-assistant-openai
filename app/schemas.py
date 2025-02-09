@@ -34,4 +34,30 @@ class TokenResponse(BaseModel):
         orm_mode = True
 
 
-__all__ = ["UserCreate", "UserLogin", "TokenSchema", "TokenData"]
+class RealtimeSessionCreate(BaseModel):
+    scenario: str
+    user_id: Optional[int] = None
+
+
+class RealtimeSessionResponse(BaseModel):
+    session_id: str
+    ice_servers: list
+    created_at: str
+
+
+class SignalingMessage(BaseModel):
+    type: str
+    sdp: Optional[str] = None
+    candidate: Optional[dict] = None
+    session_id: str
+
+
+class SignalingResponse(BaseModel):
+    type: str
+    sdp: Optional[str] = None
+    ice_servers: Optional[list] = None
+    error: Optional[str] = None
+
+
+__all__ = ["UserCreate", "UserLogin", "TokenSchema", "TokenData", "RealtimeSessionCreate",
+           "RealtimeSessionResponse", "SignalingMessage", "SignalingResponse"]

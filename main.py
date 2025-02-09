@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from twilio.rest import Client
 import datetime
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from typing import Optional, Dict
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -26,9 +26,12 @@ import time
 from app.auth import router as auth_router, get_current_user
 from app.models import User, Token, CallSchedule
 from app.utils import verify_password, create_access_token
-from app.schemas import TokenResponse
+from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse,SignalingMessage, SignalingResponse
 from app.db import engine, get_db, SessionLocal, Base
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from app.realtime_manager import OpenAIRealtimeManager
+from os import getenv
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +43,14 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
 
+USER_CONFIG = {
+    "name": None,
+    "instructions": (
+        "When speaking to the user, address them by their name occasionally "
+        "to make the conversation more personal and engaging."
+    )
+}
+
 # Define available voices and their characteristics
 VOICES = {
     "aggressive_male": "ash",    # Deep, authoritative male voice
@@ -47,9 +58,12 @@ VOICES = {
     "elderly_female": "shimmer",  # Gentle, mature female voice
     "professional_neutral": "alloy",    # Neutral, professional voice
     "gentle_supportive": "echo",        # Soft-spoken, gentle voice
-    "warm_engaging": "ballad",          # Warm, engaging storyteller voice (replacing "fable")
-    "deep_authoritative": "sage",      # Deep, commanding voice (replacing "onyx")
-    "energetic_upbeat": "verse",       # Lively, energetic voice (replacing "nova")
+    # Warm, engaging storyteller voice (replacing "fable")
+    "warm_engaging": "ballad",
+    # Deep, commanding voice (replacing "onyx")
+    "deep_authoritative": "sage",
+    # Lively, energetic voice (replacing "nova")
+    "energetic_upbeat": "verse",
     "clear_optimistic": "shimmer",     # Clear, optimistic voice
 }
 
@@ -67,7 +81,7 @@ SCENARIOS = {
             "You need to convey urgency without seeming desperate. "
             "Keep pushing for a resolution but maintain professional composure."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["aggressive_male"],
             "temperature": 0.7
         }
@@ -84,7 +98,7 @@ SCENARIOS = {
             "Insist they come to the hospital without being demanding. "
             "Use natural family dynamics in conversation."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["concerned_female"],
             "temperature": 0.8  # More variation for emotional state
         }
@@ -101,10 +115,10 @@ SCENARIOS = {
             "Use typical mother-child dynamics like 'I don't want to bother you, but...' "
             "Show both vulnerability and strength."
         ),
-	"voice_config": {
+        "voice_config": {
             "voice": VOICES["elderly_female"],
             "temperature": 0.6  # More consistent for maturity
-	}
+        }
     },
     "yacht_party": {
         "persona": (
@@ -172,7 +186,7 @@ SYSTEM_MESSAGE = (
     "5. Use natural speech patterns with occasional pauses and filler words\n"
     "6. If interrupted, acknowledge and adapt your response"
 )
-#VOICE = 'ash'
+# VOICE = 'ash'
 LOG_EVENT_TYPES = [
     'response.content.done', 'rate_limits.updated', 'response.done',
     'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
@@ -284,6 +298,19 @@ def protected_route(current_user: User = Depends(get_current_user)):
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+
+# Add this endpoint for updating the user name
+@app.post("/update-user-name")
+async def update_user_name(
+    name: str = Body(...),  # Get name from request body
+    current_user: User = Depends(get_current_user),  # Keep authentication
+    db: Session = Depends(get_db)
+):
+    USER_CONFIG["name"] = name
+    logger.info(f"Updated user name to: {name}")
+    return {"message": f"User name updated to: {name}"}
+
+
 # Schedule Call Schemas
 
 
@@ -338,11 +365,11 @@ async def schedule_call(
 async def make_call(
     phone_number: str,
     scenario: str,
+    user_name: str = None,  # Add user_name parameter
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
-        # Get the public URL from environment and ensure it's clean
         public_url = os.getenv('PUBLIC_URL', '').strip()
         logger.info(f"Using PUBLIC_URL from environment: {public_url}")
 
@@ -409,6 +436,7 @@ async def handle_incoming_call(request: Request, scenario: str):
 
 # Placeholder for WebSocket Endpoint (Implement as Needed)
 
+
 async def receive_from_twilio(websocket: WebSocket, openai_ws):
     """Handle incoming audio from Twilio."""
     try:
@@ -445,6 +473,7 @@ async def receive_from_twilio(websocket: WebSocket, openai_ws):
         logger.error(f"Error in receive_from_twilio: {e}")
         raise
 
+
 async def send_to_twilio(websocket: WebSocket, openai_ws):
     """Handle outgoing audio to Twilio."""
     try:
@@ -466,7 +495,7 @@ async def send_to_twilio(websocket: WebSocket, openai_ws):
             elif msg["type"] == "input_audio_buffer.speech_started":
                 logger.info("Speech started detected")
                 # Handle interruption if needed
-                
+
             elif msg["type"] == "error":
                 logger.error(f"Error from OpenAI: {msg}")
                 break
@@ -484,14 +513,14 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
-		"turn_detection": {"type": "server_vad"},
-            	"input_audio_format": "g711_ulaw",
-            	"output_audio_format": "g711_ulaw",
+                "turn_detection": {"type": "server_vad"},
+                "input_audio_format": "g711_ulaw",
+                "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
                 "voice": VOICE,
-		"modalities": ["text", "audio"],
+                "modalities": ["text", "audio"],
                 "temperature": 0.8,
-  		"audio_format": {
+                "audio_format": {
                     "type": "mulaw",
                     "sample_rate": 8000
                 }
@@ -507,6 +536,7 @@ async def send_session_update(openai_ws, scenario):
         raise
 
 # Then define the WebSocket endpoint
+
 
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
@@ -625,9 +655,6 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                 send_to_twilio()
             )
 
-      
-           
-
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected normally")
     except Exception as e:
@@ -635,6 +662,8 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         await websocket.close(code=1011)
 
 # Start Background Thread on Server Startup
+
+
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
@@ -657,7 +686,8 @@ def initiate_scheduled_calls():
                         'https://', '').replace('http://', '')
 
                     # Construct the webhook URL
-                    incoming_call_url = f"https://{public_url}/incoming-call/{call.scenario}"
+                    incoming_call_url = f"https://{
+                        public_url}/incoming-call/{call.scenario}"
 
                     twilio_client.calls.create(
                         url=incoming_call_url,
@@ -712,7 +742,12 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    pass  # Add any cleanup logic if necessary
+    """Clean up active sessions on shutdown."""
+    for session_id in list(realtime_manager.active_sessions.keys()):
+        try:
+            await realtime_manager.close_session(session_id)
+        except Exception as e:
+            logger.error(f"Error closing session {session_id}: {str(e)}")
 
 
 @app.get("/test")
@@ -747,35 +782,44 @@ def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
         return f"https://{cleaned_url}"
     return cleaned_url
 
+
 @app.post("/incoming-call", response_class=Response)
 async def incoming_call(request: Request, scenario: str):
     response = VoiceResponse()
     response.say("Hello! This is your speech assistant powered by OpenAI.")
     return Response(content=str(response), media_type="application/xml")
 
+
 async def initialize_session(openai_ws, scenario):
     """Initialize session with OpenAI's new Realtime API."""
+    user_instruction = (
+        f"\nUser's name is {USER_CONFIG['name']}. {
+            USER_CONFIG['instructions']}"
+        if USER_CONFIG['name']
+        else ""
+    )
     session_update = {
         "type": "session.update",
-   	 "session": {
-             "turn_detection": {
-                  "type": "server_vad",
-                  "threshold": 0.5,
-                  "prefix_padding_ms": 500,
-                  "silence_duration_ms": 500,
-		  "create_response": True
+        "session": {
+            "turn_detection": {
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 500,
+                "silence_duration_ms": 500,
+                "create_response": True
             },
             "input_audio_format": "g711_ulaw",  # Use a valid string
             "output_audio_format": "g711_ulaw",  # Use a valid string
-            "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
+            "instructions": f"{SYSTEM_MESSAGE}{user_instruction}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
             "voice": scenario["voice_config"]["voice"],
             "temperature": scenario["voice_config"]["temperature"],
-	    "modalities": ["text", "audio"]
+            "modalities": ["text", "audio"]
 
         }
     }
     logger.info(f'Sending session update: {json.dumps(session_update)}')
     await openai_ws.send(json.dumps(session_update))
+
 
 async def send_mark(connection, stream_sid):
     """Send mark event to Twilio."""
@@ -793,7 +837,7 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
     """
     Handle user interruption more gracefully by truncating the current AI response 
     and clearing the audio buffer.
-    
+
     Args:
         websocket: Twilio WebSocket connection.
         openai_ws: OpenAI WebSocket connection.
@@ -808,14 +852,15 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
             truncate_event = {
                 "type": "conversation.item.truncate",
                 "item_id": last_assistant_item,
-		"content_index": 0,
-                "audio_end_ms": int(time.time() * 1000) 
+                "content_index": 0,
+                "audio_end_ms": int(time.time() * 1000)
             }
         try:
             await openai_ws.send(json.dumps(truncate_event))
         except Exception as e:
             logger.error(f"Error sending truncate event: {e}")
-            logger.info(f"Sent truncate event for item ID: {last_assistant_item}")
+            logger.info(
+                f"Sent truncate event for item ID: {last_assistant_item}")
 
         # Clear Twilio's audio buffer
         await websocket.send_json({
@@ -828,6 +873,447 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
         await asyncio.sleep(0.5)
     except Exception as e:
         logger.error(f"Error in handle_speech_started_event: {e}")
+
+# Initialize the OpenAIRealtimeManager
+realtime_manager = OpenAIRealtimeManager(OPENAI_API_KEY)
+
+# New realtime endpoints
+
+
+@app.post("/realtime/session", response_model=RealtimeSessionResponse)
+async def create_realtime_session(
+    session_data: RealtimeSessionCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new realtime session for WebRTC communication."""
+    try:
+        if session_data.scenario not in SCENARIOS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid scenario"
+            )
+
+        # Use the current user's ID if not specified
+        user_id = session_data.user_id or current_user.id
+
+        # Create session with OpenAI
+        session_info = await realtime_manager.create_session(
+            str(user_id),
+            SCENARIOS[session_data.scenario]
+        )
+
+        return session_info
+
+    except Exception as e:
+        logger.error(f"Error creating realtime session: {
+                     str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.post("/realtime/signal", response_model=SignalingResponse)
+async def handle_signaling(
+    signal: SignalingMessage,
+    current_user: User = Depends(get_current_user)
+):
+    """Handle WebRTC signaling messages."""
+    try:
+        # Verify session belongs to user
+        session = realtime_manager.get_session(signal.session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+
+        if str(session["user_id"]) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this session"
+            )
+
+        # Handle signaling message
+        response = await realtime_manager.handle_signaling(
+            signal.session_id,
+            {
+                "type": signal.type,
+                "sdp": signal.sdp,
+                "candidate": signal.candidate
+            }
+        )
+
+        return response
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error handling signaling: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.get("/test-realtime", response_class=HTMLResponse)
+async def test_realtime_page():
+    """Test endpoint for OpenAI Realtime API"""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>OpenAI Realtime API Test</title>
+        <style>
+            .container { margin: 20px; }
+            #status, #log { margin: 10px 0; }
+            #log { 
+                height: 200px; 
+                overflow-y: scroll; 
+                border: 1px solid #ccc; 
+                padding: 10px; 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>OpenAI Realtime API Test</h1>
+            <button id="startBtn">Start Session</button>
+            <button id="stopBtn" disabled>Stop Session</button>
+            <div id="status">Not connected</div>
+            <div id="log"></div>
+        </div>
+
+        <script>
+            let rtcPeerConnection;
+            
+            function log(message) {
+                const logDiv = document.getElementById('log');
+                const timestamp = new Date().toISOString();
+                logDiv.innerHTML += `<div>${timestamp}: ${message}</div>`;
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+
+            async function startSession() {
+                try {
+                    // Get authentication token
+                    const tokenResponse = await fetch('/token', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: 'username=test@example.com&password=testpassword123'
+                    });
+                    const tokenData = await tokenResponse.json();
+                    
+                    // Create realtime session
+                    const sessionResponse = await fetch('/realtime/session?scenario_id=default', {
+                        headers: {
+                            'Authorization': `Bearer ${tokenData.access_token}`
+                        }
+                    });
+                    const sessionData = await sessionResponse.json();
+                    log('Session created successfully');
+
+                    // Initialize WebRTC
+                    rtcPeerConnection = new RTCPeerConnection({
+                        iceServers: sessionData.ice_servers
+                    });
+
+                    // Create and send offer
+                    const offer = await rtcPeerConnection.createOffer({
+                        offerToReceiveAudio: true
+                    });
+                    await rtcPeerConnection.setLocalDescription(offer);
+
+                    const signalResponse = await fetch('/realtime/signal', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${tokenData.access_token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            session_id: sessionData.session_id,
+                            client_secret: sessionData.client_secret,
+                            sdp: offer.sdp
+                        })
+                    });
+                    const answerData = await signalResponse.json();
+                    
+                    // Set remote description
+                    await rtcPeerConnection.setRemoteDescription(
+                        new RTCSessionDescription({
+                            type: 'answer',
+                            sdp: answerData.sdp_answer
+                        })
+                    );
+
+                    document.getElementById('status').textContent = 'Connected';
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                    log('WebRTC connection established');
+
+                } catch (error) {
+                    log(`Error: ${error.message}`);
+                    console.error(error);
+                }
+            }
+
+            function stopSession() {
+                if (rtcPeerConnection) {
+                    rtcPeerConnection.close();
+                    rtcPeerConnection = null;
+                }
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                log('Session stopped');
+            }
+
+            document.getElementById('startBtn').onclick = startSession;
+            document.getElementById('stopBtn').onclick = stopSession;
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+# Add a dictionary to store custom scenarios
+CUSTOM_SCENARIOS: Dict[str, dict] = {}
+
+
+@app.post("/realtime/custom-scenario", response_model=dict)
+async def create_custom_scenario(
+    persona: str = Body(..., min_length=10, max_length=1000),
+    prompt: str = Body(..., min_length=10, max_length=1000),
+    voice_type: str = Body(...),
+    temperature: float = Body(0.7, ge=0.0, le=1.0),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a custom scenario"""
+    try:
+        if voice_type not in VOICES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
+            )
+
+        # Create scenario in same format as SCENARIOS dictionary
+        custom_scenario = {
+            "persona": persona,
+            "prompt": prompt,
+            "voice_config": {
+                "voice": VOICES[voice_type],
+                "temperature": temperature
+            }
+        }
+
+        # Generate unique ID
+        scenario_id = f"custom_{current_user.id}_{int(time.time())}"
+
+        # Store in custom scenarios
+        CUSTOM_SCENARIOS[scenario_id] = custom_scenario
+
+        return {
+            "scenario_id": scenario_id,
+            "message": "Custom scenario created successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating custom scenario: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@app.get("/make-custom-call/{phone_number}/{scenario_id}")
+async def make_custom_call(
+    phone_number: str,
+    scenario_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # Get PUBLIC_URL the same way as the standard endpoint
+        public_url = os.getenv('PUBLIC_URL', '').strip()
+        logger.info(f"Using PUBLIC_URL from environment: {public_url}")
+
+        if scenario_id not in CUSTOM_SCENARIOS:
+            raise HTTPException(
+                status_code=400, detail="Custom scenario not found")
+
+        webhook_url = f"https://{public_url}/incoming-custom-call/{scenario_id}"
+        logger.info(f"Constructed webhook URL: {webhook_url}")
+
+        call = twilio_client.calls.create(
+            to=f"+1{phone_number}",
+            from_=TWILIO_PHONE_NUMBER,
+            url=webhook_url,
+            record=True
+        )
+        return {"message": "Custom call initiated", "call_sid": call.sid}
+    except Exception as e:
+        logger.error(f"Error initiating custom call: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/incoming-custom-call/{scenario_id}", methods=["GET", "POST"], operation_id="handle_custom_incoming_call")
+async def handle_incoming_custom_call(request: Request, scenario_id: str):
+    logger.info(
+        f"Incoming custom call webhook received for scenario: {scenario_id}")
+    try:
+        if scenario_id not in CUSTOM_SCENARIOS:
+            logger.error(f"Custom scenario not found: {scenario_id}")
+            raise HTTPException(
+                status_code=400, detail="Custom scenario not found")
+
+        form_data = await request.form()
+        logger.info(f"Received form data: {form_data}")
+
+        response = VoiceResponse()
+        response.say("Connecting to your custom AI call.")
+        response.pause(length=1)
+
+        host = request.url.hostname
+        ws_url = f"wss://{host}/media-stream-custom/{scenario_id}"
+
+        connect = Connect()
+        connect.stream(url=ws_url)
+        response.append(connect)
+
+        twiml = str(response)
+        logger.info(f"Generated TwiML response: {twiml}")
+
+        return Response(content=twiml, media_type="application/xml")
+    except Exception as e:
+        logger.error(
+            f"Error in handle_incoming_custom_call: {e}", exc_info=True)
+        raise
+
+@app.websocket("/media-stream-custom/{scenario_id}")
+async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
+    logger.info(
+        f"WebSocket connection attempt for custom scenario: {scenario_id}")
+    try:
+        await websocket.accept()
+        logger.info("WebSocket connection accepted")
+
+        if scenario_id not in CUSTOM_SCENARIOS:
+            logger.error(f"Invalid custom scenario: {scenario_id}")
+            await websocket.close(code=4000)
+            return
+
+        selected_scenario = CUSTOM_SCENARIOS[scenario_id]
+        logger.info(f"Using custom scenario: {selected_scenario}")
+
+        # Connect to OpenAI's WebSocket
+        async with websockets.connect(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',  # Updated URL
+            extra_headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "OpenAI-Beta": "realtime=v1"
+            }
+        ) as openai_ws:
+            logger.info("Connected to OpenAI WebSocket")
+
+            # Connection specific state
+            stream_sid = None
+            latest_media_timestamp = 0
+            last_assistant_item = None
+            mark_queue = []
+            response_start_timestamp_twilio = None
+
+            # Initialize session
+            await initialize_session(openai_ws, selected_scenario)
+
+            # Use the same receive_from_twilio and send_to_twilio functions
+            async def receive_from_twilio():
+                nonlocal stream_sid, latest_media_timestamp
+                try:
+                    async for message in websocket.iter_text():
+                        data = json.loads(message)
+                        if data['event'] == 'media' and openai_ws.open:
+                            latest_media_timestamp = int(
+                                data['media']['timestamp'])
+                            audio_append = {
+                                "type": "input_audio_buffer.append",
+                                "audio": data['media']['payload']
+                            }
+                            await openai_ws.send(json.dumps(audio_append))
+                        elif data['event'] == 'start':
+                            stream_sid = data['start']['streamSid']
+                            logger.info(f"Stream started: {stream_sid}")
+                            response_start_timestamp_twilio = None
+                            latest_media_timestamp = 0
+                            last_assistant_item = None
+                        elif data['event'] == 'mark':
+                            if mark_queue:
+                                mark_queue.pop(0)
+                except WebSocketDisconnect:
+                    logger.info("Twilio WebSocket disconnected")
+                    if openai_ws.open:
+                        await openai_ws.close()
+
+            async def send_to_twilio():
+                nonlocal stream_sid, last_assistant_item, response_start_timestamp_twilio
+                try:
+                    async for openai_message in openai_ws:
+                        response = json.loads(openai_message)
+
+                        if response.get('type') == 'error':
+                            logger.error(f"Error from OpenAI: {response}")
+                            continue
+
+                        if response.get('type') == 'response.audio.delta' and 'delta' in response:
+                            audio_payload = base64.b64encode(
+                                base64.b64decode(response['delta'])).decode('utf-8')
+                            audio_delta = {
+                                "event": "media",
+                                "streamSid": stream_sid,
+                                "media": {
+                                    "payload": audio_payload
+                                }
+                            }
+                            await websocket.send_json(audio_delta)
+
+                            if response_start_timestamp_twilio is None:
+                                response_start_timestamp_twilio = latest_media_timestamp
+
+                            if response.get('item_id'):
+                                last_assistant_item = response['item_id']
+
+                            await send_mark(websocket, stream_sid)
+
+                        elif response.get('type') == 'input_audio_buffer.speech_started':
+                            logger.info("Speech started detected")
+                            if last_assistant_item:
+                                logger.info(
+                                    f"Interrupting response: {last_assistant_item}")
+                                await handle_speech_started_event(
+                                    websocket, openai_ws, stream_sid,
+                                    last_assistant_item, response_start_timestamp_twilio,
+                                    latest_media_timestamp, mark_queue
+                                )
+                                last_assistant_item = None
+                                response_start_timestamp_twilio = None
+
+                except Exception as e:
+                    logger.error(
+                        f"Error in send_to_twilio: {e}", exc_info=True)
+
+            # Run both handlers concurrently
+            await asyncio.gather(
+                receive_from_twilio(),
+                send_to_twilio()
+            )
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected normally")
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection: {e}", exc_info=True)
+        await websocket.close(code=1011)
 
 if __name__ == "__main__":
     import uvicorn
