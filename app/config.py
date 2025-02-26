@@ -1,10 +1,12 @@
 import os
 from dotenv import load_dotenv
-from typing import List, Dict
+from pathlib import Path
 from typing import List, Dict
 
-
-load_dotenv()
+# Load from both .env and dev.env
+env_path = Path('.') / 'dev.env'
+load_dotenv(env_path)
+load_dotenv()  # This will load .env as fallback
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:

@@ -59,5 +59,19 @@ class SignalingResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ConversationResponse(BaseModel):
+    id: int
+    call_sid: str
+    phone_number: Optional[str]
+    direction: str
+    scenario: str
+    transcript: Optional[str]
+    created_at: str
+    user_id: Optional[int]
+
+    class Config:
+        orm_mode = True
+
+
 __all__ = ["UserCreate", "UserLogin", "TokenSchema", "TokenData", "RealtimeSessionCreate",
-           "RealtimeSessionResponse", "SignalingMessage", "SignalingResponse"]
+           "RealtimeSessionResponse", "SignalingMessage", "SignalingResponse", "ConversationResponse"]

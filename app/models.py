@@ -1,8 +1,9 @@
 # models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.db import Base
-import datetime
+from datetime import datetime
 
 
 class User(Base):
@@ -24,7 +25,7 @@ class CallSchedule(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     phone_number = Column(String, nullable=False)
     scheduled_time = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
     scenario = Column(String, nullable=False)
 
     # Relationships
@@ -37,10 +38,23 @@ class Token(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     token = Column(String, unique=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="tokens")
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+    
+    id = Column(Integer, primary_key=True)
+    call_sid = Column(String, nullable=False, unique=True)
+    phone_number = Column(String)  # Store anonymized/hashed if needed
+    direction = Column(String, nullable=False)  # 'inbound' or 'outbound'
+    scenario = Column(String, nullable=False)
+    transcript = Column(Text)
+    created_at = Column(DateTime, default=datetime.now())
+    user_id = Column(Integer, ForeignKey('users.id'))
 
 
 __all__ = ["User", "Token", "Base"]

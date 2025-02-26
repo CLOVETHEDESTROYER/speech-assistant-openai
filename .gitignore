@@ -10,3 +10,5 @@ venv/
 # Logs and temporary files
 *.log
 *.db
+venv/
+*.env
