@@ -18,7 +18,7 @@ export const TranscriptViewer: React.FC = () => {
   useEffect(() => {
     const fetchTranscripts = async () => {
       try {
-        const response = await axios.get('/api/transcripts/', {
+        const response = await axios.get('/api/stored-transcripts/', {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('access_token')}`
           }

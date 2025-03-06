@@ -43,7 +43,6 @@ from os import getenv
 from app.services.conversation_service import ConversationService
 from app.services.transcription import TranscriptionService
 from app.services.twilio_intelligence import TwilioIntelligenceService
-from app.routers.transcripts import router as transcripts_router
 from twilio.request_validator import RequestValidator
 import traceback
 import openai
@@ -262,8 +261,7 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 # Include routers
-app.include_router(auth_router)
-app.include_router(transcripts_router, tags=["transcripts"])
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 if not OPENAI_API_KEY:
     raise ValueError(

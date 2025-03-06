@@ -104,7 +104,7 @@ export const TranscriptList: React.FC = () => {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   <Link 
-                    to={`/transcripts/${transcript.transcript_sid}`} 
+                    to={`/stored-transcripts/${transcript.transcript_sid}`} 
                     className="text-indigo-600 hover:text-indigo-900"
                   >
                     View Details
