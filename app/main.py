@@ -422,6 +422,17 @@ async def schedule_call(
 @app.get("/make-call/{phone_number}/{scenario}")
 async def make_call(phone_number: str, scenario: str):
     try:
+        # Get PUBLIC_URL from environment
+        host = os.getenv('PUBLIC_URL', '').strip()
+        logger.info(f"Using PUBLIC_URL from environment: {host}")
+
+        if not host:
+            logger.error("PUBLIC_URL environment variable not set")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Server configuration error"}
+            )
+
         if scenario not in SCENARIOS:
             logger.error(f"Invalid scenario: {scenario}")
             return JSONResponse(
@@ -448,22 +459,13 @@ async def make_call(phone_number: str, scenario: str):
                 content={"error": "Twilio phone number not configured"}
             )
 
-        # Construct the webhook URL with proper protocol
-        host = os.environ.get('PUBLIC_URL')
-        if not host:
-            logger.error("PUBLIC_URL environment variable not set")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Server configuration error"}
-            )
-
         # Ensure the URL has the https:// protocol
         if not host.startswith('http://') and not host.startswith('https://'):
             host = f"https://{host}"
 
         # Use the correct route path that matches the defined endpoint
         webhook_url = f"{host}/incoming-call/{scenario}"
-        logger.info(f"Using webhook URL: {webhook_url}")
+        logger.info(f"Constructed webhook URL: {webhook_url}")
 
         # Create the call using Twilio
         call = get_twilio_client().calls.create(
@@ -509,11 +511,11 @@ async def handle_incoming_call(request: Request, scenario: str):
         logger.info(f"Setting up WebSocket connection at: {ws_url}")
 
         # Add a greeting message
-        response.say(
-            "Connecting you to our AI assistant, please wait a moment.")
+        # response.say(
+        #    "Connecting you to our AI assistant, please wait a moment.")
 
         # Add a pause to allow the server to initialize
-        response.pause(length=0.5)
+        response.pause(length=0.1)
 
         # Set up the stream connection
         connect = Connect()
@@ -747,7 +749,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
                         extra_headers={
                             "Authorization": f"Bearer {OPENAI_API_KEY}",
-                            "Content-Type": "application/json",
+                            "OpenAI-Beta": "realtime=v1"
                         },
                         ping_interval=20,
                         ping_timeout=60,
