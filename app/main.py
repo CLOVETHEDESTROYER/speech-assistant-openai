@@ -508,10 +508,22 @@ async def handle_incoming_call(request: Request, scenario: str):
         ws_url = f"wss://{host}/media-stream/{scenario}"
         logger.info(f"Setting up WebSocket connection at: {ws_url}")
 
-        # Set up the stream connection without initial greeting
+        # Add a greeting message
+        response.say(
+            "Connecting you to our AI assistant, please wait a moment.")
+
+        # Add a pause to allow the server to initialize
+        response.pause(length=0.5)
+
+        # Set up the stream connection
         connect = Connect()
         connect.stream(url=ws_url)
         response.append(connect)
+
+        # Add a Gather verb to keep the connection open
+        gather = Gather(action="/handle-user-input",
+                        method="POST", input="speech", timeout=60)
+        response.append(gather)
 
         twiml = str(response)
         logger.info(f"Generated TwiML response: {twiml}")
@@ -711,7 +723,7 @@ async def send_session_update(openai_ws, scenario):
 async def handle_media_stream(websocket: WebSocket, scenario: str):
     """Handle media stream for Twilio calls."""
     MAX_RECONNECT_ATTEMPTS = 3
-    RECONNECT_DELAY = 1  # seconds
+    RECONNECT_DELAY = 2  # seconds
 
     async with websocket_manager(websocket) as ws:
         try:
@@ -725,17 +737,21 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             selected_scenario = SCENARIOS[scenario]
             logger.info(f"Using scenario: {selected_scenario}")
 
+            # Initialize reconnection counter
             reconnect_attempts = 0
+
+            # Start reconnection loop
             while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
                 try:
                     async with websockets.connect(
                         'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
                         extra_headers={
                             "Authorization": f"Bearer {OPENAI_API_KEY}",
-                            "OpenAI-Beta": "realtime=v1"
+                            "Content-Type": "application/json",
                         },
                         ping_interval=20,
-                        ping_timeout=10
+                        ping_timeout=60,
+                        close_timeout=60
                     ) as openai_ws:
                         logger.info("Connected to OpenAI WebSocket")
 
@@ -744,8 +760,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                             "should_stop": False,
                             "stream_sid": None,
                             "latest_media_timestamp": 0,
-                            "last_assistant_item": None,
-                            "current_transcript": "",
+                            "greeting_sent": False,
                             "reconnecting": False
                         }
 
@@ -753,11 +768,57 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         await initialize_session(openai_ws, selected_scenario)
                         logger.info("Session initialized with OpenAI")
 
+                        # Add a delay before sending the initial greeting
+                        await asyncio.sleep(1.0)
+
+                        # Check if Twilio WebSocket is still connected
+                        try:
+                            await ws.send_text(json.dumps({"status": "connected"}))
+                            logger.info("Twilio WebSocket is still connected")
+                        except Exception as e:
+                            logger.warning(
+                                f"Twilio WebSocket connection closed before sending greeting: {e}")
+                            break
+
+                        # Send initial greeting in a separate task
+                        greeting_task = asyncio.create_task(
+                            send_initial_greeting(openai_ws, selected_scenario))
+
                         # Create tasks for receiving and sending
                         receive_task = asyncio.create_task(
                             receive_from_twilio(ws, openai_ws, shared_state))
                         send_task = asyncio.create_task(
                             send_to_twilio(ws, openai_ws, shared_state))
+
+                        # Define a constant for greeting timeout
+                        GREETING_TIMEOUT = 10  # seconds
+                        greeting_success = False
+
+                        # Wait for greeting to complete first with a longer timeout
+                        try:
+                            greeting_result = await asyncio.wait_for(greeting_task, timeout=GREETING_TIMEOUT)
+                            if greeting_result:
+                                logger.info(
+                                    "Initial greeting sent successfully")
+                                shared_state["greeting_sent"] = True
+                                greeting_success = True
+                            else:
+                                logger.warning(
+                                    "Failed to send initial greeting, but continuing with call")
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"Timeout waiting for initial greeting after {GREETING_TIMEOUT}s, but continuing with call")
+                        except Exception as e:
+                            logger.error(
+                                f"Error sending initial greeting: {str(e)}", exc_info=True)
+
+                        # Check if Twilio WebSocket is still open
+                        try:
+                            await ws.send_text(json.dumps({"status": "processing"}))
+                        except Exception as e:
+                            logger.warning(
+                                f"Twilio WebSocket closed during greeting: {e}")
+                            break
 
                         try:
                             # Wait for both tasks to complete
@@ -954,8 +1015,8 @@ async def initialize_session(openai_ws, scenario):
                     f"{SYSTEM_MESSAGE}\n\n"
                     f"Persona: {scenario['persona']}\n\n"
                     f"Scenario: {scenario['prompt']}\n\n"
-                    "IMPORTANT: Wait for the caller to say hello or greet you first. "
-                    "Then respond naturally in character, introducing yourself as specified in your persona."
+                    "IMPORTANT: Greet the caller immediately when the call connects. "
+                    "Introduce yourself as specified in your persona and ask how you can help."
                 ),
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
@@ -970,6 +1031,75 @@ async def initialize_session(openai_ws, scenario):
     except Exception as e:
         logger.error(f"Error sending session update: {e}")
         raise
+
+
+async def send_initial_greeting(openai_ws, scenario):
+    """Send an initial greeting to trigger the AI's response immediately."""
+    try:
+        # Check if the connection is still open
+        if openai_ws.closed:
+            logger.error(
+                "Cannot send initial greeting: WebSocket connection is closed")
+            return False
+
+        greeting_id = str(uuid.uuid4())
+        logger.info(
+            f"Sending initial greeting to trigger AI response, greeting_id: {greeting_id}")
+
+        # Extract persona name from scenario if available
+        persona_name = "AI Assistant"  # Default name
+        if isinstance(scenario, dict) and "persona" in scenario:
+            # Try to extract the name from the persona description
+            persona_text = scenario["persona"]
+            name_match = re.search(
+                r'^([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)', persona_text)
+            if name_match:
+                persona_name = name_match.group(1)
+
+        # Create a conversation item to trigger the AI's response with a simple greeting
+        conversation_item = {
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "The call has been connected. Please respond with a greeting, introducing yourself as specified in your persona."
+                    }
+                ]
+            }
+        }
+
+        # Send the conversation item with error handling
+        try:
+            await openai_ws.send(json.dumps(conversation_item))
+            logger.info("Initial conversation item sent successfully")
+
+            # Add a small delay to ensure the message is processed
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Failed to send conversation item: {str(e)}")
+            return False
+
+        # Request a response from the AI
+        response_request = {
+            "type": "response.create"
+        }
+
+        try:
+            await openai_ws.send(json.dumps(response_request))
+            logger.info("Response request sent successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send response request: {str(e)}")
+            return False
+
+    except Exception as e:
+        logger.error(
+            f"Error sending initial greeting: {str(e)}", exc_info=True)
+        # Don't raise the exception to allow the call to continue
+        return False
 
 
 async def send_mark(connection, stream_sid):
@@ -1440,10 +1570,22 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
         host = request.url.hostname
         ws_url = f"wss://{host}/media-stream-custom/{scenario_id}"
 
-        # Set up the stream connection without initial greeting
+        # Add a greeting message
+        # response.say(
+        #    "Connecting you to our AI assistant, please wait a moment.")
+
+        # Add a pause to allow the server to initialize
+        response.pause(length=0.1)
+
+        # Set up the stream connection
         connect = Connect()
         connect.stream(url=ws_url)
         response.append(connect)
+
+        # Add a Gather verb to keep the connection open
+        gather = Gather(action="/handle-user-input",
+                        method="POST", input="speech", timeout=60)
+        response.append(gather)
 
         twiml = str(response)
         logger.info(f"Generated TwiML response: {twiml}")
@@ -1458,6 +1600,9 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
 @app.websocket("/media-stream-custom/{scenario_id}")
 async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
     """Handle media stream for custom scenarios."""
+    MAX_RECONNECT_ATTEMPTS = 3
+    RECONNECT_DELAY = 2  # seconds
+
     async with websocket_manager(websocket) as ws:
         try:
             logger.info(
@@ -1490,35 +1635,125 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
 
             logger.info(f"Using custom scenario: {selected_scenario}")
 
-            async with websockets.connect(
-                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
-                extra_headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "OpenAI-Beta": "realtime=v1"
-                }
-            ) as openai_ws:
-                logger.info("Connected to OpenAI WebSocket")
+            # Initialize reconnection counter
+            reconnect_attempts = 0
 
-                # Connection specific state
-                shared_state = {
-                    "should_stop": False,
-                    "stream_sid": None,
-                    "latest_media_timestamp": 0,
-                    "last_assistant_item": None,
-                    "current_transcript": ""
-                }
+            # Start reconnection loop
+            while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                try:
+                    async with websockets.connect(
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                        extra_headers={
+                            "Authorization": f"Bearer {OPENAI_API_KEY}",
+                            "OpenAI-Beta": "realtime=v1"
+                        },
+                        ping_interval=20,
+                        ping_timeout=60,
+                        close_timeout=60
+                    ) as openai_ws:
+                        logger.info("Connected to OpenAI WebSocket")
 
-                # Initialize session
-                await initialize_session(openai_ws, selected_scenario)
+                        # Connection specific state
+                        shared_state = {
+                            "should_stop": False,
+                            "stream_sid": None,
+                            "latest_media_timestamp": 0,
+                            "last_assistant_item": None,
+                            "current_transcript": "",
+                            "greeting_sent": False
+                        }
 
-                # Create tasks for receiving and sending
-                receive_task = asyncio.create_task(
-                    receive_from_twilio(ws, openai_ws, shared_state))
-                send_task = asyncio.create_task(
-                    send_to_twilio(ws, openai_ws, shared_state))
+                        # Initialize session
+                        await initialize_session(openai_ws, selected_scenario)
+                        logger.info("Session initialized with OpenAI")
 
-                # Wait for both tasks to complete
-                await asyncio.gather(receive_task, send_task)
+                        # Add a delay before sending the initial greeting
+                        await asyncio.sleep(1.0)
+
+                        # Check if Twilio WebSocket is still connected
+                        try:
+                            await ws.send_text(json.dumps({"status": "connected"}))
+                            logger.info("Twilio WebSocket is still connected")
+                        except Exception as e:
+                            logger.warning(
+                                f"Twilio WebSocket connection closed before sending greeting: {e}")
+                            break
+
+                        # Send initial greeting in a separate task
+                        greeting_task = asyncio.create_task(
+                            send_initial_greeting(openai_ws, selected_scenario))
+
+                        # Create tasks for receiving and sending
+                        receive_task = asyncio.create_task(
+                            receive_from_twilio(ws, openai_ws, shared_state))
+                        send_task = asyncio.create_task(
+                            send_to_twilio(ws, openai_ws, shared_state))
+
+                        # Define a constant for greeting timeout
+                        GREETING_TIMEOUT = 10  # seconds
+                        greeting_success = False
+
+                        # Wait for greeting to complete first with a longer timeout
+                        try:
+                            greeting_result = await asyncio.wait_for(greeting_task, timeout=GREETING_TIMEOUT)
+                            if greeting_result:
+                                logger.info(
+                                    "Initial greeting sent successfully")
+                                shared_state["greeting_sent"] = True
+                                greeting_success = True
+                            else:
+                                logger.warning(
+                                    "Failed to send initial greeting, but continuing with call")
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"Timeout waiting for initial greeting after {GREETING_TIMEOUT}s, but continuing with call")
+                        except Exception as e:
+                            logger.error(
+                                f"Error sending initial greeting: {str(e)}", exc_info=True)
+
+                        # Check if Twilio WebSocket is still open
+                        try:
+                            await ws.send_text(json.dumps({"status": "processing"}))
+                        except Exception as e:
+                            logger.warning(
+                                f"Twilio WebSocket closed during greeting: {e}")
+                            break
+
+                        try:
+                            # Wait for both tasks to complete
+                            await asyncio.gather(receive_task, send_task)
+                            # If we get here without exception, break the reconnection loop
+                            break
+                        except websockets.exceptions.ConnectionClosed as e:
+                            logger.warning(f"WebSocket connection closed: {e}")
+                            if not shared_state["should_stop"]:
+                                reconnect_attempts += 1
+                                if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                                    logger.info(
+                                        f"Attempting to reconnect... (Attempt {reconnect_attempts})")
+                                    shared_state["reconnecting"] = True
+                                    await asyncio.sleep(RECONNECT_DELAY)
+                                    continue
+                            raise
+                        finally:
+                            # Cancel tasks if they're still running
+                            for task in [receive_task, send_task]:
+                                if not task.done():
+                                    task.cancel()
+                                    try:
+                                        await task
+                                    except asyncio.CancelledError:
+                                        pass
+
+                except websockets.exceptions.WebSocketException as e:
+                    logger.error(f"WebSocket error: {e}")
+                    reconnect_attempts += 1
+                    if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                        logger.info(
+                            f"Attempting to reconnect... (Attempt {reconnect_attempts})")
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        continue
+                    raise
 
         except websockets.exceptions.ConnectionClosed:
             logger.warning("WebSocket connection closed")
@@ -1526,6 +1761,9 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
             logger.error(
                 f"Error in custom media stream: {str(e)}", exc_info=True)
             # WebSocket closure is handled by the context manager
+        finally:
+            # Close the database session
+            db.close()
 
 
 @app.websocket("/ws/{session_id}")
@@ -2559,6 +2797,45 @@ async def delete_custom_scenario(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@app.api_route("/handle-user-input", methods=["GET", "POST"])
+async def handle_user_input(request: Request):
+    """Handle user input from the Gather verb."""
+    try:
+        form_data = await request.form()
+        logger.info(f"Received user input: {form_data}")
+
+        # Create a simple response that continues the call
+        response = VoiceResponse()
+        response.say("Thank you for your input. Continuing the conversation.")
+
+        # Return an empty response to continue the call
+        return Response(content=str(response), media_type="application/xml")
+    except Exception as e:
+        logger.error(f"Error handling user input: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Handle WebSocket connections for general sessions."""
+    async with websocket_manager(websocket) as ws:
+        try:
+            # Your existing WebSocket logic here
+            # Use ws.send_text(), ws.receive_text(), etc. instead of websocket.send_text()
+            pass
+        except Exception as e:
+            logger.error(
+                f"Error in WebSocket session: {str(e)}", exc_info=True)
+            # WebSocket closure is handled by the context manager
+        finally:
+            if db:
+                db.close()
 
 
 if __name__ == "__main__":
