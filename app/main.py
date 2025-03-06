@@ -1333,6 +1333,24 @@ async def make_custom_call(
                 content={"error": "Server configuration error"}
             )
 
+        # Check if phone number is valid
+        if not re.match(r'^\d{10}$', phone_number):
+            logger.error(f"Invalid phone number format: {phone_number}")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Invalid phone number format. Please provide a 10-digit number."}
+            )
+
+        # Get Twilio phone number from environment
+        twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')
+        if not twilio_phone:
+            logger.error("TWILIO_PHONE_NUMBER not set")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Twilio phone number not configured"}
+            )
+
         # Check if scenario exists in database
         db_scenario = db.query(CustomScenario).filter(
             CustomScenario.scenario_id == scenario_id,
@@ -1356,7 +1374,7 @@ async def make_custom_call(
 
         call = get_twilio_client().calls.create(
             to=f"+1{phone_number}",
-            from_=get_twilio_client().phone_number,
+            from_=twilio_phone,
             url=webhook_url,
             record=True
         )
