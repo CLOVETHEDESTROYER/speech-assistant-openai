@@ -505,17 +505,12 @@ async def handle_incoming_call(request: Request, scenario: str):
         selected_scenario = SCENARIOS[scenario]
         response = VoiceResponse()
 
-        # Use the scenario's persona for the initial greeting
-        initial_message = f"Hello! I'm {selected_scenario['persona'].split(',')[0].replace('You are ', '')}."
-        response.say(initial_message)
-        response.pause(length=0.5)
-
         # Get the hostname for WebSocket connection
         host = request.url.hostname
         ws_url = f"wss://{host}/media-stream/{scenario}"
         logger.info(f"Setting up WebSocket connection at: {ws_url}")
 
-        # Set up the stream connection
+        # Set up the stream connection without initial greeting
         connect = Connect()
         connect.stream(url=ws_url)
         response.append(connect)
@@ -559,10 +554,32 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
             elif data.get("event") == "start":
                 shared_state["stream_sid"] = data.get("streamSid")
                 logger.info(f"Stream started: {shared_state['stream_sid']}")
+
+                # Initialize session with turn detection for "hello"
+                await openai_ws.send(json.dumps({
+                    "type": "session.update",
+                    "session": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.2,
+                            "prefix_padding_ms": 200,
+                            "silence_duration_ms": 700
+                        }
+                    }
+                }))
             elif data.get("event") == "stop":
                 logger.info("Stream stopped")
                 shared_state["should_stop"] = True
                 break
+            elif data.get("event") == "speech_started":
+                logger.info("Speech started - waiting for transcription")
+            elif data.get("event") == "transcription" and not shared_state.get("greeting_sent"):
+                transcript = data.get("transcript", "").lower()
+                if "hello" in transcript or "hi" in transcript or "hey" in transcript:
+                    logger.info(
+                        "Detected greeting from caller, triggering agent response")
+                    shared_state["greeting_sent"] = True
+                    # The agent's response will be handled by the existing WebSocket connection
 
     except websockets.exceptions.ConnectionClosed:
         logger.warning("Twilio WebSocket connection closed")
@@ -935,7 +952,13 @@ async def initialize_session(openai_ws, scenario):
                 },
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
-                "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
+                "instructions": (
+                    f"{SYSTEM_MESSAGE}\n\n"
+                    f"Persona: {scenario['persona']}\n\n"
+                    f"Scenario: {scenario['prompt']}\n\n"
+                    "IMPORTANT: Wait for the caller to say hello or greet you first. "
+                    "Then respond naturally in character, introducing yourself as specified in your persona."
+                ),
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
                 "temperature": scenario["voice_config"].get("temperature", 0.8)
@@ -1415,12 +1438,11 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
         logger.info(f"Received form data: {form_data}")
 
         response = VoiceResponse()
-        response.say("Connecting to your custom AI call.")
-        response.pause(length=1)
 
         host = request.url.hostname
         ws_url = f"wss://{host}/media-stream-custom/{scenario_id}"
 
+        # Set up the stream connection without initial greeting
         connect = Connect()
         connect.stream(url=ws_url)
         response.append(connect)
@@ -1432,6 +1454,7 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
     except Exception as e:
         logger.error(
             f"Error in handle_incoming_custom_call: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.websocket("/media-stream-custom/{scenario_id}")
