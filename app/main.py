@@ -410,7 +410,9 @@ class CallScheduleRead(CallScheduleCreate):
 
 
 @app.post("/schedule-call", response_model=CallScheduleRead)
+@rate_limit("3/minute")
 async def schedule_call(
+    request: Request,
     call: CallScheduleCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -433,7 +435,12 @@ async def schedule_call(
 
 
 @app.get("/make-call/{phone_number}/{scenario}")
-async def make_call(phone_number: str, scenario: str):
+@rate_limit("2/minute")
+async def make_call(
+    request: Request,
+    phone_number: str,
+    scenario: str
+):
     try:
         # Get PUBLIC_URL from environment
         host = os.getenv('PUBLIC_URL', '').strip()
@@ -1603,7 +1610,9 @@ async def create_custom_scenario(
 
 
 @app.get("/make-custom-call/{phone_number}/{scenario_id}")
+@rate_limit("2/minute")
 async def make_custom_call(
+    request: Request,
     phone_number: str,
     scenario_id: str,
     current_user: User = Depends(get_current_user),
