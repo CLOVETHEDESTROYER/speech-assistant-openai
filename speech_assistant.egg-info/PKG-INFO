@@ -1,0 +1,13 @@
+Metadata-Version: 2.2
+Name: speech-assistant
+Version: 0.1.0
+Requires-Dist: fastapi
+Requires-Dist: sqlalchemy
+Requires-Dist: pydantic
+Requires-Dist: python-jose
+Requires-Dist: passlib
+Requires-Dist: python-dotenv
+Requires-Dist: twilio
+Requires-Dist: openai
+Requires-Dist: websockets
+Dynamic: requires-dist

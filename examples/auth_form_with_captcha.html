@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Assistant - Auth Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .container {
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .form-container {
+            width: 48%;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        h2 {
+            margin-bottom: 20px;
+            color: #3498db;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        .error {
+            color: #e74c3c;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .success {
+            color: #27ae60;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .captcha-container {
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .response-display {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+        }
+    </style>
+    <!-- Include the reCAPTCHA script -->
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</head>
+<body>
+    <h1>Speech Assistant API - Authentication Example</h1>
+    
+    <div class="container">
+        <!-- Registration Form -->
+        <div class="form-container">
+            <h2>Register</h2>
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="register-email">Email</label>
+                    <input type="email" id="register-email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" name="password" required>
+                </div>
+                
+                <!-- reCAPTCHA widget will be rendered here -->
+                <div class="captcha-container">
+                    <div class="g-recaptcha" data-sitekey="SITE_KEY_PLACEHOLDER"></div>
+                </div>
+                
+                <div class="error" id="register-error"></div>
+                <div class="success" id="register-success"></div>
+                
+                <button type="submit">Register</button>
+            </form>
+            
+            <div class="response-display">
+                <h4>Response:</h4>
+                <pre id="register-response"></pre>
+            </div>
+        </div>
+        
+        <!-- Login Form -->
+        <div class="form-container">
+            <h2>Login</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" name="email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" name="password" required>
+                </div>
+                
+                <!-- reCAPTCHA widget will be rendered here -->
+                <div class="captcha-container">
+                    <div class="g-recaptcha" data-sitekey="SITE_KEY_PLACEHOLDER"></div>
+                </div>
+                
+                <div class="error" id="login-error"></div>
+                <div class="success" id="login-success"></div>
+                
+                <button type="submit">Login</button>
+            </form>
+            
+            <div class="response-display">
+                <h4>Response:</h4>
+                <pre id="login-response"></pre>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Fetch the reCAPTCHA site key from the API
+        async function fetchCaptchaKey() {
+            try {
+                const response = await fetch('/auth/captcha-key');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch CAPTCHA key');
+                }
+                const data = await response.json();
+                return data.site_key;
+            } catch (error) {
+                console.error('Error fetching CAPTCHA key:', error);
+                return null;
+            }
+        }
+        
+        // Update the reCAPTCHA widgets with the site key
+        async function updateCaptchaWidgets() {
+            const siteKey = await fetchCaptchaKey();
+            if (siteKey) {
+                document.querySelectorAll('.g-recaptcha').forEach(widget => {
+                    widget.setAttribute('data-sitekey', siteKey);
+                });
+            } else {
+                document.querySelectorAll('.g-recaptcha').forEach(widget => {
+                    widget.innerHTML = '<p class="error">Could not load CAPTCHA. Please refresh the page.</p>';
+                });
+            }
+        }
+        
+        // Handle registration form submission
+        document.getElementById('register-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const errorElement = document.getElementById('register-error');
+            const successElement = document.getElementById('register-success');
+            const responseElement = document.getElementById('register-response');
+            
+            errorElement.textContent = '';
+            successElement.textContent = '';
+            responseElement.textContent = '';
+            
+            // Get form data
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const captchaResponse = grecaptcha.getResponse(0); // First reCAPTCHA on the page
+            
+            if (!captchaResponse) {
+                errorElement.textContent = 'Please complete the CAPTCHA verification.';
+                return;
+            }
+            
+            // Prepare request payload
+            const payload = {
+                email: email,
+                password: password
+            };
+            
+            try {
+                // Send registration request
+                const response = await fetch('/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload),
+                    // The captcha_response is sent via URL parameter
+                    // This is required due to how the FastAPI dependency is set up
+                    // to expect the captcha_response from Form()
+                    credentials: 'include'
+                });
+                
+                // Add captcha response as URL parameter
+                const url = new URL(response.url);
+                url.searchParams.append('captcha_response', captchaResponse);
+                
+                // Create a new request with the updated URL
+                const request = new Request(url.toString(), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload),
+                    credentials: 'include'
+                });
+                
+                // Make the request
+                const finalResponse = await fetch(request);
+                const data = await finalResponse.json();
+                
+                // Display the response
+                responseElement.textContent = JSON.stringify(data, null, 2);
+                
+                if (finalResponse.ok) {
+                    successElement.textContent = 'Registration successful!';
+                    // Store the tokens
+                    localStorage.setItem('access_token', data.access_token);
+                    localStorage.setItem('refresh_token', data.refresh_token);
+                } else {
+                    errorElement.textContent = data.detail || 'Registration failed.';
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                errorElement.textContent = 'An error occurred during registration.';
+            }
+            
+            // Reset the CAPTCHA
+            grecaptcha.reset(0);
+        });
+        
+        // Handle login form submission
+        document.getElementById('login-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            
+            const errorElement = document.getElementById('login-error');
+            const successElement = document.getElementById('login-success');
+            const responseElement = document.getElementById('login-response');
+            
+            errorElement.textContent = '';
+            successElement.textContent = '';
+            responseElement.textContent = '';
+            
+            // Get form data
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const captchaResponse = grecaptcha.getResponse(1); // Second reCAPTCHA on the page
+            
+            if (!captchaResponse) {
+                errorElement.textContent = 'Please complete the CAPTCHA verification.';
+                return;
+            }
+            
+            // Create form data for OAuth2 password flow
+            const formData = new FormData();
+            formData.append('username', email);
+            formData.append('password', password);
+            formData.append('captcha_response', captchaResponse);
+            
+            try {
+                // Send login request
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                // Display the response
+                responseElement.textContent = JSON.stringify(data, null, 2);
+                
+                if (response.ok) {
+                    successElement.textContent = 'Login successful!';
+                    // Store the tokens
+                    localStorage.setItem('access_token', data.access_token);
+                    localStorage.setItem('refresh_token', data.refresh_token);
+                } else {
+                    errorElement.textContent = data.detail || 'Login failed.';
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                errorElement.textContent = 'An error occurred during login.';
+            }
+            
+            // Reset the CAPTCHA
+            grecaptcha.reset(1);
+        });
+        
+        // Initialize the page
+        updateCaptchaWidgets();
+    </script>
+</body>
+</html> 
