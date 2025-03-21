@@ -463,8 +463,8 @@ async def make_call(phone_number: str, scenario: str):
         if not host.startswith('http://') and not host.startswith('https://'):
             host = f"https://{host}"
 
-        # Use the correct route path that matches the defined endpoint
-        webhook_url = f"{host}/incoming-call/{scenario}"
+        # Use a different endpoint for outgoing calls
+        webhook_url = f"{host}/outgoing-call/{scenario}"
         logger.info(f"Constructed webhook URL: {webhook_url}")
 
         # Create the call using Twilio
@@ -490,6 +490,46 @@ async def make_call(phone_number: str, scenario: str):
             status_code=500,
             content={"error": f"Server error: {str(e)}"}
         )
+
+# Add a new endpoint for outgoing calls
+
+
+@app.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
+async def handle_outgoing_call(request: Request, scenario: str):
+    logger.info(f"Outgoing call webhook received for scenario: {scenario}")
+    try:
+        if scenario not in SCENARIOS:
+            logger.error(f"Invalid scenario: {scenario}")
+            raise HTTPException(status_code=400, detail="Invalid scenario")
+
+        selected_scenario = SCENARIOS[scenario]
+        response = VoiceResponse()
+
+        # Get the hostname for WebSocket connection
+        host = request.url.hostname
+        ws_url = f"wss://{host}/media-stream/{scenario}"
+        logger.info(f"Setting up WebSocket connection at: {ws_url}")
+
+        # Add a brief pause to allow the server to initialize
+        response.pause(length=0.1)
+
+        # Set up the stream connection
+        connect = Connect()
+        connect.stream(url=ws_url)
+        response.append(connect)
+
+        # Add a Gather verb to keep the connection open
+        gather = Gather(action="/handle-user-input",
+                        method="POST", input="speech", timeout=60)
+        response.append(gather)
+
+        twiml = str(response)
+        logger.info(f"Generated TwiML response: {twiml}")
+
+        return Response(content=twiml, media_type="application/xml")
+    except Exception as e:
+        logger.error(f"Error in handle_outgoing_call: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Webhook Endpoint for Incoming Calls
 
@@ -575,7 +615,7 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                             "type": "server_vad",
                             "threshold": 0.2,
                             "prefix_padding_ms": 200,
-                            "silence_duration_ms": 700
+                            "silence_duration_ms": 500
                         }
                     }
                 }))
@@ -739,6 +779,10 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             selected_scenario = SCENARIOS[scenario]
             logger.info(f"Using scenario: {selected_scenario}")
 
+            # Get the request path to determine if this is an outgoing call
+            request_path = websocket.url.path
+            is_incoming = not request_path.startswith("/outgoing-call")
+
             # Initialize reconnection counter
             reconnect_attempts = 0
 
@@ -767,11 +811,11 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         }
 
                         # Initialize session with the selected scenario
-                        await initialize_session(openai_ws, selected_scenario)
+                        await initialize_session(openai_ws, selected_scenario, is_incoming=is_incoming)
                         logger.info("Session initialized with OpenAI")
 
                         # Add a delay before sending the initial greeting
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(.1)
 
                         # Check if Twilio WebSocket is still connected
                         try:
@@ -881,32 +925,108 @@ def initiate_scheduled_calls():
             now = datetime.datetime.utcnow()
             calls = db_local.query(CallSchedule).filter(
                 CallSchedule.scheduled_time <= now).all()
+
+            if calls:
+                logger.info(f"Found {len(calls)} scheduled calls to process")
+
             for call in calls:
                 try:
-                    # Clean the URL first
-                    public_url = os.getenv('PUBLIC_URL', '').strip()
-                    public_url = public_url.replace(
-                        'https://', '').replace('http://', '')
+                    # Get PUBLIC_URL from environment
+                    host = os.getenv('PUBLIC_URL', '').strip()
+                    logger.info(f"Using PUBLIC_URL from environment: {host}")
 
-                    # Construct the webhook URL
-                    incoming_call_url = f"https://{
-                        public_url}/incoming-call/{call.scenario}"
+                    if not host:
+                        logger.error("PUBLIC_URL environment variable not set")
+                        # Delete the record if environment is not properly configured
+                        db_local.delete(call)
+                        db_local.commit()
+                        logger.info(
+                            f"Deleted call schedule {call.id} due to missing PUBLIC_URL")
+                        continue
 
-                    get_twilio_client().calls.create(
-                        url=incoming_call_url,
-                        to=call.phone_number,
-                        from_=get_twilio_client().phone_number
-                    )
+                    # Clean and validate phone number
+                    clean_number = call.phone_number.replace('+1', '').strip()
+                    if not re.match(r'^\d{10}$', clean_number):
+                        logger.error(
+                            f"Invalid phone number format: {call.phone_number}")
+                        # Delete invalid phone number records
+                        db_local.delete(call)
+                        db_local.commit()
+                        logger.info(
+                            f"Deleted call schedule {call.id} due to invalid phone number format")
+                        continue
+
+                    # Get Twilio phone number from environment
+                    twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')
+                    if not twilio_phone:
+                        logger.error("TWILIO_PHONE_NUMBER not set")
+                        # Delete the record if environment is not properly configured
+                        db_local.delete(call)
+                        db_local.commit()
+                        logger.info(
+                            f"Deleted call schedule {call.id} due to missing TWILIO_PHONE_NUMBER")
+                        continue
+
+                    # Ensure the URL has the https:// protocol
+                    if not host.startswith('http://') and not host.startswith('https://'):
+                        host = f"https://{host}"
+
+                    # Construct the webhook URL for outgoing calls
+                    webhook_url = f"{host}/outgoing-call/{call.scenario}"
                     logger.info(
-                        f"Scheduled call initiated to {call.phone_number} with ID: {call.id}")
-                    db_local.delete(call)
+                        f"Processing scheduled call ID {call.id} to {clean_number}")
+                    logger.info(f"Using webhook URL: {webhook_url}")
+
+                    try:
+                        # Create the call using Twilio
+                        twilio_call = get_twilio_client().calls.create(
+                            url=webhook_url,
+                            to=f"+1{clean_number}",
+                            from_=twilio_phone,
+                            record=True
+                        )
+
+                        logger.info(
+                            f"Scheduled call initiated successfully - Call SID: {twilio_call.sid}")
+
+                        # Only delete the schedule if the call was created successfully
+                        db_local.delete(call)
+                        db_local.commit()
+                        logger.info(
+                            f"Removed completed schedule for call ID: {call.id}")
+
+                    except TwilioRestException as e:
+                        if "not valid" in str(e).lower():
+                            # If Twilio says the number is invalid, delete the record
+                            logger.error(
+                                f"Invalid phone number confirmed by Twilio for call ID {call.id}: {str(e)}")
+                            db_local.delete(call)
+                            db_local.commit()
+                            logger.info(
+                                f"Deleted call schedule {call.id} due to Twilio phone number validation")
+                        else:
+                            # For other Twilio errors, log but keep the record
+                            logger.error(
+                                f"Twilio error for call ID {call.id}: {str(e)}")
+
                 except Exception as e:
-                    logger.error(f"Failed to initiate scheduled call: {e}")
+                    logger.error(
+                        f"Failed to initiate scheduled call ID {call.id}: {str(e)}", exc_info=True)
+
+            # Commit any remaining changes
             db_local.commit()
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Database error in initiate_scheduled_calls: {str(e)}", exc_info=True)
+            if db_local.is_active:
+                db_local.rollback()
         except Exception as e:
-            logger.error(f"Error in initiate_scheduled_calls: {e}")
+            logger.error(
+                f"Error in initiate_scheduled_calls: {str(e)}", exc_info=True)
         finally:
             db_local.close()
+
+        # Wait for 60 seconds before checking again
         time.sleep(60)
 
 
@@ -993,7 +1113,7 @@ async def incoming_call(request: Request, scenario: str):
     return Response(content=str(response), media_type="application/xml")
 
 
-async def initialize_session(openai_ws, scenario):
+async def initialize_session(openai_ws, scenario, is_incoming=True):
     """Initialize session with OpenAI."""
     try:
         # If scenario is a string, get the scenario data from SCENARIOS
@@ -1009,7 +1129,7 @@ async def initialize_session(openai_ws, scenario):
                     "type": "server_vad",
                     "threshold": 0.2,
                     "prefix_padding_ms": 200,
-                    "silence_duration_ms": 700
+                    "silence_duration_ms": 500
                 },
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
@@ -1017,8 +1137,10 @@ async def initialize_session(openai_ws, scenario):
                     f"{SYSTEM_MESSAGE}\n\n"
                     f"Persona: {scenario['persona']}\n\n"
                     f"Scenario: {scenario['prompt']}\n\n"
-                    "IMPORTANT: Greet the caller immediately when the call connects. "
-                    "Introduce yourself as specified in your persona and ask how you can help."
+                    + ("IMPORTANT: Greet the caller immediately when the call connects. "
+                       "Introduce yourself as specified in your persona and ask how you can help."
+                       if is_incoming else
+                       "IMPORTANT: Follow the scenario prompt exactly. Do not ask how you can help.")
                 ),
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
@@ -1079,7 +1201,7 @@ async def send_initial_greeting(openai_ws, scenario):
             logger.info("Initial conversation item sent successfully")
 
             # Add a small delay to ensure the message is processed
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)
         except Exception as e:
             logger.error(f"Failed to send conversation item: {str(e)}")
             return False
@@ -1177,7 +1299,7 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
 
         # Optional: Small pause before accepting new input
         # Reduced from 0.5 for faster response
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.1)
 
     except Exception as e:
         logger.error(
@@ -1398,8 +1520,8 @@ CUSTOM_SCENARIOS: Dict[str, dict] = {}
 
 @app.post("/realtime/custom-scenario", response_model=dict)
 async def create_custom_scenario(
-    persona: str = Body(..., min_length=10, max_length=1000),
-    prompt: str = Body(..., min_length=10, max_length=1000),
+    persona: str = Body(..., min_length=10, max_length=5000),
+    prompt: str = Body(..., min_length=10, max_length=5000),
     voice_type: str = Body(...),
     temperature: float = Body(0.7, ge=0.0, le=1.0),
     current_user: User = Depends(get_current_user),
@@ -1666,11 +1788,11 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
                         }
 
                         # Initialize session
-                        await initialize_session(openai_ws, selected_scenario)
+                        await initialize_session(openai_ws, selected_scenario, is_incoming=True)
                         logger.info("Session initialized with OpenAI")
 
                         # Add a delay before sending the initial greeting
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(0.1)
 
                         # Check if Twilio WebSocket is still connected
                         try:
@@ -2694,11 +2816,11 @@ async def get_custom_scenario(
         )
 
 
-@app.put("/realtime/custom-scenario/{scenario_id}", response_model=dict)
+@app.put("/realtime/custom-scenario/{scenario_id}")
 async def update_custom_scenario(
     scenario_id: str,
-    persona: str = Body(..., min_length=10, max_length=1000),
-    prompt: str = Body(..., min_length=10, max_length=1000),
+    persona: str = Body(..., min_length=10, max_length=5000),
+    prompt: str = Body(..., min_length=10, max_length=5000),
     voice_type: str = Body(...),
     temperature: float = Body(0.7, ge=0.0, le=1.0),
     current_user: User = Depends(get_current_user),
