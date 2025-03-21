@@ -9,7 +9,7 @@ import tempfile
 import io
 import requests
 import re
-from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query
+from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query, BackgroundTasks, File, Form, Path, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocketDisconnect
@@ -62,6 +62,11 @@ from app.utils.twilio_helpers import (
     TwilioRateLimitError
 )
 from app.utils.websocket import websocket_manager
+from fastapi.middleware.cors import CORSMiddleware
+from app.limiter import limiter, rate_limit
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -257,6 +262,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add rate limiting middleware
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 # Create database tables (do this only once)
 Base.metadata.create_all(bind=engine)
 
@@ -320,7 +330,9 @@ async def validate_twilio_connection():
 
 
 @app.post("/token", response_model=TokenResponse)
+@rate_limit("5/minute")
 async def login_for_access_token(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -348,7 +360,8 @@ async def login_for_access_token(
 
 
 @app.get("/protected")
-def protected_route(current_user: User = Depends(get_current_user)):
+@rate_limit("5/minute")
+def protected_route(request: Request, current_user: User = Depends(get_current_user)):
     return {"message": f"Hello, {current_user.email}"}
 
 

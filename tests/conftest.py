@@ -74,10 +74,14 @@ def client(db_session):
 @pytest.fixture(scope="function")
 def auth_headers(client, test_user):
     """Creates authentication headers for test user."""
+    # Reset limiter to avoid rate limits during testing
+    from app.limiter import limiter
+    limiter.reset()
+
     response = client.post(
         "/auth/login",
-        json={
-            "email": test_user.email,
+        data={
+            "username": test_user.email,
             "password": "testpassword123"
         }
     )
