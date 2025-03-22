@@ -31,8 +31,13 @@ The following endpoints have rate limits applied:
 | Endpoint                                    | Rate Limit | Reason                                       |
 | ------------------------------------------- | ---------- | -------------------------------------------- |
 | `/token`                                    | 5/minute   | Prevents brute force authentication attempts |
+| `/auth/register`                            | 5/minute   | Prevents automated account creation          |
+| `/auth/login`                               | 5/minute   | Prevents brute force authentication attempts |
+| `/auth/refresh`                             | 10/minute  | Prevents token farming                       |
+| `/protected`                                | 5/minute   | Prevents excessive API usage                 |
 | `/schedule-call`                            | 3/minute   | Prevents abuse of call scheduling service    |
 | `/make-call/{phone}/{scenario}`             | 2/minute   | Limits outgoing calls, which cost money      |
+| `/make-custom-call/{phone}/{scenario_id}`   | 2/minute   | Limits outgoing calls, which cost money      |
 | `/realtime/session`                         | 5/minute   | Prevents excessive resource consumption      |
 | `/realtime/custom-scenario`                 | 10/minute  | Prevents database spam of custom scenarios   |
 | `/twilio-transcripts/create-with-media-url` | 10/minute  | Limits expensive transcription API calls     |
@@ -83,7 +88,7 @@ In production environments with multiple API instances, consider:
 
 ## Customizing Rate Limits
 
-If you're hosting your own instance of the API, you can customize rate limits by modifying the `@limiter.limit()` decorators in `app/main.py`.
+If you're hosting your own instance of the API, you can customize rate limits by modifying the `@rate_limit()` decorators in the codebase.
 
 ## Rate Limit Exemptions
 

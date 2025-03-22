@@ -158,5 +158,37 @@ def test_rate_limit_headers(client, test_user):
 
 def test_make_custom_call_rate_limit(client, auth_headers, mocker, db_session, test_user):
     """Test that the make-custom-call endpoint enforces rate limits of 2/minute."""
-    # Skip this test due to complications with mocking TwilioRestException
-    pytest.skip("Test skipped due to issues with mocking TwilioRestException")
+    # Mock necessary components and setup test data
+    mocker.patch(
+        "app.services.twilio_client.get_twilio_client",
+        return_value=mocker.MagicMock(
+            calls=mocker.MagicMock(
+                create=mocker.MagicMock(
+                    return_value=mocker.MagicMock(sid="test_call_sid")
+                )
+            )
+        )
+    )
+
+    # Mock environment variables
+    mocker.patch.dict("os.environ", {
+        "PUBLIC_URL": "https://example.com",
+        "TWILIO_PHONE_NUMBER": "+15551234567"
+    })
+
+    # Reset limiter for this test
+    limiter.reset()
+
+    # We will use a consistent endpoint URL with a non-existent scenario ID
+    # The endpoint will return 400, but the rate limit will still be applied
+    endpoint = "/make-custom-call/1234567890/nonexistent-scenario"
+
+    # Make first requests that should count against the rate limit
+    # Even though they return 400, they still count for rate limiting
+    client.get(endpoint, headers=auth_headers)
+    client.get(endpoint, headers=auth_headers)
+
+    # The 3rd request should be rate limited with 429, regardless of the endpoint logic
+    rate_limited_response = client.get(endpoint, headers=auth_headers)
+    assert rate_limited_response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Rate limit exceeded" in rate_limited_response.text

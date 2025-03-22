@@ -12,3 +12,7 @@ venv/
 *.db
 venv/
 *.env
+
+# Logs directory
+logs/
+*.log.*

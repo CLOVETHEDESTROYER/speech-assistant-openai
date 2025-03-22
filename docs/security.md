@@ -78,6 +78,23 @@ For detailed rate limit configuration, see [Rate Limiting](rate_limiting.md).
 - Only trusted origins are allowed to access the API
 - Preflight requests are handled correctly
 
+### Security Headers
+
+The API implements the following security headers to protect against various attacks:
+
+- **Content-Security-Policy (CSP)**: Restricts the sources from which resources can be loaded, preventing XSS attacks.
+- **X-XSS-Protection**: Enables browser's built-in XSS filtering.
+- **X-Content-Type-Options**: Prevents MIME type sniffing attacks by forcing browsers to respect the declared content type.
+- **X-Frame-Options**: Prevents clickjacking attacks by controlling whether a page can be embedded in iframes.
+- **Strict-Transport-Security (HSTS)**: Forces browsers to use HTTPS for all future connections to the site.
+- **Permissions-Policy**: Restricts which browser features can be used by the application.
+- **Referrer-Policy**: Controls how much referrer information is included with requests.
+- **Cache-Control**: Prevents storing sensitive information in browser caches.
+
+These headers are configurable via environment variables and can be enabled or disabled as needed.
+
+For detailed security header configuration, see [Security Headers](security_headers.md).
+
 ## Recommendations for Clients
 
 1. **Token Storage**: Store access tokens securely, preferably in HTTP-only cookies or secure local storage

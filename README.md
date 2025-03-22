@@ -73,18 +73,20 @@ This application provides a complete solution for creating realistic voice assis
 
 | Endpoint            | Method | Description               | Rate Limit | CAPTCHA |
 | ------------------- | ------ | ------------------------- | ---------- | ------- |
-| `/auth/register`    | POST   | Register a new user       | None       | Yes     |
-| `/auth/login`       | POST   | Login and get tokens      | None       | Yes     |
-| `/auth/refresh`     | POST   | Refresh access token      | None       | No      |
+| `/auth/register`    | POST   | Register a new user       | 5/minute   | Yes     |
+| `/auth/login`       | POST   | Login and get tokens      | 5/minute   | Yes     |
+| `/auth/refresh`     | POST   | Refresh access token      | 10/minute  | No      |
 | `/token`            | POST   | Get access token (OAuth2) | 5/minute   | No      |
 | `/auth/captcha-key` | GET    | Get reCAPTCHA site key    | None       | No      |
 
 ### Call Management
 
-| Endpoint                        | Method | Description            | Rate Limit |
-| ------------------------------- | ------ | ---------------------- | ---------- |
-| `/schedule-call`                | POST   | Schedule a future call | 3/minute   |
-| `/make-call/{phone}/{scenario}` | GET    | Make an immediate call | 2/minute   |
+| Endpoint                         | Method | Description                    | Rate Limit |
+| -------------------------------- | ------ | ------------------------------ | ---------- |
+| `/schedule-call`                 | POST   | Schedule a future call         | 3/minute   |
+| `/make-call/{phone}/{scenario}`  | GET    | Make an immediate call         | 2/minute   |
+| `/make-custom-call/{phone}/{id}` | GET    | Make call with custom scenario | 2/minute   |
+| `/protected`                     | GET    | Example protected route        | 5/minute   |
 
 ### Real-time Sessions
 
@@ -111,35 +113,6 @@ This application provides a complete solution for creating realistic voice assis
 | `/twilio-transcripts/{id}`                  | GET    | Get a specific transcript  | None       |
 | `/twilio-transcripts`                       | GET    | List all transcripts       | None       |
 | `/twilio-transcripts/{id}`                  | DELETE | Delete a transcript        | None       |
-
-## Rate Limiting
-
-The API implements rate limiting to prevent abuse and ensure fair usage. Rate limits are specified as requests per time period (e.g., "30/minute").
-
-Key endpoints are protected with the following rate limits:
-
-- Authentication: 5 requests per minute
-- User info: 20 requests per minute
-- Call scheduling: 3 requests per minute
-- Immediate calls: 2 requests per minute
-- Real-time sessions: 5 requests per minute
-- WebRTC signaling: 30 requests per minute
-- Custom scenario creation: 10 requests per minute
-- Custom scenario retrieval: 30 requests per minute
-- Custom scenario modification: 15 requests per minute
-- Transcript creation: 10 requests per minute
-- Transcript retrieval: 20 requests per minute
-
-Rate limit responses include the following headers:
-
-- `X-RateLimit-Limit`: Maximum requests allowed in the time window
-- `X-RateLimit-Remaining`: Number of requests remaining in the current window
-- `X-RateLimit-Reset`: Seconds until the rate limit resets
-
-When a rate limit is exceeded, the API responds with:
-
-- Status code: 429 Too Many Requests
-- Response body: `{"detail": "Rate limit exceeded: 10 per 1 minute"}`
 
 ## Deployment
 
@@ -174,42 +147,43 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Security Features
 
+The API implements several security features to protect against unauthorized access and abuse:
+
 ### Rate Limiting
 
-The API includes rate limiting to prevent abuse and ensure fair usage. Rate limits are specified as requests per time period (e.g., "30/minute").
-
-Key endpoints are protected with the following rate limits:
+Rate limiting is implemented on sensitive endpoints to prevent abuse:
 
 - Authentication: 5 requests per minute
-- User info: 20 requests per minute
 - Call scheduling: 3 requests per minute
 - Immediate calls: 2 requests per minute
 - Real-time sessions: 5 requests per minute
-- WebRTC signaling: 30 requests per minute
 - Custom scenario creation: 10 requests per minute
-- Custom scenario retrieval: 30 requests per minute
-- Custom scenario modification: 15 requests per minute
 - Transcript creation: 10 requests per minute
-- Transcript retrieval: 20 requests per minute
 
-Rate limit responses include the following headers:
+For detailed rate limit configuration, see [Rate Limiting](docs/rate_limiting.md).
 
-- `X-RateLimit-Limit`: Maximum requests allowed in the time window
-- `X-RateLimit-Remaining`: Number of requests remaining in the current window
-- `X-RateLimit-Reset`: Seconds until the rate limit resets
+### Logging and Monitoring
 
-When a rate limit is exceeded, the API responds with:
+The API includes a comprehensive logging system with the following features:
 
-- Status code: 429 Too Many Requests
-- Response body: `{"detail": "Rate limit exceeded: 10 per 1 minute"}`
+- **Log rotation**: Automatically rotates log files when they reach a configurable size
+- **Sensitive data filtering**: Automatically redacts sensitive information such as API keys and credentials
+- **Configurable log levels**: Log levels can be adjusted via environment variables
+- **File and console logging**: Logs are written to both the console and log files
 
-### CAPTCHA Protection
+For detailed logging documentation, see [Logging Configuration](docs/logging.md).
 
-The API includes CAPTCHA protection on authentication endpoints to prevent automated bot attacks:
+### Security Headers
 
-- Google reCAPTCHA v2 integration on login and registration endpoints
-- Frontend can retrieve the site key through the API
-- Configurable through environment variables
-- Optional during development (can be disabled)
+The API implements a comprehensive set of security headers to protect against common web vulnerabilities:
 
-For detailed integration instructions, see [CAPTCHA Integration Guide](docs/captcha_integration.md).
+- **Content-Security-Policy**: Prevents XSS attacks by controlling resource loading
+- **X-XSS-Protection**: Enables browser's built-in XSS filtering
+- **X-Content-Type-Options**: Prevents MIME type sniffing attacks
+- **X-Frame-Options**: Prevents clickjacking attacks
+- **HSTS**: Forces HTTPS connections
+- **Permissions-Policy**: Controls browser feature permissions
+- **Referrer-Policy**: Controls referrer information in requests
+- **Cache-Control**: Prevents sensitive information caching
+
+All security headers are configurable via environment variables.

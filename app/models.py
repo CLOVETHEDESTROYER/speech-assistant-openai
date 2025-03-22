@@ -56,6 +56,7 @@ class Conversation(Base):
     direction = Column(String, nullable=False)  # 'inbound' or 'outbound'
     scenario = Column(String, nullable=False)
     transcript = Column(Text)
+    status = Column(String)  # Add status field to track call progress
     created_at = Column(DateTime, default=datetime.now())
     user_id = Column(Integer, ForeignKey('users.id'))
 

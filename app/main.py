@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status,
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
 from twilio.twiml.voice_response import VoiceResponse, Gather, Connect, Say, Stream
 from dotenv import load_dotenv
 from twilio.rest import Client
@@ -67,16 +68,60 @@ from app.limiter import limiter, rate_limit
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+import logging.handlers
+from app.utils.log_helpers import safe_log_request_data, sanitize_text
+from app.middleware.security_headers import add_security_headers
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
 
 # Configure logging
+
+# Get log level from config
+log_level_name = config.LOG_LEVEL.upper()  # Ensure uppercase for level name
+log_level = getattr(logging, log_level_name, logging.INFO)
+
+# Create logs directory if it doesn't exist
+os.makedirs(config.LOG_DIR, exist_ok=True)
+
+# Configure root logger
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=log_level,
+    format=config.LOG_FORMAT,
+    handlers=[
+        # Console handler
+        logging.StreamHandler(),
+        # Rotating file handler
+        logging.handlers.RotatingFileHandler(
+            os.path.join(config.LOG_DIR, 'app.log'),
+            maxBytes=config.LOG_MAX_SIZE_MB * 1024 * 1024,
+            backupCount=config.LOG_BACKUP_COUNT,
+            encoding='utf-8'
+        )
+    ]
 )
+
+# Configure application logger
 logger = logging.getLogger(__name__)
+
+# Create a filter to sanitize sensitive data
+
+
+class SensitiveDataFilter(logging.Filter):
+    def filter(self, record):
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            # Sanitize API keys if they appear in logs
+            if 'OPENAI_API_KEY' in record.msg and os.getenv('OPENAI_API_KEY'):
+                record.msg = record.msg.replace(
+                    os.getenv('OPENAI_API_KEY'), '[OPENAI_API_KEY_REDACTED]')
+            if 'TWILIO_AUTH_TOKEN' in record.msg and os.getenv('TWILIO_AUTH_TOKEN'):
+                record.msg = record.msg.replace(
+                    os.getenv('TWILIO_AUTH_TOKEN'), '[TWILIO_AUTH_TOKEN_REDACTED]')
+        return True
+
+
+# Add the filter to the logger
+logger.addFilter(SensitiveDataFilter())
 
 # After load_dotenv(), add these debug lines:
 logger.info("Environment variables loaded:")
@@ -265,6 +310,56 @@ app.add_middleware(
 # Add rate limiting middleware
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Add security headers middleware
+if config.ENABLE_SECURITY_HEADERS:
+    add_security_headers(
+        app,
+        content_security_policy=config.CONTENT_SECURITY_POLICY,
+        enable_hsts=config.ENABLE_HSTS,
+        xss_protection=config.XSS_PROTECTION,
+        content_type_options=config.CONTENT_TYPE_OPTIONS,
+        frame_options=config.FRAME_OPTIONS,
+        permissions_policy=config.PERMISSIONS_POLICY,
+        referrer_policy=config.REFERRER_POLICY,
+        cache_control=config.CACHE_CONTROL,
+    )
+
+# Add global exception handler
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to avoid exposing stack traces or sensitive error details
+    """
+    logger.exception(f"Unhandled exception: {str(exc)}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An unexpected error occurred. Please try again later."}
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handle validation errors with clear error messages
+    """
+    errors = []
+    for error in exc.errors():
+        location = error.get("loc", [])
+        location_str = " -> ".join(str(loc)
+                                   for loc in location if loc != "body")
+        errors.append({
+            "field": location_str,
+            "message": error.get("msg", "")
+        })
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "Validation error", "errors": errors}
+    )
+
 app.add_middleware(SlowAPIMiddleware)
 
 # Create database tables (do this only once)
@@ -439,76 +534,56 @@ async def schedule_call(
 async def make_call(
     request: Request,
     phone_number: str,
-    scenario: str
+    scenario: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     try:
-        # Get PUBLIC_URL from environment
-        host = os.getenv('PUBLIC_URL', '').strip()
-        logger.info(f"Using PUBLIC_URL from environment: {host}")
+        # Build the media stream URL using the PUBLIC_URL from config and ensure it has proper protocol
+        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        # Use the outgoing-call endpoint instead of media-stream
+        outgoing_call_url = f"{base_url}/outgoing-call/{scenario}"
+        logger.info(f"Outgoing call URL: {outgoing_call_url}")
 
-        if not host:
-            logger.error("PUBLIC_URL environment variable not set")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Server configuration error"}
-            )
-
-        if scenario not in SCENARIOS:
-            logger.error(f"Invalid scenario: {scenario}")
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": f"Invalid scenario. Valid options are: {', '.join(SCENARIOS.keys())}"}
-            )
-
-        # Check if phone number is valid
-        if not re.match(r'^\d{10}$', phone_number):
-            logger.error(f"Invalid phone number format: {phone_number}")
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Invalid phone number format. Please provide a 10-digit number."}
-            )
-
-        # Get Twilio phone number from environment
-        twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')
-        if not twilio_phone:
-            logger.error("TWILIO_PHONE_NUMBER not set")
-            return JSONResponse(
-                status_code=500,
-                content={"error": "Twilio phone number not configured"}
-            )
-
-        # Ensure the URL has the https:// protocol
-        if not host.startswith('http://') and not host.startswith('https://'):
-            host = f"https://{host}"
-
-        # Use a different endpoint for outgoing calls
-        webhook_url = f"{host}/outgoing-call/{scenario}"
-        logger.info(f"Constructed webhook URL: {webhook_url}")
-
-        # Create the call using Twilio
-        call = get_twilio_client().calls.create(
-            to=f"+1{phone_number}",
-            from_=twilio_phone,
-            url=webhook_url,
+        # Make the call first to get the call_sid
+        client = get_twilio_client()
+        call = client.calls.create(
+            to=phone_number,
+            from_=config.TWILIO_PHONE_NUMBER,
+            url=outgoing_call_url,
             record=True
         )
-        logger.info(
-            f"Call initiated to +1{phone_number}, call_sid: {call.sid}")
 
-        return {"status": "Call initiated", "call_sid": call.sid}
+        # Create a conversation record in the database with the call_sid
+        conversation = Conversation(
+            user_id=current_user.id,
+            scenario=scenario,
+            phone_number=phone_number,
+            direction="outbound",
+            status="in-progress",
+            call_sid=call.sid  # Now we have a valid call_sid
+        )
+        db.add(conversation)
+        db.commit()
+
+        # Return the call details
+        return {"status": "success", "call_sid": call.sid}
+
     except TwilioRestException as e:
-        logger.error(f"Twilio error: {str(e)}", exc_info=True)
+        logger.exception(
+            f"Twilio error when calling {phone_number} with scenario {scenario}")
         return JSONResponse(
-            status_code=500,
-            content={"error": f"Twilio error: {str(e)}"}
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": "An error occurred with the phone service. Please try again later."}
         )
     except Exception as e:
-        logger.error(f"Error making call: {str(e)}", exc_info=True)
+        logger.exception(
+            f"Error making call to {phone_number} with scenario {scenario}")
         return JSONResponse(
-            status_code=500,
-            content={"error": f"Server error: {str(e)}"}
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An error occurred while processing the outgoing call. Please try again later."}
         )
 
 # Add a new endpoint for outgoing calls
@@ -549,7 +624,10 @@ async def handle_outgoing_call(request: Request, scenario: str):
         return Response(content=twiml, media_type="application/xml")
     except Exception as e:
         logger.error(f"Error in handle_outgoing_call: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing the outgoing call. Please try again later."
+        )
 
 # Webhook Endpoint for Incoming Calls
 
@@ -593,7 +671,10 @@ async def handle_incoming_call(request: Request, scenario: str):
         return Response(content=twiml, media_type="application/xml")
     except Exception as e:
         logger.error(f"Error in handle_incoming_call: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing the incoming call. Please try again later."
+        )
 
 
 # Add a compatibility route for the old webhook URL format
@@ -1086,11 +1167,15 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up active sessions on shutdown."""
-    for session_id in list(realtime_manager.active_sessions.keys()):
-        try:
-            await realtime_manager.close_session(session_id)
-        except Exception as e:
-            logger.error(f"Error closing session {session_id}: {str(e)}")
+    # Check if realtime_manager is defined in the global scope
+    if 'realtime_manager' in globals():
+        for session_id in list(realtime_manager.active_sessions.keys()):
+            try:
+                await realtime_manager.close_session(session_id)
+            except Exception as e:
+                logger.error(f"Error closing session {session_id}: {str(e)}")
+    else:
+        logger.info("No realtime_manager found during shutdown")
 
 
 @app.get("/test")
@@ -1326,14 +1411,16 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
             f"Error in handle_speech_started_event: {e}", exc_info=True)
         # Don't raise the exception - try to continue the conversation
 
-    # Initialize the OpenAIRealtimeManager
-    realtime_manager = OpenAIRealtimeManager(OPENAI_API_KEY)
+# Initialize the OpenAIRealtimeManager at global scope
+realtime_manager = OpenAIRealtimeManager(config.OPENAI_API_KEY)
 
-    # New realtime endpoints
+# New realtime endpoints
 
 
 @app.post("/realtime/session", response_model=RealtimeSessionResponse)
+@rate_limit("5/minute")
 async def create_realtime_session(
+    request: Request,
     session_data: RealtimeSessionCreate,
     current_user: User = Depends(get_current_user)
 ):
@@ -1539,7 +1626,9 @@ CUSTOM_SCENARIOS: Dict[str, dict] = {}
 
 
 @app.post("/realtime/custom-scenario", response_model=dict)
+@rate_limit("10/minute")
 async def create_custom_scenario(
+    request: Request,
     persona: str = Body(..., min_length=10, max_length=5000),
     prompt: str = Body(..., min_length=10, max_length=5000),
     voice_type: str = Body(...),
@@ -1605,7 +1694,42 @@ async def create_custom_scenario(
         logger.error(f"Error creating custom scenario: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="An error occurred while creating the custom scenario. Please try again later."
+        )
+
+
+@app.get("/custom-scenarios", response_model=List[Dict])
+async def get_custom_scenarios(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all custom scenarios for the current user."""
+    try:
+        # Query all custom scenarios for the current user
+        db_scenarios = db.query(CustomScenario).filter(
+            CustomScenario.user_id == current_user.id
+        ).order_by(CustomScenario.created_at.desc()).all()
+
+        # Convert to a list of dictionaries for the response
+        scenarios = []
+        for scenario in db_scenarios:
+            scenarios.append({
+                "id": scenario.id,
+                "scenario_id": scenario.scenario_id,
+                "persona": scenario.persona,
+                "prompt": scenario.prompt,
+                "voice_type": scenario.voice_type,
+                "temperature": scenario.temperature,
+                "created_at": scenario.created_at.isoformat() if scenario.created_at else None
+            })
+
+        return scenarios
+
+    except Exception as e:
+        logger.exception(f"Error retrieving custom scenarios: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving custom scenarios. Please try again later."
         )
 
 
@@ -1627,7 +1751,7 @@ async def make_custom_call(
             logger.error("PUBLIC_URL environment variable not set")
             return JSONResponse(
                 status_code=500,
-                content={"error": "Server configuration error"}
+                content={"detail": "Server configuration error"}
             )
 
         # Check if phone number is valid
@@ -1636,7 +1760,7 @@ async def make_custom_call(
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "Invalid phone number format. Please provide a 10-digit number."}
+                    "detail": "Invalid phone number format. Please provide a 10-digit number."}
             )
 
         # Get Twilio phone number from environment
@@ -1645,7 +1769,7 @@ async def make_custom_call(
             logger.error("TWILIO_PHONE_NUMBER not set")
             return JSONResponse(
                 status_code=500,
-                content={"error": "Twilio phone number not configured"}
+                content={"detail": "Server configuration error"}
             )
 
         # Check if scenario exists in database
@@ -1659,7 +1783,7 @@ async def make_custom_call(
             logger.error(f"Custom scenario not found: {scenario_id}")
             return JSONResponse(
                 status_code=400,
-                content={"error": "Custom scenario not found"}
+                content={"detail": "Custom scenario not found"}
             )
 
         # Ensure the URL has the https:// protocol
@@ -1682,13 +1806,15 @@ async def make_custom_call(
         logger.error(f"Twilio error: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={"error": f"Twilio error: {str(e)}"}
+            content={
+                "detail": "An error occurred with the phone service. Please try again later."}
         )
     except Exception as e:
         logger.error(f"Error initiating custom call: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={"error": f"Server error: {str(e)}"}
+            content={
+                "detail": "An error occurred while processing the outgoing call. Please try again later."}
         )
 
 
@@ -1738,9 +1864,11 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
 
         return Response(content=twiml, media_type="application/xml")
     except Exception as e:
-        logger.error(
-            f"Error in handle_incoming_custom_call: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error handling user input: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing your input. Please try again later."
+        )
 
 
 @app.websocket("/media-stream-custom/{scenario_id}")
@@ -1953,8 +2081,10 @@ async def handle_recording_callback(request: Request, db: Session = Depends(get_
     try:
         # Log the raw request for debugging
         form_data = await request.form()
+        form_data_dict = dict(form_data)
+        # Sanitize form data for logging
         logger.info(
-            f"Recording callback received with form data: {dict(form_data)}")
+            f"Recording callback received with form data: {safe_log_request_data(form_data_dict)}")
 
         recording_sid = form_data.get('RecordingSid')
         call_sid = form_data.get('CallSid')
@@ -2411,99 +2541,61 @@ async def create_transcript_with_participants(
         )
 
 
-@app.post("/twilio-transcripts/create-with-media-url", response_model=Dict)
+@app.post("/twilio-transcripts/create-with-media-url")
+@rate_limit("10/minute")
 @with_twilio_retry(max_retries=3)
 async def create_transcript_with_media_url(
+    request: Request,
     media_url: str = Body(...),
     language_code: str = Body("en-US"),
     redaction: bool = Body(True),
-    customer_key: Optional[str] = Body(None),
-    data_logging: bool = Body(False),
-    current_user: User = Depends(get_current_user)
+    customer_key: str = Body(None),
+    data_logging: bool = Body(True)
 ):
-    """
-    Create a new transcript using a media URL instead of a recording SID.
-
-    This endpoint allows creating a transcript by providing a direct media URL
-    rather than requiring a Twilio recording SID.
-    """
     try:
-        # Validate the media_url
-        if not media_url or not (media_url.startswith("http://") or media_url.startswith("https://")):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid media_url format. Must be a valid HTTP or HTTPS URL."
-            )
+        # Log the request (sanitized for any sensitive data)
+        logger.info(
+            f"Transcript creation request: {safe_log_request_data({'media_url': media_url, 'language_code': language_code, 'redaction': redaction})}"
+        )
 
-        # Create the transcript with the media URL - create() is not async
+        # Create a transcript using Twilio Voice Intelligence
         transcript = get_twilio_client().intelligence.v2.transcripts.create(
             service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
             channel={
                 "media_properties": {
-                    "media_url": media_url
+                    "source_url": media_url
                 }
             },
             language_code=language_code,
-            redaction=redaction,
-            customer_key=customer_key,
-            data_logging=data_logging
+            redaction=redaction
         )
 
-        # Format the response to match the example structure
-        formatted_response = {
-            "account_sid": transcript.account_sid,
-            "service_sid": transcript.service_sid,
-            "sid": transcript.sid,
-            "date_created": str(transcript.date_created) if transcript.date_created else None,
-            "date_updated": str(transcript.date_updated) if transcript.date_updated else None,
-            "status": transcript.status,
-            "channel": {
-                "media_properties": {
-                    "media_url": media_url
-                }
-            },
-            "data_logging": transcript.data_logging,
-            "language_code": transcript.language_code,
-            "media_start_time": transcript.media_start_time,
-            "duration": transcript.duration,
-            "customer_key": transcript.customer_key,
-            "url": transcript.url,
-            "redaction": transcript.redaction,
-            "links": {
-                "sentences": f"https://intelligence.twilio.com/v2/Transcripts/{transcript.sid}/Sentences",
-                "media": f"https://intelligence.twilio.com/v2/Transcripts/{transcript.sid}/Media",
-                "operator_results": f"https://intelligence.twilio.com/v2/Transcripts/{transcript.sid}/OperatorResults"
-            }
+        logger.info(f"Transcript created with SID: {transcript.sid}")
+
+        return {
+            "status": "success",
+            "transcript_sid": transcript.sid,
+            "message": "Transcript creation initiated"
         }
 
-        logger.info(
-            f"Created transcript with SID: {transcript.sid} using media URL")
-        return formatted_response
-
     except TwilioAuthError as e:
-        logger.error(f"Authentication error: {e.message}")
+        logger.exception(
+            f"Authentication error creating transcript with media URL")
         raise HTTPException(
             status_code=401,
             detail="Authentication error with Twilio service"
         )
     except TwilioResourceError as e:
-        logger.error(f"Resource error: {e.message}")
+        logger.exception(f"Resource error creating transcript with media URL")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid resource: {e.message}"
         )
-    except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-            "details": e.details})
-        raise HTTPException(
-            status_code=500,
-            detail="Error communicating with Twilio service"
-        )
     except Exception as e:
-        logger.error(f"Unexpected error creating transcript: {str(e)}")
+        logger.exception(f"Error creating transcript with media URL")
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred"
+            detail="An unexpected error occurred while creating the transcript"
         )
 
 
@@ -2718,127 +2810,115 @@ async def get_stored_transcript(
         # If user is not an admin, filter by user_id
         if not getattr(current_user, 'is_admin', False):
             query = query.filter(TranscriptRecord.user_id == current_user.id)
-
-        transcript = query.first()
-
-        if not transcript:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Transcript with SID {transcript_sid} not found"
-            )
-
-        # Parse the sentences JSON
-        sentences = []
-        if transcript.sentences_json:
-            try:
-                sentences = json.loads(transcript.sentences_json)
-            except json.JSONDecodeError:
-                logger.error(
-                    f"Error parsing sentences JSON for transcript {transcript_sid}")
-
-        # Format the response
-        formatted_transcript = {
-            "id": transcript.id,
-            "transcript_sid": transcript.transcript_sid,
-            "status": transcript.status,
-            "full_text": transcript.full_text,
-            "date_created": str(transcript.date_created) if transcript.date_created else None,
-            "date_updated": str(transcript.date_updated) if transcript.date_updated else None,
-            "duration": transcript.duration,
-            "language_code": transcript.language_code,
-            "created_at": str(transcript.created_at) if transcript.created_at else None,
-            "sentences": sentences
-        }
-
-        return formatted_transcript
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(
-            f"Error retrieving stored transcript {transcript_sid}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error retrieving stored transcript"
-        )
-
-
-@app.get("/realtime/custom-scenarios", response_model=List[dict])
-async def get_custom_scenarios(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get all custom scenarios for the current user"""
-    try:
-        # Get scenarios from database
-        db_scenarios = db.query(CustomScenario).filter(
-            CustomScenario.user_id == current_user.id
-        ).all()
-
-        # Convert to response format
-        scenarios = []
-        for scenario in db_scenarios:
-            scenarios.append({
-                "id": scenario.id,
-                "scenario_id": scenario.scenario_id,
-                "persona": scenario.persona,
-                "prompt": scenario.prompt,
-                "voice_type": scenario.voice_type,
-                "temperature": scenario.temperature,
-                "created_at": scenario.created_at
-            })
-
-        return scenarios
-
-    except Exception as e:
-        logger.error(f"Error getting custom scenarios: {str(e)}")
+        logger.error(f"Error filtering transcript records: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="An error occurred while retrieving transcript records. Please try again later."
         )
 
 
-@app.get("/realtime/custom-scenario/{scenario_id}", response_model=dict)
+@app.get("/custom-scenarios/{scenario_id}", response_model=Dict)
 async def get_custom_scenario(
     scenario_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get a specific custom scenario"""
+    """Get a specific custom scenario by ID."""
     try:
-        # Get scenario from database
-        scenario = db.query(CustomScenario).filter(
+        # Query the specific custom scenario
+        db_scenario = db.query(CustomScenario).filter(
             CustomScenario.scenario_id == scenario_id,
             CustomScenario.user_id == current_user.id
         ).first()
 
-        if not scenario:
-            raise HTTPException(
-                status_code=404,
-                detail="Custom scenario not found"
-            )
+        # If not found in database, check the in-memory dictionary
+        if not db_scenario:
+            if scenario_id in CUSTOM_SCENARIOS:
+                # Make sure it belongs to this user (may not be possible to validate for in-memory scenarios)
+                return {
+                    "id": None,
+                    "scenario_id": scenario_id,
+                    "persona": CUSTOM_SCENARIOS[scenario_id].get("persona", ""),
+                    "prompt": CUSTOM_SCENARIOS[scenario_id].get("prompt", ""),
+                    "voice_type": "unknown",  # In-memory might not store this
+                    "temperature": CUSTOM_SCENARIOS[scenario_id].get("voice_config", {}).get("temperature", 0.7),
+                    "created_at": None
+                }
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Custom scenario not found"
+                )
 
+        # Convert to dictionary for the response
         return {
-            "id": scenario.id,
-            "scenario_id": scenario.scenario_id,
-            "persona": scenario.persona,
-            "prompt": scenario.prompt,
-            "voice_type": scenario.voice_type,
-            "temperature": scenario.temperature,
-            "created_at": scenario.created_at
+            "id": db_scenario.id,
+            "scenario_id": db_scenario.scenario_id,
+            "persona": db_scenario.persona,
+            "prompt": db_scenario.prompt,
+            "voice_type": db_scenario.voice_type,
+            "temperature": db_scenario.temperature,
+            "created_at": db_scenario.created_at.isoformat() if db_scenario.created_at else None
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting custom scenario: {str(e)}")
+        logger.exception(f"Error retrieving custom scenario: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="An error occurred while retrieving the custom scenario. Please try again later."
         )
 
 
-@app.put("/realtime/custom-scenario/{scenario_id}")
+@app.delete("/custom-scenarios/{scenario_id}", response_model=Dict)
+async def delete_custom_scenario(
+    scenario_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific custom scenario by ID."""
+    try:
+        # Query the specific custom scenario
+        db_scenario = db.query(CustomScenario).filter(
+            CustomScenario.scenario_id == scenario_id,
+            CustomScenario.user_id == current_user.id
+        ).first()
+
+        if not db_scenario:
+            # Check if it exists in the in-memory dictionary
+            if scenario_id in CUSTOM_SCENARIOS:
+                # Remove from in-memory dictionary
+                del CUSTOM_SCENARIOS[scenario_id]
+                return {"message": "Custom scenario deleted successfully"}
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Custom scenario not found"
+                )
+
+        # Delete from database
+        db.delete(db_scenario)
+        db.commit()
+
+        # Also remove from in-memory dictionary if it exists there
+        if scenario_id in CUSTOM_SCENARIOS:
+            del CUSTOM_SCENARIOS[scenario_id]
+
+        return {"message": "Custom scenario deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error deleting custom scenario: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while deleting the custom scenario. Please try again later."
+        )
+
+
+@app.put("/custom-scenarios/{scenario_id}", response_model=Dict)
 async def update_custom_scenario(
     scenario_id: str,
     persona: str = Body(..., min_length=10, max_length=5000),
@@ -2848,7 +2928,7 @@ async def update_custom_scenario(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update a custom scenario"""
+    """Update a specific custom scenario by ID."""
     try:
         if voice_type not in VOICES:
             raise HTTPException(
@@ -2856,134 +2936,43 @@ async def update_custom_scenario(
                 detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
             )
 
-        # Get scenario from database
-        scenario = db.query(CustomScenario).filter(
+        # Query the specific custom scenario
+        db_scenario = db.query(CustomScenario).filter(
             CustomScenario.scenario_id == scenario_id,
             CustomScenario.user_id == current_user.id
         ).first()
 
-        if not scenario:
+        if not db_scenario:
             raise HTTPException(
                 status_code=404,
                 detail="Custom scenario not found"
             )
 
-        # Update scenario
-        scenario.persona = persona
-        scenario.prompt = prompt
-        scenario.voice_type = voice_type
-        scenario.temperature = temperature
-
-        db.commit()
-        db.refresh(scenario)
-
-        # Update in-memory dictionary for backward compatibility
-        custom_scenario = {
-            "persona": persona,
-            "prompt": prompt,
-            "voice_config": {
-                "voice": VOICES[voice_type],
-                "temperature": temperature
-            }
-        }
-        CUSTOM_SCENARIOS[scenario_id] = custom_scenario
-
-        return {
-            "scenario_id": scenario_id,
-            "message": "Custom scenario updated successfully"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating custom scenario: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@app.delete("/realtime/custom-scenario/{scenario_id}", response_model=dict)
-async def delete_custom_scenario(
-    scenario_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Delete a custom scenario"""
-    try:
-        # Get scenario from database
-        scenario = db.query(CustomScenario).filter(
-            CustomScenario.scenario_id == scenario_id,
-            CustomScenario.user_id == current_user.id
-        ).first()
-
-        if not scenario:
-            raise HTTPException(
-                status_code=404,
-                detail="Custom scenario not found"
-            )
-
-        # Delete from database
-        db.delete(scenario)
+        # Update database entry
+        db_scenario.persona = persona
+        db_scenario.prompt = prompt
+        db_scenario.voice_type = voice_type
+        db_scenario.temperature = temperature
         db.commit()
 
-        # Delete from in-memory dictionary
+        # Update in-memory dictionary if it exists there
         if scenario_id in CUSTOM_SCENARIOS:
-            del CUSTOM_SCENARIOS[scenario_id]
+            CUSTOM_SCENARIOS[scenario_id] = {
+                "persona": persona,
+                "prompt": prompt,
+                "voice_config": {
+                    "voice": VOICES[voice_type],
+                    "temperature": temperature
+                }
+            }
 
-        return {
-            "message": "Custom scenario deleted successfully"
-        }
+        return {"message": "Custom scenario updated successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting custom scenario: {str(e)}")
+        logger.exception(f"Error updating custom scenario: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="An error occurred while updating the custom scenario. Please try again later."
         )
-
-
-@app.api_route("/handle-user-input", methods=["GET", "POST"])
-async def handle_user_input(request: Request):
-    """Handle user input from the Gather verb."""
-    try:
-        form_data = await request.form()
-        logger.info(f"Received user input: {form_data}")
-
-        # Create a simple response that continues the call
-        response = VoiceResponse()
-        response.say("Thank you for your input. Continuing the conversation.")
-
-        # Return an empty response to continue the call
-        return Response(content=str(response), media_type="application/xml")
-    except Exception as e:
-        logger.error(f"Error handling user input: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.websocket("/ws/{session_id}")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    session_id: str,
-    db: Session = Depends(get_db)
-):
-    """Handle WebSocket connections for general sessions."""
-    async with websocket_manager(websocket) as ws:
-        try:
-            # Your existing WebSocket logic here
-            # Use ws.send_text(), ws.receive_text(), etc. instead of websocket.send_text()
-            pass
-        except Exception as e:
-            logger.error(
-                f"Error in WebSocket session: {str(e)}", exc_info=True)
-            # WebSocket closure is handled by the context manager
-        finally:
-            if db:
-                db.close()
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
