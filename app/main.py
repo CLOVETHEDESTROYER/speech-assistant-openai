@@ -539,11 +539,11 @@ async def make_call(
     db: Session = Depends(get_db)
 ):
     try:
-        # Build the media stream URL using the PUBLIC_URL from config and ensure it has proper protocol
+        # Build the media stream URL with user name and direction parameters
         base_url = clean_and_validate_url(config.PUBLIC_URL)
-        # Use the outgoing-call endpoint instead of media-stream
-        outgoing_call_url = f"{base_url}/outgoing-call/{scenario}"
-        logger.info(f"Outgoing call URL: {outgoing_call_url}")
+        user_name = USER_CONFIG.get("name", "")
+        outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
+        logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
 
         # Make the call first to get the call_sid
         client = get_twilio_client()
@@ -593,19 +593,31 @@ async def make_call(
 async def handle_outgoing_call(request: Request, scenario: str):
     logger.info(f"Outgoing call webhook received for scenario: {scenario}")
     try:
+        # Extract direction and user_name from query parameters
+        params = dict(request.query_params)
+        direction = params.get("direction", "outbound")
+        user_name = params.get("user_name", "")
+        logger.info(f"Call direction: {direction}, User name: {user_name}")
+
         if scenario not in SCENARIOS:
             logger.error(f"Invalid scenario: {scenario}")
             raise HTTPException(status_code=400, detail="Invalid scenario")
 
-        selected_scenario = SCENARIOS[scenario]
-        response = VoiceResponse()
+        # Create a copy to avoid modifying the original
+        selected_scenario = SCENARIOS[scenario].copy()
+
+        # Add direction and user_name to the scenario
+        selected_scenario["direction"] = direction
+        if user_name:
+            selected_scenario["user_name"] = user_name
 
         # Get the hostname for WebSocket connection
         host = request.url.hostname
-        ws_url = f"wss://{host}/media-stream/{scenario}"
+        ws_url = f"wss://{host}/media-stream/{scenario}?direction={direction}&user_name={user_name}"
         logger.info(f"Setting up WebSocket connection at: {ws_url}")
 
         # Add a brief pause to allow the server to initialize
+        response = VoiceResponse()
         response.pause(length=0.1)
 
         # Set up the stream connection
@@ -868,6 +880,13 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
     MAX_RECONNECT_ATTEMPTS = 3
     RECONNECT_DELAY = 2  # seconds
 
+    # Get the direction and user_name from query parameters
+    params = dict(websocket.query_params)
+    direction = params.get("direction", "inbound")
+    user_name = params.get("user_name", "")
+    logger.info(
+        f"WebSocket connection for scenario: {scenario}, direction: {direction}, user_name: {user_name}")
+
     async with websocket_manager(websocket) as ws:
         try:
             logger.info(
@@ -879,10 +898,6 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
 
             selected_scenario = SCENARIOS[scenario]
             logger.info(f"Using scenario: {selected_scenario}")
-
-            # Get the request path to determine if this is an outgoing call
-            request_path = websocket.url.path
-            is_incoming = not request_path.startswith("/outgoing-call")
 
             # Initialize reconnection counter
             reconnect_attempts = 0
@@ -912,7 +927,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         }
 
                         # Initialize session with the selected scenario
-                        await initialize_session(openai_ws, selected_scenario, is_incoming=is_incoming)
+                        await initialize_session(openai_ws, selected_scenario, is_incoming=direction == "outbound")
                         logger.info("Session initialized with OpenAI")
 
                         # Add a delay before sending the initial greeting
@@ -1218,7 +1233,7 @@ async def incoming_call(request: Request, scenario: str):
     return Response(content=str(response), media_type="application/xml")
 
 
-async def initialize_session(openai_ws, scenario, is_incoming=True):
+async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=None):
     """Initialize session with OpenAI."""
     try:
         # If scenario is a string, get the scenario data from SCENARIOS
@@ -1227,6 +1242,24 @@ async def initialize_session(openai_ws, scenario, is_incoming=True):
                 raise ValueError(f"Invalid scenario: {scenario}")
             scenario = SCENARIOS[scenario]
 
+        # Determine direction and get user name if available
+        direction = "inbound" if is_incoming else "outbound"
+        effective_user_name = None
+        if direction == "outbound":
+            # Try to get user_name from various sources
+            effective_user_name = user_name or scenario.get(
+                "user_name") or USER_CONFIG.get("name")
+
+        # Build instructions with user name for outbound calls
+        additional_instructions = ""
+        if direction == "outbound" and effective_user_name:
+            additional_instructions = f"The user's name is {effective_user_name}. Address them by name. DO NOT ask for their name."
+            logger.info(
+                f"Adding user name instructions: {additional_instructions}")
+        elif direction == "inbound":
+            additional_instructions = "Ask for the caller's name if appropriate for the conversation."
+
+        # Generate session update payload
         session_data = {
             "type": "session.update",
             "session": {
@@ -1242,10 +1275,11 @@ async def initialize_session(openai_ws, scenario, is_incoming=True):
                     f"{SYSTEM_MESSAGE}\n\n"
                     f"Persona: {scenario['persona']}\n\n"
                     f"Scenario: {scenario['prompt']}\n\n"
+                    f"{additional_instructions}\n\n"
                     + ("IMPORTANT: Greet the caller immediately when the call connects. "
                        "Introduce yourself as specified in your persona and ask how you can help."
-                       if is_incoming else
-                       "IMPORTANT: Follow the scenario prompt exactly. Do not ask how you can help.")
+                       if direction == "inbound" else
+                       "IMPORTANT: Follow the scenario prompt exactly. Address the user by name if known.")
                 ),
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
