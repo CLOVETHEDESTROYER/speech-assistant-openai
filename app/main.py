@@ -2110,6 +2110,40 @@ async def stream_endpoint(websocket: WebSocket):
     # Add new endpoint for recording callback
 
 
+async def link_transcript_to_conversation(db: Session, call_sid: str, transcript_sid: str, max_retries: int = 6) -> bool:
+    """
+    Attempt to link a transcript to a conversation with retries.
+    Retries every 30 seconds for up to 3 minutes (6 attempts total).
+    """
+    for attempt in range(max_retries):
+        try:
+            conversation = db.query(Conversation).filter(
+                Conversation.call_sid == call_sid
+            ).first()
+
+            if conversation:
+                conversation.transcript_sid = transcript_sid
+                db.commit()
+                logger.info(
+                    f"Successfully linked transcript {transcript_sid} to conversation on attempt {attempt + 1}")
+                return True
+
+            if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                logger.info(
+                    f"Conversation not found, retrying in 30 seconds (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(
+                f"Error linking transcript on attempt {attempt + 1}: {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(30)
+
+    logger.error(
+        f"Failed to link transcript {transcript_sid} after {max_retries} attempts")
+    return False
+
+
 @app.post("/recording-callback")
 async def handle_recording_callback(request: Request, db: Session = Depends(get_db)):
     try:
@@ -2155,31 +2189,21 @@ async def handle_recording_callback(request: Request, db: Session = Depends(get_
 
                 logger.info(f"Transcript created with SID: {transcript.sid}")
 
-                # Store the transcript SID in your database
-                conversation = db.query(Conversation).filter(
-                    Conversation.call_sid == call_sid
-                ).first()
+                # Start background task to link transcript with retries
+                background_tasks = BackgroundTasks()
+                background_tasks.add_task(
+                    link_transcript_to_conversation,
+                    db=db,
+                    call_sid=call_sid,
+                    transcript_sid=transcript.sid
+                )
 
-                if conversation:
-                    conversation.transcript_sid = transcript.sid
-                    conversation.recording_sid = recording_sid
-                    db.commit()
-                    logger.info(
-                        f"Updated conversation with transcript SID: {transcript.sid}")
+                return {
+                    "status": "success",
+                    "transcript_sid": transcript.sid,
+                    "message": "Transcript creation initiated, linking in progress"
+                }
 
-                    return {
-                        "status": "success",
-                        "transcript_sid": transcript.sid,
-                        "message": "Transcript creation initiated"
-                    }
-                else:
-                    logger.error(
-                        f"No conversation found with call_sid: {call_sid}")
-                    return {
-                        "status": "error",
-                        "message": f"No conversation found with call_sid: {call_sid}",
-                        "code": "not_found"
-                    }
             except TwilioAuthError as e:
                 logger.error(f"Twilio authentication error: {e.message}", extra={
                     "details": e.details})
@@ -3010,3 +3034,194 @@ async def update_custom_scenario(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while updating the custom scenario. Please try again later."
         )
+
+
+@app.get("/test-db-connection")
+async def test_db_connection(db: Session = Depends(get_db)):
+    try:
+        # Import the text function from SQLAlchemy
+        from sqlalchemy import text
+
+        # Use the text() function to properly format the SQL query
+        result = db.execute(text("SELECT 1")).fetchone()
+        return {"status": "Database connection working", "result": result[0]}
+    except Exception as e:
+        return {"status": "Database connection failed", "error": str(e)}
+
+
+@app.get("/debug/twilio-intelligence-config")
+async def debug_twilio_intelligence_config():
+    """Check Twilio Voice Intelligence configuration"""
+    return {
+        "voice_intelligence_enabled": config.USE_TWILIO_VOICE_INTELLIGENCE,
+        "voice_intelligence_sid": config.TWILIO_VOICE_INTELLIGENCE_SID,
+        "pii_redaction_enabled": config.ENABLE_PII_REDACTION
+    }
+
+
+@app.get("/debug/recent-conversations")
+async def debug_recent_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Check recent conversations and their transcript status"""
+    try:
+        from sqlalchemy import text
+
+        conversations = db.execute(
+            text("""
+                SELECT 
+                    id, 
+                    call_sid, 
+                    recording_sid, 
+                    transcript_sid,
+                    status,
+                    created_at
+                FROM conversations 
+                WHERE user_id = :user_id 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            """),
+            {"user_id": current_user.id}
+        ).fetchall()
+
+        return {
+            "conversations": [
+                {
+                    "id": row[0],
+                    "call_sid": row[1],
+                    "recording_sid": row[2],
+                    "transcript_sid": row[3],
+                    "status": row[4],
+                    "created_at": str(row[5])
+                }
+                for row in conversations
+            ]
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Error getting recent conversations"
+        }
+
+
+@app.get("/debug/recording-callback-status")
+async def debug_recording_callback_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Check the status of recent recording callbacks and their transcripts"""
+    try:
+        from sqlalchemy import text
+
+        # Query recent conversations with recording and transcript info
+        results = db.execute(
+            text("""
+                SELECT 
+                    c.id,
+                    c.call_sid,
+                    c.recording_sid,
+                    c.transcript_sid,
+                    c.transcript,
+                    c.created_at,
+                    tr.status as transcript_status,
+                    tr.full_text
+                FROM conversations c
+                LEFT JOIN transcript_records tr ON c.transcript_sid = tr.transcript_sid
+                WHERE c.user_id = :user_id
+                ORDER BY c.created_at DESC
+                LIMIT 5
+            """),
+            {"user_id": current_user.id}
+        ).fetchall()
+
+        return {
+            "recordings": [
+                {
+                    "conversation_id": row[0],
+                    "call_sid": row[1],
+                    "recording_sid": row[2],
+                    "transcript_sid": row[3],
+                    "conversation_transcript": row[4],
+                    "created_at": str(row[5]),
+                    "transcript_status": row[6],
+                    "transcript_full_text": row[7]
+                }
+                for row in results
+            ]
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Error checking recording callback status"
+        }
+
+
+@app.get("/debug/transcript-records")
+async def debug_transcript_records(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Check the TranscriptRecord table directly"""
+    try:
+        from sqlalchemy import text
+
+        records = db.execute(
+            text("""
+                SELECT 
+                    id,
+                    transcript_sid,
+                    status,
+                    full_text,
+                    created_at
+                FROM transcript_records
+                WHERE user_id = :user_id
+                ORDER BY created_at DESC
+                LIMIT 5
+            """),
+            {"user_id": current_user.id}
+        ).fetchall()
+
+        return {
+            "transcript_records": [
+                {
+                    "id": row[0],
+                    "transcript_sid": row[1],
+                    "status": row[2],
+                    "full_text": row[3],
+                    "created_at": str(row[4])
+                }
+                for row in records
+            ]
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "message": "Error checking transcript records"
+        }
+
+
+@app.get("/api/transcripts/{transcript_sid}")
+async def get_transcript_details(
+    transcript_sid: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # First check our local cache
+    transcript_record = db.query(TranscriptRecord).filter(
+        TranscriptRecord.transcript_sid == transcript_sid
+    ).first()
+
+    if transcript_record:
+        return {
+            "status": "success",
+            "transcript": {
+                "full_text": transcript_record.full_text,
+                "sentences": json.loads(transcript_record.sentences_json),
+                "language_code": transcript_record.language_code,
+                "duration": transcript_record.duration,
+                "status": transcript_record.status
+            }
+        }
+
+    return {"status": "error", "message": "Transcript not found"}

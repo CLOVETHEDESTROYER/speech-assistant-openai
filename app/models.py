@@ -49,16 +49,17 @@ class Token(Base):
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id = Column(Integer, primary_key=True)
-    call_sid = Column(String, nullable=False, index=True)
-    recording_sid = Column(String, index=True)
-    phone_number = Column(String)  # Store anonymized/hashed if needed
-    direction = Column(String, nullable=False)  # 'inbound' or 'outbound'
-    scenario = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    scenario = Column(String)
+    phone_number = Column(String)
+    direction = Column(String)
+    status = Column(String)
+    call_sid = Column(String)
+    recording_sid = Column(String)
     transcript = Column(Text)
-    status = Column(String)  # Add status field to track call progress
-    created_at = Column(DateTime, default=datetime.now())
-    user_id = Column(Integer, ForeignKey('users.id'))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    transcript_sid = Column(String, nullable=True)
 
 
 class TranscriptRecord(Base):

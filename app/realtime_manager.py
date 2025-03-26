@@ -183,7 +183,7 @@ class OpenAIRealtimeManager:
         """Get instructions based on the scenario direction."""
         direction = scenario.get('direction', 'outbound')
         user_name = scenario.get('user_name')
-
+        
         # Make sure required keys exist
         persona = scenario.get('persona', 'Assistant')
         prompt = scenario.get('prompt', 'You are a helpful assistant.')
@@ -200,16 +200,19 @@ class OpenAIRealtimeManager:
                 f"according to your persona and scenario without asking how you can help."
             )
         else:
-            # For incoming calls, modify to actively ask for and remember caller's name
+            # For incoming calls, actively gather caller information including name
             instructions = (
                 f"{system_message}\n\n"
                 f"Persona: {persona}\n\n"
                 f"Scenario: {prompt}\n\n"
-                f"This is an incoming call where someone is calling you. Greet them politely and "
-                f"introduce yourself according to your persona. Early in the conversation, politely ask for "
-                f"their name with phrases like 'May I ask who I'm speaking with?' or 'Could I get your name please?'. "
-                f"Once they share their name, remember it and use it occasionally throughout the rest of the call to "
-                f"make the conversation more personal. If they don't provide their name after asking, proceed with "
-                f"the conversation without pressing further."
+                f"This is an incoming call where someone is calling you. You do not know who is calling. "
+                f"Greet them politely and introduce yourself according to your persona. "
+                f"Early in the conversation, ask for their name clearly: 'May I get your name, please?' "
+                f"Listen for their response and use their name throughout the rest of the conversation. "
+                f"Also gather any other important information that would be relevant to your scenario, "
+                f"such as their contact details, reason for calling, or specific needs. "
+                f"Be conversational and natural while collecting this information - don't make it feel "
+                f"like an interrogation. If they don't provide their name after being asked, "
+                f"continue the conversation professionally without pressing the issue."
             )
         return instructions
