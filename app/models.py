@@ -1,8 +1,9 @@
 # models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Float
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.db import Base
-import datetime
+from datetime import datetime
 
 
 class User(Base):
@@ -12,9 +13,11 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
 
     call_schedules = relationship("CallSchedule", back_populates="user")
     tokens = relationship("Token", back_populates="user")
+    custom_scenarios = relationship("CustomScenario", back_populates="user")
 
 
 class CallSchedule(Base):
@@ -24,7 +27,7 @@ class CallSchedule(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     phone_number = Column(String, nullable=False)
     scheduled_time = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
     scenario = Column(String, nullable=False)
 
     # Relationships
@@ -37,10 +40,59 @@ class Token(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     token = Column(String, unique=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="tokens")
 
 
-__all__ = ["User", "Token", "Base"]
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    scenario = Column(String)
+    phone_number = Column(String)
+    direction = Column(String)
+    status = Column(String)
+    call_sid = Column(String)
+    recording_sid = Column(String)
+    transcript = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    transcript_sid = Column(String, nullable=True)
+
+
+class TranscriptRecord(Base):
+    __tablename__ = "transcript_records"
+
+    id = Column(Integer, primary_key=True)
+    transcript_sid = Column(String, nullable=False, index=True, unique=True)
+    status = Column(String, nullable=False)
+    full_text = Column(Text)
+    date_created = Column(DateTime)
+    date_updated = Column(DateTime)
+    duration = Column(Integer)
+    language_code = Column(String)
+    sentences_json = Column(Text)  # JSON string of sentence data
+    created_at = Column(DateTime, default=datetime.now())
+    user_id = Column(Integer, ForeignKey('users.id'))
+
+
+class CustomScenario(Base):
+    __tablename__ = "custom_scenarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scenario_id = Column(String, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    persona = Column(Text, nullable=False)
+    prompt = Column(Text, nullable=False)
+    voice_type = Column(String, nullable=False)
+    temperature = Column(Float, default=0.7)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    user = relationship("User", back_populates="custom_scenarios")
+
+
+__all__ = ["User", "Token", "Base", "CallSchedule",
+           "Conversation", "TranscriptRecord", "CustomScenario"]

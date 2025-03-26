@@ -1,0 +1,9 @@
+fastapi
+sqlalchemy
+pydantic
+python-jose
+passlib
+python-dotenv
+twilio
+openai
+websockets

@@ -1,5 +1,5 @@
 # auth.py
-from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Response, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.models import User, Token
@@ -10,7 +10,6 @@ from app.utils import (
     get_password_hash,
     verify_password,
     create_access_token,
-    create_refresh_token
 )
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -19,6 +18,7 @@ import uuid
 import json
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import timedelta
+from app.limiter import rate_limit
 
 
 router = APIRouter()
@@ -56,7 +56,8 @@ def create_refresh_token():
 
 
 @router.post("/register", response_model=TokenResponse)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+@rate_limit("5/minute")
+def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -86,7 +87,8 @@ def authenticate_user(db: Session, email: str, password: str):
 
 
 @router.post("/login", response_model=TokenSchema)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@rate_limit("5/minute")
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
@@ -98,7 +100,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
-    refresh_token = create_refresh_token(data={"sub": user.email})
+    refresh_token = create_refresh_token()
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -107,7 +109,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token_route(token: str = Cookie(None), db: Session = Depends(get_db)):
+@rate_limit("10/minute")
+async def refresh_token_route(request: Request, token: str = Cookie(None), db: Session = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
     decoded = decode_token(token)
