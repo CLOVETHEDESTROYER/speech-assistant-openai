@@ -385,7 +385,8 @@ async def make_call(
             to=f"+1{phone_number}",  # Ensure proper phone number formatting
             from_=TWILIO_PHONE_NUMBER,
             url=webhook_url,
-            record=True
+            record=True,
+	    time_limit=90 
         )
 
         return {"message": "Call initiated", "call_sid": call.sid}
@@ -395,35 +396,27 @@ async def make_call(
 
 # Webhook Endpoint for Incoming Calls
 
-
 @app.api_route("/incoming-call/{scenario}", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request, scenario: str):
     logger.info(f"Incoming call webhook received for scenario: {scenario}")
     try:
-        # Validate scenario
-        if scenario not in SCENARIOS:
-            logger.error(f"Invalid scenario: {scenario}")
-            raise HTTPException(status_code=400, detail="Invalid scenario")
-
-        # Log request details
         form_data = await request.form()
         logger.info(f"Received form data: {form_data}")
 
-        """Handle incoming call and return TwiML response."""
-
         response = VoiceResponse()
-        response.say("what up son, can you talk.")
+        response.say("Thanks for calling Hyper labs, How may I help you?")
         response.pause(length=1)
-        response.say("y'all ready to talk some shit?")
 
         # Get the host from the request
         host = request.url.hostname
-
-        # Construct WebSocket URL
         ws_url = f"wss://{host}/media-stream/{scenario}"
 
+        # Create Connect verb with stream
         connect = Connect()
-        connect.stream(url=ws_url)
+        stream = Stream(url=ws_url)
+        # Add parameters as attributes to the Stream
+        stream.parameter("maxDuration", "210")
+        connect.append(stream)
         response.append(connect)
 
         twiml = str(response)
@@ -537,15 +530,18 @@ async def send_session_update(openai_ws, scenario):
 
 # Then define the WebSocket endpoint
 
-
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
     logger.info(f"WebSocket connection attempt for scenario: {scenario}")
     try:
         await websocket.accept()
         logger.info("WebSocket connection accepted")
+        
+        # Initialize duration tracking
+        start_time = time.time()
+        MAX_DURATION = 210  # 3.5 minutes in seconds
+        WARNING_TIME = 30   # Warn when 30 seconds remaining
 
-        # Validate scenario
         if scenario not in SCENARIOS:
             await websocket.close(code=4000, reason="Invalid scenario")
             logger.error(f"Invalid scenario: {scenario}")
@@ -555,7 +551,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         logger.info(f"Using scenario: {selected_scenario}")
 
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',  # Updated URL
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
@@ -573,15 +569,34 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             # Initialize session
             await initialize_session(openai_ws, selected_scenario)
 
+            async def check_duration():
+                """Monitor call duration and handle timeouts"""
+                while True:
+                    current_duration = time.time() - start_time
+                    remaining_time = MAX_DURATION - current_duration
+                    
+                    if remaining_time <= WARNING_TIME and remaining_time > WARNING_TIME - 1:
+                        # Send warning message through OpenAI
+                        warning = {
+                            "type": "response.create",
+                            "text": "We're approaching the end of our time. Let's wrap up our conversation."
+                        }
+                        await openai_ws.send(json.dumps(warning))
+                    
+                    if current_duration >= MAX_DURATION:
+                        logger.info("Call reached maximum duration of 3.5 minutes")
+                        return
+                    
+                    await asyncio.sleep(1)
+
             async def receive_from_twilio():
-                """Receive audio data from Twilio and send it to OpenAI."""
+                """Handle incoming audio from Twilio"""
                 nonlocal stream_sid, latest_media_timestamp
                 try:
                     async for message in websocket.iter_text():
                         data = json.loads(message)
                         if data['event'] == 'media' and openai_ws.open:
-                            latest_media_timestamp = int(
-                                data['media']['timestamp'])
+                            latest_media_timestamp = int(data['media']['timestamp'])
                             audio_append = {
                                 "type": "input_audio_buffer.append",
                                 "audio": data['media']['payload']
@@ -602,7 +617,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         await openai_ws.close()
 
             async def send_to_twilio():
-                """Receive events from OpenAI and send audio back to Twilio."""
+                """Handle outgoing audio to Twilio"""
                 nonlocal stream_sid, last_assistant_item, response_start_timestamp_twilio
                 try:
                     async for openai_message in openai_ws:
@@ -635,8 +650,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         elif response.get('type') == 'input_audio_buffer.speech_started':
                             logger.info("Speech started detected")
                             if last_assistant_item:
-                                logger.info(
-                                    f"Interrupting response: {last_assistant_item}")
+                                logger.info(f"Interrupting response: {last_assistant_item}")
                                 await handle_speech_started_event(
                                     websocket, openai_ws, stream_sid,
                                     last_assistant_item, response_start_timestamp_twilio,
@@ -646,11 +660,11 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                                 response_start_timestamp_twilio = None
 
                 except Exception as e:
-                    logger.error(
-                        f"Error in send_to_twilio: {e}", exc_info=True)
+                    logger.error(f"Error in send_to_twilio: {e}", exc_info=True)
 
-            # Run both handlers concurrently
+            # Run all handlers concurrently
             await asyncio.gather(
+                check_duration(),
                 receive_from_twilio(),
                 send_to_twilio()
             )
@@ -1173,7 +1187,7 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str):
         logger.info(f"Received form data: {form_data}")
 
         response = VoiceResponse()
-        response.say("Connecting to your custom AI call.")
+        response.say("Hello.")
         response.pause(length=1)
 
         host = request.url.hostname
