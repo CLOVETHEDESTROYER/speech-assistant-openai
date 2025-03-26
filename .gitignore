@@ -1,4 +1,50 @@
-# Environment and credential files
+# Ignore environment files
+.env
+.env.*
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+env/
+
+# Ignore logs and temporary files
+*.log
+*.db
+*.sqlite3
+*.pid
+*.seed
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+.mypy_cache/
+.pytest_cache/
+.coverage
+
+# Ignore deployment artifacts
+.docker/
+.dockerignore
+*.tar.gz
+*.zip
+
+# Ignore node_modules (if applicable)
+node_modules/
+
+# Ignore generated API documentation
+/docs/
+
+# Ignore Git-specific files
+.git/
+.gitignore# Environment and credential files
 .env
 
 # Python cache files
