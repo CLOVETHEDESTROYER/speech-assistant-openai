@@ -44,7 +44,9 @@ node_modules/
 
 # Ignore Git-specific files
 .git/
-.gitignore# Environment and credential files
+.gitignore
+
+# Environment and credential files
 .env
 
 # Python cache files
@@ -56,3 +58,8 @@ venv/
 # Logs and temporary files
 *.log
 *.db
+
+# Ignore sensitive files
+dev.env
+logs/
+*.log
