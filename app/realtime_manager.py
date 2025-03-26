@@ -27,10 +27,11 @@ class OpenAIRealtimeManager:
 
             # Connect to OpenAI's Realtime API
             async with websockets.connect(
-                'wss://api.openai.com/v1/audio/speech',
+                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+
                 extra_headers={
                     "Authorization": f"Bearer {self.openai_api_key}",
-                    "OpenAI-Beta": "speech-api-v1"
+                    "OpenAI-Beta": "realtime=v1"
                 }
             ) as openai_ws:
                 # Initialize session configuration
@@ -39,15 +40,15 @@ class OpenAIRealtimeManager:
                     "session": {
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.5,
-                            "prefix_padding_ms": 500,
-                            "silence_duration_ms": 500,
+                            "threshold": 0.3,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 750,
                             "create_response": True
                         },
                         "input_audio_format": "pcm16",
                         "output_audio_format": "pcm16",
                         "sample_rate": 16000,
-                        "instructions": f"{scenario.get('system_message', '')}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
+                        "instructions": self._get_instructions(scenario),
                         "voice": scenario["voice_config"]["voice"],
                         "temperature": scenario["voice_config"]["temperature"],
                         "modalities": ["text", "audio"]
@@ -177,3 +178,41 @@ class OpenAIRealtimeManager:
             self.logger.error(f"Error handling audio stream: {
                               str(e)}", exc_info=True)
             raise
+
+    def _get_instructions(self, scenario: dict) -> str:
+        """Get instructions based on the scenario direction."""
+        direction = scenario.get('direction', 'outbound')
+        user_name = scenario.get('user_name')
+
+        # Make sure required keys exist
+        persona = scenario.get('persona', 'Assistant')
+        prompt = scenario.get('prompt', 'You are a helpful assistant.')
+        system_message = scenario.get('system_message', '')
+
+        if direction == "outbound":
+            # Only include name instructions for outbound calls if name exists
+            name_instruction = f"\n\nThe user's name is {user_name}. Address them by name occasionally during the call." if user_name else ""
+            instructions = (
+                f"{system_message}\n\n"
+                f"Persona: {persona}\n\n"
+                f"Scenario: {prompt}{name_instruction}\n\n"
+                f"This is an outbound call that you initiated. Begin the conversation directly "
+                f"according to your persona and scenario without asking how you can help."
+            )
+        else:
+            # For incoming calls, actively gather caller information including name
+            instructions = (
+                f"{system_message}\n\n"
+                f"Persona: {persona}\n\n"
+                f"Scenario: {prompt}\n\n"
+                f"This is an incoming call where someone is calling you. You do not know who is calling. "
+                f"Greet them politely and introduce yourself according to your persona. "
+                f"Early in the conversation, ask for their name clearly: 'May I get your name, please?' "
+                f"Listen for their response and use their name throughout the rest of the conversation. "
+                f"Also gather any other important information that would be relevant to your scenario, "
+                f"such as their contact details, reason for calling, or specific needs. "
+                f"Be conversational and natural while collecting this information - don't make it feel "
+                f"like an interrogation. If they don't provide their name after being asked, "
+                f"continue the conversation professionally without pressing the issue."
+            )
+        return instructions
