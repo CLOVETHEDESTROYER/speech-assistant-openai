@@ -45,8 +45,8 @@ class OpenAIRealtimeManager:
                             "silence_duration_ms": 750,
                             "create_response": True
                         },
-                        "input_audio_format": "pcm16",
-                        "output_audio_format": "pcm16",
+                        "input_audio_format": "g711_ulaw",
+                        "output_audio_format": "g711_ulaw",
                         "sample_rate": 16000,
                         "instructions": self._get_instructions(scenario),
                         "voice": scenario["voice_config"]["voice"],
@@ -159,6 +159,10 @@ class OpenAIRealtimeManager:
 
             openai_ws = session["openai_ws"]
 
+            # Debugging logs
+            logger.info(
+                f"Audio data size received from Twilio: {len(audio_data)} bytes")
+
             # Send audio to OpenAI
             await openai_ws.send(json.dumps({
                 "type": "input_audio_buffer.append",
@@ -167,6 +171,9 @@ class OpenAIRealtimeManager:
 
             # Get response from OpenAI
             response = await openai_ws.recv()
+            # Add this line explicitly
+            logger.info(f"🔍 OpenAI response: {response}")
+
             response_data = json.loads(response)
 
             if response_data.get("type") == "error":
