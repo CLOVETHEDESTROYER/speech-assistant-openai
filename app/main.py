@@ -727,8 +727,8 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                         "turn_detection": {
                             "type": "server_vad",
                             "threshold": 0.2,
-                            "prefix_padding_ms": 200,
-                            "silence_duration_ms": 500
+                            "prefix_padding_ms": 25,
+                            "silence_duration_ms": 50
                         }
                     }
                 }))
@@ -849,7 +849,7 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
-                "turn_detection": {"type": "server_vad"},
+                "turn_detection": {"type": "server_vad", "threshold": 0.2, "prefix_padding_ms": 25, "silence_duration_ms": 50},
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
@@ -1266,8 +1266,8 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
                 "turn_detection": {
                     "type": "server_vad",
                     "threshold": 0.2,
-                    "prefix_padding_ms": 200,
-                    "silence_duration_ms": 500
+                    "prefix_padding_ms": 25,
+                    "silence_duration_ms": 50
                 },
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
