@@ -18,6 +18,8 @@ class User(Base):
     call_schedules = relationship("CallSchedule", back_populates="user")
     tokens = relationship("Token", back_populates="user")
     custom_scenarios = relationship("CustomScenario", back_populates="user")
+    google_credentials = relationship(
+        "GoogleCalendarCredentials", back_populates="user")
 
 
 class CallSchedule(Base):
@@ -94,5 +96,20 @@ class CustomScenario(Base):
     user = relationship("User", back_populates="custom_scenarios")
 
 
+class GoogleCalendarCredentials(Base):
+    __tablename__ = "google_calendar_credentials"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    token = Column(String)
+    refresh_token = Column(String)
+    token_expiry = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="google_credentials")
+
+
 __all__ = ["User", "Token", "Base", "CallSchedule",
-           "Conversation", "TranscriptRecord", "CustomScenario"]
+           "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials"]

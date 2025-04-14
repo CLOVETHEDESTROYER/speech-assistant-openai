@@ -71,6 +71,7 @@ from slowapi.errors import RateLimitExceeded
 import logging.handlers
 from app.utils.log_helpers import safe_log_request_data, sanitize_text
 from app.middleware.security_headers import add_security_headers
+from app.routes import google_calendar
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -367,6 +368,7 @@ Base.metadata.create_all(bind=engine)
 
 # Include routers
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(google_calendar.router, tags=["google-calendar"])
 
 if not OPENAI_API_KEY:
     raise ValueError(

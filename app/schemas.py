@@ -1,6 +1,7 @@
 # schemas.py
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime
 
 
 class UserCreate(BaseModel):
@@ -73,5 +74,15 @@ class ConversationResponse(BaseModel):
         orm_mode = True
 
 
+class CallScheduleCreate(BaseModel):
+    phone_number: str
+    scheduled_time: datetime
+    scenario: str
+
+    class Config:
+        from_attributes = True  # Updated from orm_mode in newer Pydantic versions
+
+
 __all__ = ["UserCreate", "UserLogin", "TokenSchema", "TokenData", "RealtimeSessionCreate",
-           "RealtimeSessionResponse", "SignalingMessage", "SignalingResponse", "ConversationResponse"]
+           "RealtimeSessionResponse", "SignalingMessage", "SignalingResponse", "ConversationResponse",
+           "CallScheduleCreate"]
