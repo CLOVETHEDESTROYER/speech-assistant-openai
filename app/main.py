@@ -727,8 +727,8 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                         "turn_detection": {
                             "type": "server_vad",
                             "threshold": 0.2,
-                            "prefix_padding_ms": 25,
-                            "silence_duration_ms": 50
+                            "prefix_padding_ms": 50,
+                            "silence_duration_ms": 100
                         }
                     }
                 }))
@@ -849,7 +849,7 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
-                "turn_detection": {"type": "server_vad", "threshold": 0.2, "prefix_padding_ms": 25, "silence_duration_ms": 50},
+                "turn_detection": {"type": "server_vad", "threshold": 0.2, "prefix_padding_ms": 50, "silence_duration_ms": 100},
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
@@ -1266,8 +1266,8 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
                 "turn_detection": {
                     "type": "server_vad",
                     "threshold": 0.2,
-                    "prefix_padding_ms": 25,
-                    "silence_duration_ms": 50
+                    "prefix_padding_ms": 50,
+                    "silence_duration_ms": 100
                 },
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
@@ -3225,3 +3225,292 @@ async def get_transcript_details(
         }
 
     return {"status": "error", "message": "Transcript not found"}
+
+
+@app.post("/whisper/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """
+    Endpoint to transcribe audio using OpenAI's Whisper API.
+    Accepts audio file uploads and returns the transcription.
+    """
+    try:
+        # Create a temporary file to store the uploaded audio
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            # Write the uploaded file content to the temporary file
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        # Use the existing TranscriptionService to transcribe the audio
+        transcription_result = await transcription_service.transcribe_audio(content)
+
+        if transcription_result:
+            return {
+                "status": "success",
+                "transcription": transcription_result
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to transcribe audio"
+            }
+    except Exception as e:
+        logger.error(f"Error in transcribe_audio endpoint: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+    finally:
+        # Clean up the temporary file
+        try:
+            os.unlink(temp_file_path)
+        except:
+            pass
+
+
+@app.post("/api/transcripts/{transcript_sid}/summarize")
+async def summarize_transcript(
+    transcript_sid: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Summarize a transcript and prepare it for SMS sending.
+    """
+    try:
+        # Get the transcript from our database
+        transcript_record = db.query(TranscriptRecord).filter(
+            TranscriptRecord.transcript_sid == transcript_sid
+        ).first()
+
+        if not transcript_record:
+            raise HTTPException(
+                status_code=404,
+                detail="Transcript not found"
+            )
+
+        # Get the full conversation text
+        full_text = transcript_record.full_text
+
+        # Use OpenAI to generate a summary
+        client = OpenAI(api_key=config.OPENAI_API_KEY)
+        response = await client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that creates concise summaries of phone conversations. Keep summaries under 160 characters for SMS compatibility."},
+                {"role": "user", "content": f"Please summarize this conversation in a clear, concise way suitable for SMS: {full_text}"}
+            ],
+            max_tokens=100,
+            temperature=0.7
+        )
+
+        summary = response.choices[0].message.content
+
+        # Store the summary in the database
+        transcript_record.summary = summary
+        db.commit()
+
+        return {
+            "status": "success",
+            "summary": summary,
+            "transcript_sid": transcript_sid
+        }
+
+    except Exception as e:
+        logger.error(f"Error summarizing transcript: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error generating summary"
+        )
+
+
+@app.post("/api/transcripts/fetch-and-store/{transcript_sid}")
+async def fetch_and_store_transcript(
+    transcript_sid: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Fetch a transcript from Twilio and store it in our database.
+    """
+    try:
+        # First check if we already have this transcript
+        existing_transcript = db.query(TranscriptRecord).filter(
+            TranscriptRecord.transcript_sid == transcript_sid
+        ).first()
+
+        if existing_transcript:
+            return {
+                "status": "success",
+                "message": "Transcript already stored",
+                "transcript": {
+                    "transcript_sid": existing_transcript.transcript_sid,
+                    "full_text": existing_transcript.full_text,
+                    "sentences": json.loads(existing_transcript.sentences_json) if existing_transcript.sentences_json else [],
+                    "status": existing_transcript.status,
+                    "duration": existing_transcript.duration,
+                    "language_code": existing_transcript.language_code
+                }
+            }
+
+        # Fetch from Twilio
+        transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
+        sentences = get_twilio_client().intelligence.v2.transcripts(
+            transcript_sid).sentences.list()
+
+        # Sort sentences by start time
+        sorted_sentences = sorted(
+            sentences, key=lambda s: getattr(s, "start_time", 0))
+
+        # Create full text from sentences
+        full_text = " ".join(
+            getattr(s, "transcript", "No text available")
+            for s in sorted_sentences
+        )
+
+        # Helper function for decimal conversion
+        def decimal_to_float(obj):
+            from decimal import Decimal
+            if isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+
+        # Create new TranscriptRecord
+        new_transcript = TranscriptRecord(
+            transcript_sid=transcript_sid,
+            status=transcript.status,
+            full_text=full_text,
+            date_created=transcript.date_created,
+            date_updated=transcript.date_updated,
+            duration=decimal_to_float(transcript.duration),
+            language_code=transcript.language_code,
+            user_id=current_user.id,
+            sentences_json=json.dumps([{
+                "transcript": getattr(s, "transcript", "No text available"),
+                "speaker": getattr(s, "media_channel", 0),
+                "start_time": decimal_to_float(getattr(s, "start_time", 0)),
+                "end_time": decimal_to_float(getattr(s, "end_time", 0)),
+                "confidence": decimal_to_float(getattr(s, "confidence", None))
+            } for s in sorted_sentences], default=decimal_to_float)
+        )
+
+        db.add(new_transcript)
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Transcript fetched and stored",
+            "transcript": {
+                "transcript_sid": new_transcript.transcript_sid,
+                "full_text": new_transcript.full_text,
+                "sentences": json.loads(new_transcript.sentences_json),
+                "status": new_transcript.status,
+                "duration": new_transcript.duration,
+                "language_code": new_transcript.language_code
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching and storing transcript: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing transcript: {str(e)}"
+        )
+
+
+@app.post("/api/import-twilio-transcripts")
+async def import_twilio_transcripts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all transcripts from /twilio-transcripts endpoint,
+    fetch their details, and store them in our database.
+    """
+    try:
+        # Get list of all Twilio transcripts
+        transcripts = get_twilio_client().intelligence.v2.transcripts.list()
+
+        results = {
+            "success": [],
+            "already_exists": [],
+            "failed": []
+        }
+
+        for twilio_transcript in transcripts:
+            try:
+                # Check if transcript already exists in our database
+                existing = db.query(TranscriptRecord).filter(
+                    TranscriptRecord.transcript_sid == twilio_transcript.sid
+                ).first()
+
+                if existing:
+                    results["already_exists"].append(twilio_transcript.sid)
+                    continue
+
+                # Fetch detailed transcript information
+                detailed_transcript = get_twilio_client().intelligence.v2.transcripts(
+                    twilio_transcript.sid).fetch()
+                sentences = get_twilio_client().intelligence.v2.transcripts(
+                    twilio_transcript.sid).sentences.list()
+
+                # Sort sentences by start time
+                sorted_sentences = sorted(
+                    sentences, key=lambda s: getattr(s, "start_time", 0))
+
+                # Create full text from sentences
+                full_text = " ".join(
+                    getattr(s, "transcript", "No text available")
+                    for s in sorted_sentences
+                )
+
+                # Helper function for decimal conversion
+                def decimal_to_float(obj):
+                    from decimal import Decimal
+                    if isinstance(obj, Decimal):
+                        return float(obj)
+                    return obj
+
+                # Create new TranscriptRecord
+                new_transcript = TranscriptRecord(
+                    transcript_sid=twilio_transcript.sid,
+                    status=detailed_transcript.status,
+                    full_text=full_text,
+                    date_created=detailed_transcript.date_created,
+                    date_updated=detailed_transcript.date_updated,
+                    duration=decimal_to_float(detailed_transcript.duration),
+                    language_code=detailed_transcript.language_code,
+                    user_id=current_user.id,
+                    sentences_json=json.dumps([{
+                        "transcript": getattr(s, "transcript", "No text available"),
+                        "speaker": getattr(s, "media_channel", 0),
+                        "start_time": decimal_to_float(getattr(s, "start_time", 0)),
+                        "end_time": decimal_to_float(getattr(s, "end_time", 0)),
+                        "confidence": decimal_to_float(getattr(s, "confidence", None))
+                    } for s in sorted_sentences], default=decimal_to_float)
+                )
+
+                db.add(new_transcript)
+                db.commit()
+                results["success"].append(twilio_transcript.sid)
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing transcript {twilio_transcript.sid}: {str(e)}")
+                results["failed"].append({
+                    "sid": twilio_transcript.sid,
+                    "error": str(e)
+                })
+                db.rollback()
+
+        return {
+            "status": "completed",
+            "results": results
+        }
+
+    except Exception as e:
+        logger.error(f"Error importing transcripts: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error importing transcripts: {str(e)}"
+        )
