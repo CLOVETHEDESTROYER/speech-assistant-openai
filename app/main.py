@@ -28,7 +28,7 @@ import sqlalchemy
 import threading
 import time
 from app.auth import router as auth_router, get_current_user
-from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario
+from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials
 from app.utils import (
     get_password_hash,
     verify_password,
@@ -72,6 +72,8 @@ import logging.handlers
 from app.utils.log_helpers import safe_log_request_data, sanitize_text
 from app.middleware.security_headers import add_security_headers
 from app.routes import google_calendar
+from app.services.google_calendar import GoogleCalendarService
+from datetime import timedelta
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -3515,4 +3517,602 @@ async def import_twilio_transcripts(
         raise HTTPException(
             status_code=500,
             detail=f"Error importing transcripts: {str(e)}"
+        )
+
+
+@app.websocket("/calendar-media-stream")
+async def handle_calendar_media_stream(websocket: WebSocket):
+    """Handle media stream for calendar-related calls"""
+    caller = websocket.query_params.get("caller", "unknown")
+    logger.info(f"Calendar WebSocket connection from {caller}")
+
+    # Accept the connection
+    async with websocket_manager(websocket) as ws:
+        try:
+            # Get a database session
+            db = SessionLocal()
+
+            # Look up the user based on call history instead of phone number
+            # since User model doesn't have a phone_number field
+            user = None
+
+            # Normalize the phone number for matching
+            normalized_phone = caller.replace('+', '').replace(' ', '')
+
+            # Try to find the user through conversation history
+            conversation = db.query(Conversation).filter(
+                Conversation.phone_number.like(f"%{normalized_phone}%")
+            ).order_by(Conversation.created_at.desc()).first()
+
+            if conversation and conversation.user_id:
+                user = db.query(User).filter(
+                    User.id == conversation.user_id).first()
+                logger.info(
+                    f"Found user {user.email} based on conversation history")
+
+            # If we don't find the user, try to find any user with calendar credentials
+            # This is a fallback for testing/development
+            if not user:
+                logger.warning(f"No matching user found for caller: {caller}")
+                # Find any user with calendar credentials for testing
+                credentials_query = db.query(GoogleCalendarCredentials).first()
+                if credentials_query:
+                    user = db.query(User).filter(
+                        User.id == credentials_query.user_id).first()
+                    logger.info(
+                        f"Using fallback user: {user.email} for calendar demo")
+                else:
+                    logger.error(
+                        "No users with Google Calendar credentials found")
+                    # Send error message as TwiML
+                    await ws.send_text(json.dumps({
+                        "error": "User not found",
+                        "message": "I'm sorry, I don't recognize this phone number. Please register in our system first."
+                    }))
+                    return
+
+            # Check if user has Google Calendar connected
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == user.id
+            ).first()
+
+            # Define the instructions for OpenAI
+            if not credentials:
+                # Handle case where user hasn't connected their calendar
+                logger.warning(
+                    f"User {user.id} hasn't connected Google Calendar")
+                instructions = (
+                    "You are a helpful assistant handling a phone call. "
+                    "The caller wants to access their calendar, but they haven't connected "
+                    "their Google Calendar to our system yet. "
+                    "Politely explain that they need to log in to the web portal and connect "
+                    "their Google Calendar before they can use this feature. Offer to help with "
+                    "any questions they have about the process."
+                )
+
+                # Initialize connection with OpenAI
+                scenario = {
+                    "persona": "Calendar Assistant",
+                    "prompt": "You are a helpful calendar assistant. The caller wants to check their calendar, but they haven't connected their Google Calendar yet.",
+                    "voice_config": {
+                        "voice": "alloy",  # Changed from 'alloy' to ensure compatibility
+                        "temperature": 0.7
+                    }
+                }
+            else:
+                # User has calendar connected - prepare calendar service
+                calendar_service = GoogleCalendarService()
+                service = calendar_service.get_calendar_service({
+                    "token": credentials.token,
+                    "refresh_token": credentials.refresh_token,
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                    "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                    "expiry": credentials.token_expiry.isoformat()
+                })
+
+                # Get upcoming events for context
+                time_min = datetime.datetime.utcnow()
+                events = await calendar_service.get_upcoming_events(
+                    service,
+                    max_results=5,
+                    time_min=time_min
+                )
+
+                # Format events for the AI context
+                events_context = ""
+                if events:
+                    events_context = "Here are the user's upcoming calendar events:\\n"
+                    for event in events:
+                        if 'dateTime' in event.get('start', {}):
+                            start_time = event['start']['dateTime']
+                            end_time = event['end']['dateTime']
+                        else:
+                            # All-day event
+                            start_time = event.get('start', {}).get('date', '')
+                            end_time = event.get('end', {}).get('date', '')
+
+                        events_context += (
+                            f"- {event.get('summary', 'No title')} from {start_time} to {end_time}\\n"
+                        )
+                else:
+                    events_context = "The user has no upcoming events on their calendar."
+
+                # Find next available slots
+                start_date = datetime.datetime.utcnow()
+                end_date = start_date + timedelta(days=7)
+                free_slots = await calendar_service.find_free_slots(
+                    service,
+                    start_date,
+                    end_date,
+                    min_duration_minutes=30,
+                    max_results=3,
+                    working_hours=(9, 17)
+                )
+
+                slots_context = ""
+                if free_slots:
+                    slots_context = "Here are some available time slots in the user's calendar:\\n"
+                    for start, end in free_slots:
+                        slots_context += f"- {start.strftime('%A, %B %d at %I:%M %p')} to {end.strftime('%I:%M %p')}\\n"
+                else:
+                    slots_context = "The user has no free time slots in the next week."
+
+                # Create custom instructions for this scenario
+                instructions = (
+                    "You are a helpful calendar assistant handling a phone call. "
+                    "You have access to the caller's Google Calendar. Be conversational and friendly. "
+                    f"\n\n{events_context}\\n\\n{slots_context}\\n\\n"
+                    "You can provide information about upcoming events, check availability, "
+                    "and suggest free time slots. If the caller asks about scheduling an event, "
+                    "collect the necessary details like date, time, duration, and purpose. "
+                    "IMPORTANT: Introduce yourself as a calendar assistant. "
+                    "Remain connected and responsive during silences. "
+                    "Offer to help with any other calendar-related questions they might have."
+                )
+
+                # Initialize connection with OpenAI with calendar-specific scenario
+                scenario = {
+                    "persona": "Calendar Assistant",
+                    "prompt": instructions,
+                    "voice_config": {
+                        "voice": "alloy",  # Changed from 'nova' to 'alloy' which is supported
+                        "temperature": 0.7
+                    }
+                }
+
+            # Initialize reconnection counter
+            reconnect_attempts = 0
+            MAX_RECONNECT_ATTEMPTS = 3
+            RECONNECT_DELAY = 2  # seconds
+
+            # Start reconnection loop similar to your existing WebSocket endpoints
+            while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                try:
+                    async with websockets.connect(
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                        extra_headers={
+                            "Authorization": f"Bearer {OPENAI_API_KEY}",
+                            "OpenAI-Beta": "realtime=v1"
+                        },
+                        ping_interval=20,
+                        ping_timeout=60,
+                        close_timeout=60
+                    ) as openai_ws:
+                        logger.info(
+                            "Connected to OpenAI WebSocket for calendar")
+
+                        # Connection specific state
+                        shared_state = {
+                            "should_stop": False,
+                            "stream_sid": None,
+                            "latest_media_timestamp": 0,
+                            "last_assistant_item": None,
+                            "current_transcript": "",
+                            "greeting_sent": False,
+                            "pending_greeting_attempts": 0
+                        }
+
+                        # Initialize session
+                        await initialize_session(openai_ws, scenario, is_incoming=True)
+                        logger.info(
+                            "Session initialized with OpenAI for calendar")
+
+                        # Add a delay to ensure the session is fully initialized
+                        await asyncio.sleep(0.5)
+
+                        # Check if Twilio WebSocket is still connected with retry
+                        for ping_attempt in range(3):
+                            try:
+                                await ws.send_text(json.dumps({"status": "connected", "attempt": ping_attempt}))
+                                logger.info(
+                                    f"Twilio WebSocket is connected (attempt {ping_attempt+1})")
+                                break
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to ping Twilio WebSocket (attempt {ping_attempt+1}): {e}")
+                                await asyncio.sleep(0.5)
+                                if ping_attempt == 2:  # Last attempt
+                                    logger.error(
+                                        "All Twilio ping attempts failed, aborting")
+                                    return
+
+                        # Function to send initial greeting with retry
+                        async def send_greeting_with_retry(max_retries=3):
+                            for attempt in range(max_retries):
+                                try:
+                                    # Create a conversation item to trigger the AI's response with a simple greeting
+                                    conversation_item = {
+                                        "type": "conversation.item.create",
+                                        "item": {
+                                            "type": "message",
+                                            "role": "user",
+                                            "content": [
+                                                {
+                                                    "type": "input_text",
+                                                    "text": "The call has been connected. Please introduce yourself as a calendar assistant and ask how you can help with the caller's calendar."
+                                                }
+                                            ]
+                                        }
+                                    }
+
+                                    # Send the conversation item
+                                    await openai_ws.send(json.dumps(conversation_item))
+                                    logger.info(
+                                        f"Initial conversation item sent successfully (attempt {attempt+1})")
+
+                                    # Add a small delay
+                                    await asyncio.sleep(0.2)
+
+                                    # Request a response
+                                    response_request = {
+                                        "type": "response.create"
+                                    }
+
+                                    await openai_ws.send(json.dumps(response_request))
+                                    logger.info(
+                                        f"Response request sent successfully (attempt {attempt+1})")
+
+                                    # Mark as successful
+                                    return True
+                                except Exception as e:
+                                    logger.error(
+                                        f"Failed to send greeting (attempt {attempt+1}): {str(e)}")
+                                    await asyncio.sleep(0.5)
+
+                            # If we got here, all attempts failed
+                            logger.error("All greeting attempts failed")
+                            return False
+
+                        # Send initial greeting with retry mechanism
+                        greeting_success = await send_greeting_with_retry(max_retries=3)
+                        if greeting_success:
+                            logger.info(
+                                "Initial greeting sent successfully with retry mechanism")
+                            shared_state["greeting_sent"] = True
+                        else:
+                            logger.warning(
+                                "Failed to send initial greeting after multiple attempts")
+                            # Continue anyway, as the user might speak first
+
+                        # Create tasks for receiving from Twilio and sending to Twilio
+                        receive_task = asyncio.create_task(
+                            receive_from_twilio(ws, openai_ws, shared_state))
+                        send_task = asyncio.create_task(
+                            send_to_twilio(ws, openai_ws, shared_state))
+
+                        # Additional task to monitor connection and retry greeting if needed
+                        async def monitor_and_retry_greeting():
+                            retry_count = 0
+                            max_retries = 2
+
+                            while not shared_state["should_stop"] and retry_count < max_retries:
+                                await asyncio.sleep(5)  # Check every 5 seconds
+
+                                # If we haven't received any response and the greeting wasn't sent successfully
+                                if not shared_state.get("greeting_sent") and not shared_state.get("current_transcript"):
+                                    logger.info(
+                                        f"Retrying greeting (attempt {retry_count+1})")
+                                    success = await send_greeting_with_retry(max_retries=1)
+                                    if success:
+                                        shared_state["greeting_sent"] = True
+                                        logger.info(
+                                            f"Retry greeting succeeded (attempt {retry_count+1})")
+                                        break
+                                    retry_count += 1
+                                else:
+                                    # Greeting was sent or we have received user input, no need to continue
+                                    break
+
+                        # Start the monitoring task
+                        monitor_task = asyncio.create_task(
+                            monitor_and_retry_greeting())
+
+                        # Wait for tasks to complete
+                        done, pending = await asyncio.wait(
+                            [receive_task, send_task, monitor_task],
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+
+                        # Cancel any pending tasks
+                        for task in pending:
+                            task.cancel()
+
+                        # Handle any exceptions from completed tasks
+                        for task in done:
+                            try:
+                                await task
+                            except Exception as e:
+                                logger.error(f"Task error: {str(e)}")
+
+                        # Break out of the reconnection loop
+                        break
+
+                except websockets.exceptions.WebSocketException as e:
+                    logger.error(f"WebSocket error in calendar stream: {e}")
+                    reconnect_attempts += 1
+                    if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                        logger.info(
+                            f"Attempting to reconnect... (Attempt {reconnect_attempts})")
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        continue
+                    raise
+
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("WebSocket connection closed")
+        except Exception as e:
+            logger.error(
+                f"Error in calendar media stream: {str(e)}", exc_info=True)
+        finally:
+            if 'db' in locals():
+                db.close()
+
+
+@app.post("/handle-user-input")
+async def handle_user_input(request: Request):
+    """Handle user input from Twilio Gather verb"""
+    try:
+        form_data = await request.form()
+        speech_result = form_data.get("SpeechResult", "")
+        call_sid = form_data.get("CallSid", "")
+
+        logger.info(f"Received user input from Gather: {speech_result}")
+
+        # We don't need to do anything with the input here, as the websocket connection
+        # will handle the real-time conversation. We just need to return a valid TwiML response
+        # to keep the call going.
+        response = VoiceResponse()
+        response.pause(length=60)  # Add a long pause to keep the call open
+
+        return Response(content=str(response), media_type="application/xml")
+    except Exception as e:
+        logger.error(f"Error handling user input: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while processing your input. Please try again later."
+        )
+
+
+@app.post("/twilio-callback")
+async def handle_twilio_callback(request: Request, db: Session = Depends(get_db)):
+    """Handle Twilio status callbacks for call status updates"""
+    try:
+        form_data = await request.form()
+        call_sid = form_data.get("CallSid")
+        call_status = form_data.get("CallStatus")
+
+        logger.info(
+            f"Received Twilio callback for call {call_sid} with status {call_status}")
+
+        if not call_sid:
+            return {"status": "error", "message": "No CallSid provided"}
+
+        # Update conversation record if it exists
+        conversation = db.query(Conversation).filter(
+            Conversation.call_sid == call_sid
+        ).first()
+
+        if conversation:
+            # Map Twilio status to our status
+            status_map = {
+                "completed": "completed",
+                "busy": "failed",
+                "failed": "failed",
+                "no-answer": "failed",
+                "canceled": "canceled"
+            }
+
+            conversation.status = status_map.get(call_status, call_status)
+            db.commit()
+            logger.info(
+                f"Updated conversation {conversation.id} status to {conversation.status}")
+
+            # Check for recording if the call was completed
+            if call_status == "completed":
+                recording_sid = form_data.get("RecordingSid")
+                if recording_sid:
+                    conversation.recording_sid = recording_sid
+                    db.commit()
+                    logger.info(
+                        f"Updated conversation {conversation.id} with recording {recording_sid}")
+
+        return {"status": "success", "call_sid": call_sid, "call_status": call_status}
+    except Exception as e:
+        logger.error(
+            f"Error handling Twilio callback: {str(e)}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/make-calendar-call-scenario/{phone_number}")
+@rate_limit("2/minute")
+async def make_calendar_call_scenario(
+    request: Request,
+    phone_number: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Make a calendar call using the standard scenario approach that's known to work well.
+    This creates a temporary scenario with calendar data and uses the standard call flow.
+    """
+    try:
+        # Validate phone number format
+        if not phone_number.startswith('+'):
+            phone_number = f"+{phone_number}"
+
+        logger.info(
+            f"Initiating calendar call (scenario approach) to {phone_number} for user {current_user.email}")
+
+        # Check if user has Google Calendar connected
+        credentials = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == current_user.id
+        ).first()
+
+        if not credentials:
+            raise HTTPException(
+                status_code=401, detail="Google Calendar not connected")
+
+        # Prepare calendar service
+        calendar_service = GoogleCalendarService()
+        service = calendar_service.get_calendar_service({
+            "token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "expiry": credentials.token_expiry.isoformat()
+        })
+
+        # Get upcoming events
+        time_min = datetime.datetime.utcnow()
+        events = await calendar_service.get_upcoming_events(
+            service,
+            max_results=5,
+            time_min=time_min
+        )
+
+        # Format events for the AI context
+        events_context = ""
+        if events:
+            events_context = "Here are the user's upcoming calendar events:\\n"
+            for event in events:
+                if 'dateTime' in event.get('start', {}):
+                    start_time = event['start']['dateTime']
+                    end_time = event['end']['dateTime']
+                else:
+                    # All-day event
+                    start_time = event.get('start', {}).get('date', '')
+                    end_time = event.get('end', {}).get('date', '')
+
+                events_context += (
+                    f"- {event.get('summary', 'No title')} from {start_time} to {end_time}\\n"
+                )
+        else:
+            events_context = "The user has no upcoming events on their calendar."
+
+        # Find next available slots
+        start_date = datetime.datetime.utcnow()
+        end_date = start_date + timedelta(days=7)
+        free_slots = await calendar_service.find_free_slots(
+            service,
+            start_date,
+            end_date,
+            min_duration_minutes=30,
+            max_results=3,
+            working_hours=(9, 17)
+        )
+
+        slots_context = ""
+        if free_slots:
+            slots_context = "Here are some available time slots in the user's calendar:\\n"
+            for start, end in free_slots:
+                slots_context += f"- {start.strftime('%A, %B %d at %I:%M %p')} to {end.strftime('%I:%M %p')}\\n"
+        else:
+            slots_context = "The user has no free time slots in the next week."
+
+        # Create a temporary scenario key (not in the SCENARIOS dict)
+        temp_scenario_key = f"calendar_{current_user.id}_{int(time.time())}"
+
+        # Create the scenario
+        calendar_scenario = {
+            "persona": "Calendar Assistant",
+            "prompt": (
+                f"You are a helpful calendar assistant handling a phone call. "
+                f"You have access to the caller's Google Calendar. Be conversational and friendly. "
+                f"\\n\\n{events_context}\\n\\n{slots_context}\\n\\n"
+                f"You can provide information about upcoming events, check availability, "
+                f"and suggest free time slots. If the caller asks about scheduling an event, "
+                f"collect the necessary details like date, time, duration, and purpose. "
+                f"Remain connected and responsive during silences. "
+                f"Offer to help with any other calendar-related questions they might have."
+            ),
+            "voice_config": {
+                # Changed from 'nova' to 'alloy' which is supported by the GPT-4o Realtime API
+                "voice": "alloy",
+                "temperature": 0.7
+            }
+        }
+
+        # Temporarily add to SCENARIOS
+        SCENARIOS[temp_scenario_key] = calendar_scenario
+
+        # Build the media stream URL
+        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        user_name = current_user.email
+        outgoing_call_url = f"{base_url}/outgoing-call/{temp_scenario_key}?direction=outbound&user_name={user_name}"
+        logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
+
+        # Make the call
+        client = get_twilio_client()
+        call = client.calls.create(
+            to=phone_number,
+            from_=config.TWILIO_PHONE_NUMBER,
+            url=outgoing_call_url,
+            record=True
+        )
+
+        # Create a conversation record
+        conversation = Conversation(
+            user_id=current_user.id,
+            scenario="calendar",
+            phone_number=phone_number,
+            direction="outbound",
+            status="in-progress",
+            call_sid=call.sid
+        )
+        db.add(conversation)
+        db.commit()
+
+        # Schedule removal of temporary scenario
+        def remove_temp_scenario():
+            try:
+                if temp_scenario_key in SCENARIOS:
+                    del SCENARIOS[temp_scenario_key]
+                    logger.info(
+                        f"Removed temporary scenario {temp_scenario_key}")
+            except Exception as e:
+                logger.error(f"Error removing temp scenario: {e}")
+
+        # Run cleanup after 1 hour
+        threading.Timer(3600, remove_temp_scenario).start()
+
+        return {
+            "status": "success",
+            "call_sid": call.sid,
+            "message": "Calendar call initiated using scenario approach",
+            "scenario_key": temp_scenario_key
+        }
+
+    except TwilioRestException as e:
+        logger.exception(f"Twilio error when calling {phone_number}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": f"An error occurred with the phone service: {str(e)}"}
+        )
+    except Exception as e:
+        logger.exception(f"Error making calendar call to {phone_number}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": f"An error occurred: {str(e)}"}
         )
