@@ -40,9 +40,9 @@ class OpenAIRealtimeManager:
                     "session": {
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.3,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 750,
+                            "threshold": 0.2,
+                            "prefix_padding_ms": 50,
+                            "silence_duration_ms": 100,
                             "create_response": True
                         },
                         "input_audio_format": "g711_ulaw",

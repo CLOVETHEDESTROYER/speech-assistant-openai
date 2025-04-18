@@ -21,16 +21,32 @@ async def google_auth(request: Request, current_user: User = Depends(get_current
         include_granted_scopes='true',
         prompt='consent'
     )
-    return {"authorization_url": authorization_url}
+
+    # Store user ID in state by appending it to the URL
+    # We'll extract this in the callback
+    state_data = f"{state}:{current_user.id}"
+
+    return {"authorization_url": authorization_url.replace(f"state={state}", f"state={state_data}")}
 
 
 @router.get("/callback")
 async def google_callback(
     code: str,
     state: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
+    # Extract user ID from state
+    state_parts = state.split(":")
+    if len(state_parts) < 2:
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
+
+    user_id = state_parts[1]
+
+    # Get user from database
+    current_user = db.query(User).filter(User.id == user_id).first()
+    if not current_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     calendar_service = GoogleCalendarService()
     flow = calendar_service.create_oauth_flow()
     flow.fetch_token(code=code)
