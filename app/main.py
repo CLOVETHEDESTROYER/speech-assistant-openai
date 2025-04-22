@@ -3658,14 +3658,17 @@ async def handle_calendar_media_stream(websocket: WebSocket):
                 else:
                     slots_context = "The user has no free time slots in the next week."
 
-                # Create custom instructions for this scenario
+                # Create custom instructions for this scenario including calendar event creation
                 instructions = (
                     "You are a helpful calendar assistant handling a phone call. "
                     "You have access to the caller's Google Calendar. Be conversational and friendly. "
                     f"\n\n{events_context}\\n\\n{slots_context}\\n\\n"
                     "You can provide information about upcoming events, check availability, "
                     "and suggest free time slots. If the caller asks about scheduling an event, "
-                    "collect the necessary details like date, time, duration, and purpose. "
+                    "collect the necessary details like date, time, duration, and purpose, then "
+                    "tell them 'I'll add that to your calendar right away.' You don't need to create "
+                    "the event yourself - our system will handle that automatically when you confirm. "
+                    "IMPORTANT: When asked to create a calendar event, be sure to confirm all details with the user. "
                     "IMPORTANT: Introduce yourself as a calendar assistant. "
                     "Remain connected and responsive during silences. "
                     "Offer to help with any other calendar-related questions they might have."
@@ -3796,8 +3799,9 @@ async def handle_calendar_media_stream(websocket: WebSocket):
                             # Continue anyway, as the user might speak first
 
                         # Create tasks for receiving from Twilio and sending to Twilio
+                        # Use our custom receive function that handles calendar event creation
                         receive_task = asyncio.create_task(
-                            receive_from_twilio(ws, openai_ws, shared_state))
+                            receive_from_twilio_calendar(ws, openai_ws, shared_state, user.id, db))
                         send_task = asyncio.create_task(
                             send_to_twilio(ws, openai_ws, shared_state))
 
@@ -4116,3 +4120,425 @@ async def make_calendar_call_scenario(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": f"An error occurred: {str(e)}"}
         )
+
+# Add this function at the end of the file
+
+
+async def handle_calendar_event_creation(message, user_id, db):
+    """Process calendar event creation from voice commands
+
+    This function extracts event details from a message that appears to be
+    requesting calendar event creation, then creates the event using the
+    Google Calendar API.
+
+    Args:
+        message: The message text from the voice command
+        user_id: ID of the user making the request
+        db: Database session
+
+    Returns:
+        Dict with success status and details
+    """
+    try:
+        import re
+        from dateutil import parser
+        from app.models import GoogleCalendarCredentials
+        from app.services.google_calendar import GoogleCalendarService
+
+        # Get user's Google credentials
+        credentials = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == user_id
+        ).first()
+
+        if not credentials:
+            return {"success": False, "error": "Google Calendar not connected"}
+
+        # Extract event details using simple NLP patterns
+        event_details = {}
+
+        # Try to extract the event title/summary
+        title_patterns = [
+            r"(?:add|create|schedule|make).*?(?:event|meeting|appointment).*?(?:called|titled|named|about|for|:)[\s\"']*([^\"'\n,\.]+)[\s\"']*",
+            r"(?:add|create|schedule|make)[\s\"']*([^\"'\n,\.]+)[\s\"']*(?:to my calendar|to calendar|in my calendar|in calendar)",
+            r"(?:put|add)[\s\"']*([^\"'\n,\.]+)[\s\"']*(?:on my calendar|on calendar)",
+        ]
+
+        for pattern in title_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                event_details["summary"] = match.group(1).strip()
+                break
+
+        # If no specific title found, try to extract a general title
+        if "summary" not in event_details:
+            # Look for any noun phrases after words like "add", "schedule", etc.
+            general_pattern = r"(?:add|create|schedule|make)[\s\"']*([^\"'\n,\.;]+)[\s\"']*"
+            match = re.search(general_pattern, message, re.IGNORECASE)
+            if match:
+                event_details["summary"] = match.group(1).strip()
+            else:
+                # Use a default title if nothing better is found
+                event_details["summary"] = "New Calendar Event"
+
+        # Try to extract date information
+        date_patterns = [
+            r"(?:on|for)[\s\"']*([A-Za-z]+day[\s,]+[A-Za-z]+[\s,]+\d{1,2}(?:st|nd|rd|th)?)",
+            r"(?:on|for)[\s\"']*([A-Za-z]+[\s,]+\d{1,2}(?:st|nd|rd|th)?)",
+            r"(?:on|for)[\s\"']*(\d{1,2}(?:st|nd|rd|th)?[\s,]+[A-Za-z]+)",
+            r"(?:on|for)[\s\"']*(\d{1,2}/\d{1,2}(?:/\d{2,4})?)",
+            r"(?:tomorrow|today|next week|next month)",
+        ]
+
+        date_str = None
+        for pattern in date_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                date_str = match.group(0)  # Use the whole match
+                if date_str:
+                    event_details["date_str"] = date_str
+                    break
+
+        # Try to extract time information
+        time_patterns = [
+            r"(?:at|from)[\s\"']*(\d{1,2}(?::\d{2})?[\s]*(?:am|pm|a\.m\.|p\.m\.))",
+            r"(?:at|from)[\s\"']*(\d{1,2}[\s]*(?:am|pm|a\.m\.|p\.m\.))",
+            r"(?:at|from)[\s\"']*(\d{1,2}(?::\d{2})?[\s]*(?:o'clock))",
+            r"(?:at|from)[\s\"']*(\d{1,2}(?::\d{2}))",
+        ]
+
+        time_str = None
+        for pattern in time_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                time_str = match.group(1)
+                if time_str:
+                    event_details["time_str"] = time_str
+                    break
+
+        # Try to extract duration
+        duration_patterns = [
+            r"(?:for|lasting)[\s\"']*(\d+[\s]*hours?)",
+            r"(?:for|lasting)[\s\"']*(\d+[\s]*minutes?)",
+            r"(?:for|lasting)[\s\"']*(\d+[\s]*hour(?:s)?[\s,]*(?:and)?[\s,]*\d+[\s]*minute(?:s)?)",
+        ]
+
+        for pattern in duration_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                duration_str = match.group(1)
+                if duration_str:
+                    event_details["duration"] = duration_str
+                    break
+
+        # Parse date and time to create start_time
+        start_time = None
+
+        # If we have both date and time
+        if "date_str" in event_details and "time_str" in event_details:
+            try:
+                start_time = parser.parse(
+                    f"{event_details['date_str']} {event_details['time_str']}")
+            except:
+                pass
+
+        # If only have date, use noon as default time
+        elif "date_str" in event_details:
+            try:
+                start_time = parser.parse(event_details['date_str'])
+                start_time = start_time.replace(hour=12, minute=0, second=0)
+            except:
+                pass
+
+        # If only have time, use today or tomorrow
+        elif "time_str" in event_details:
+            from datetime import datetime, timezone, timedelta
+
+            try:
+                time_only = parser.parse(event_details['time_str'])
+                now = datetime.now(timezone.utc)
+
+                # Use today if the time is in the future, otherwise tomorrow
+                start_time = now.replace(
+                    hour=time_only.hour,
+                    minute=time_only.minute,
+                    second=0,
+                    microsecond=0
+                )
+
+                if start_time < now:
+                    start_time += timedelta(days=1)
+            except:
+                pass
+
+        # If we couldn't parse a time, check for common phrases
+        if not start_time and "date_str" in event_details:
+            if "tomorrow" in event_details["date_str"].lower():
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc)
+                start_time = (now + timedelta(days=1)).replace(hour=12,
+                                                               minute=0, second=0, microsecond=0)
+            elif "today" in event_details["date_str"].lower():
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc)
+                start_time = now.replace(
+                    hour=12, minute=0, second=0, microsecond=0)
+                if start_time < now:
+                    start_time = now + timedelta(hours=1)
+
+        # If still no start time, default to tomorrow at noon
+        if not start_time:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            start_time = (now + timedelta(days=1)).replace(hour=12,
+                                                           minute=0, second=0, microsecond=0)
+
+        # Set the start time
+        event_details["start_time"] = start_time
+
+        # Calculate end time based on duration if provided
+        if "duration" in event_details:
+            duration_str = event_details["duration"]
+            hours = 0
+            minutes = 0
+
+            # Extract hours
+            hours_match = re.search(
+                r'(\d+)[\s]*hour', duration_str, re.IGNORECASE)
+            if hours_match:
+                hours = int(hours_match.group(1))
+
+            # Extract minutes
+            minutes_match = re.search(
+                r'(\d+)[\s]*minute', duration_str, re.IGNORECASE)
+            if minutes_match:
+                minutes = int(minutes_match.group(1))
+
+            # Default to 1 hour if no valid duration found
+            if hours == 0 and minutes == 0:
+                hours = 1
+
+            from datetime import timedelta
+            event_details["end_time"] = start_time + \
+                timedelta(hours=hours, minutes=minutes)
+        else:
+            # Default to 1 hour duration
+            from datetime import timedelta
+            event_details["end_time"] = start_time + timedelta(hours=1)
+
+        # Attempt to extract location if available
+        location_patterns = [
+            r"(?:at|in|location[:]?)[\s\"']*([^,\.;\n]+)(?:,|\.|;|\n)",
+            r"(?:at|in)[\s\"']*([^,\.;\n]+)$"
+        ]
+
+        for pattern in location_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                potential_location = match.group(1).strip()
+                # Filter out common time-related phrases that might be mistaken for locations
+                time_phrases = ["o'clock", "today",
+                                "tomorrow", "a.m.", "p.m.", "am", "pm"]
+                if not any(phrase in potential_location.lower() for phrase in time_phrases):
+                    event_details["location"] = potential_location
+                    break
+
+        # Create calendar service
+        calendar_service = GoogleCalendarService()
+        service = calendar_service.get_calendar_service({
+            "token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "expiry": credentials.token_expiry.isoformat()
+        })
+
+        # Create the event
+        result = await calendar_service.create_calendar_event(service, event_details)
+
+        # Return success response
+        return {
+            "success": True,
+            "event_id": result.get("id", ""),
+            "summary": result.get("summary", ""),
+            "start": result.get("start", {}).get("dateTime", ""),
+            "end": result.get("end", {}).get("dateTime", ""),
+            "html_link": result.get("htmlLink", "")
+        }
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(
+            f"Error creating calendar event: {str(e)}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+# Modify this part of handle_calendar_media_stream function to update instructions
+# Find the part where it sets the instructions for the calendar assistant
+    "'I'll create that event for you now' and actually create the event in their calendar. "
+    "IMPORTANT: Introduce yourself as a calendar assistant. "
+    "Remain connected and responsive during silences. "
+    "Offer to help with any other calendar-related questions they might have."
+
+# Add this function before the handle_calendar_media_stream function
+
+
+async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user_id, db):
+    """Receive messages from Twilio for Calendar WebSocket and handle calendar event creation."""
+    import re
+
+    # Patterns to detect calendar event creation intent
+    calendar_event_patterns = [
+        r"(?:add|create|schedule|make).*?(?:event|meeting|appointment)",
+        r"(?:add|create|schedule|make|put).*?(?:to|on|in)[\s]*(?:my)?[\s]*calendar",
+        r"(?:schedule|add|create|put).*?(?:on|in)[\s]*(?:my)?[\s]*calendar",
+    ]
+
+    try:
+        # Store transcripts for NLP processing
+        shared_state["current_transcript"] = ""
+        shared_state["caller"] = "unknown"  # Will be set in start event
+
+        while not shared_state["should_stop"]:
+            message = await ws_manager.receive_text()
+            if not message:
+                continue
+
+            data = json.loads(message)
+
+            # Handle standard events
+            if data.get("event") == "media":
+                # Forward audio to OpenAI
+                await openai_ws.send(json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": data["media"]["payload"]
+                }))
+                logger.debug("Forwarded audio to OpenAI")
+            elif data.get("event") == "start":
+                shared_state["stream_sid"] = data.get("streamSid")
+                shared_state["caller"] = data.get(
+                    "start", {}).get("callerId", "unknown")
+                logger.info(
+                    f"Calendar stream started: {shared_state['stream_sid']}")
+
+                # Initialize session with turn detection
+                await openai_ws.send(json.dumps({
+                    "type": "session.update",
+                    "session": {
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.2,
+                            "prefix_padding_ms": 50,
+                            "silence_duration_ms": 100
+                        }
+                    }
+                }))
+            elif data.get("event") == "stop":
+                logger.info("Calendar stream stopped")
+                shared_state["should_stop"] = True
+                break
+            elif data.get("event") == "speech_started":
+                logger.info(
+                    "Calendar speech started - waiting for transcription")
+
+            # Handle transcript events
+            elif data.get("event") == "transcript":
+                transcript = data.get("transcript", "")
+                if transcript:
+                    # Add to the accumulated transcript for processing
+                    shared_state["current_transcript"] += transcript + " "
+                    logger.debug(f"Received transcript: {transcript}")
+
+                    # Check for calendar event creation intent
+                    for pattern in calendar_event_patterns:
+                        if re.search(pattern, transcript, re.IGNORECASE):
+                            logger.info(
+                                f"Detected calendar event creation intent: {transcript}")
+
+                            # Process the transcript to extract event details
+                            event_result = await handle_calendar_event_creation(
+                                shared_state["current_transcript"],
+                                user_id,
+                                db
+                            )
+
+                            if event_result["success"]:
+                                # Format a confirmation message with event details
+                                summary = event_result.get(
+                                    "summary", "New Event")
+                                start_time = event_result.get("start", "")
+
+                                # Format the datetime for more natural display
+                                try:
+                                    from dateutil import parser
+                                    start_dt = parser.parse(start_time)
+                                    start_formatted = start_dt.strftime(
+                                        "%A, %B %d at %I:%M %p")
+                                except:
+                                    start_formatted = start_time
+
+                                confirmation = (
+                                    f"I've created the calendar event '{summary}' "
+                                    f"scheduled for {start_formatted}. "
+                                    f"You can view it in your Google Calendar."
+                                )
+
+                                # Send a message to the AI to relay the confirmation
+                                await openai_ws.send(json.dumps({
+                                    "type": "conversation.item.create",
+                                    "item": {
+                                        "type": "message",
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "input_text",
+                                                "text": f"[SYSTEM NOTE: Event created successfully. Please tell the user: {confirmation}]"
+                                            }
+                                        ]
+                                    }
+                                }))
+
+                                # Request a response from the AI
+                                await openai_ws.send(json.dumps({
+                                    "type": "response.create"
+                                }))
+
+                                # Reset the transcript to prevent re-processing
+                                shared_state["current_transcript"] = ""
+                                logger.info(
+                                    f"Calendar event created successfully: {summary}")
+                            else:
+                                # Send error message to the AI
+                                error_message = event_result.get(
+                                    "error", "Unknown error")
+                                await openai_ws.send(json.dumps({
+                                    "type": "conversation.item.create",
+                                    "item": {
+                                        "type": "message",
+                                        "role": "user",
+                                        "content": [
+                                            {
+                                                "type": "input_text",
+                                                "text": f"[SYSTEM NOTE: Failed to create event. Error: {error_message}. Please explain to the user that you couldn't create the event and ask them to try again.]"
+                                            }
+                                        ]
+                                    }
+                                }))
+
+                                # Request a response from the AI
+                                await openai_ws.send(json.dumps({
+                                    "type": "response.create"
+                                }))
+
+                                logger.error(
+                                    f"Failed to create calendar event: {error_message}")
+
+                            # Exit the pattern loop
+                            break
+
+    except websockets.exceptions.ConnectionClosed:
+        logger.warning("Twilio WebSocket connection closed for calendar")
+        shared_state["should_stop"] = True
+    except Exception as e:
+        logger.error(
+            f"Error receiving from Twilio for calendar: {str(e)}", exc_info=True)
+        shared_state["should_stop"] = True

@@ -60,15 +60,20 @@ class GoogleCalendarService:
 
     async def schedule_call(self, service, call_details: Dict[str, Any]):
         try:
+            # Ensure datetime is timezone-aware
+            scheduled_time = call_details["scheduled_time"]
+            if scheduled_time.tzinfo is None:
+                scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+
             event = {
                 'summary': f'Scheduled Call: {call_details["scenario"]}',
                 'description': f'Phone call to {call_details["phone_number"]}',
                 'start': {
-                    'dateTime': call_details["scheduled_time"].isoformat(),
+                    'dateTime': scheduled_time.isoformat(),
                     'timeZone': 'UTC',
                 },
                 'end': {
-                    'dateTime': (call_details["scheduled_time"] + timedelta(minutes=30)).isoformat(),
+                    'dateTime': (scheduled_time + timedelta(minutes=30)).isoformat(),
                     'timeZone': 'UTC',
                 },
             }
@@ -77,6 +82,106 @@ class GoogleCalendarService:
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to schedule calendar event: {str(e)}"
+            )
+
+    async def create_calendar_event(self, service, event_details: Dict[str, Any]):
+        """Create a calendar event
+
+        Args:
+            service: The Google Calendar service instance
+            event_details: Dict containing event details:
+                - title/summary: Event title
+                - start_time/start: Start datetime or string
+                - end_time/end: End datetime or string (optional)
+                - description: Event description (optional)
+                - location: Event location (optional)
+
+        Returns:
+            The created event object from Google Calendar API
+        """
+        try:
+            # Handle different possible key names for clarity
+            summary = event_details.get(
+                "title", event_details.get("summary", "New Event"))
+
+            # Parse start time from various formats
+            start_time = None
+            if "start_time" in event_details:
+                start_time = event_details["start_time"]
+            elif "start" in event_details:
+                start_time = event_details["start"]
+
+            # Convert string to datetime if needed
+            if isinstance(start_time, str):
+                try:
+                    # Try to parse the string as datetime
+                    from dateutil import parser
+                    start_time = parser.parse(start_time)
+                except:
+                    # If parsing fails, default to current time + 1 hour
+                    start_time = datetime.now(
+                        timezone.utc) + timedelta(hours=1)
+
+            # If still no start time, default to current time + 1 hour
+            if not start_time:
+                start_time = datetime.now(timezone.utc) + timedelta(hours=1)
+
+            # Ensure start time is timezone-aware
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+
+            # Handle end time
+            end_time = None
+            if "end_time" in event_details:
+                end_time = event_details["end_time"]
+            elif "end" in event_details:
+                end_time = event_details["end"]
+
+            # Parse end time from string if needed
+            if isinstance(end_time, str):
+                try:
+                    from dateutil import parser
+                    end_time = parser.parse(end_time)
+                except:
+                    # Default to start time + 1 hour if parsing fails
+                    end_time = start_time + timedelta(hours=1)
+
+            # If no end time, default to start time + 1 hour
+            if not end_time:
+                end_time = start_time + timedelta(hours=1)
+
+            # Ensure end time is timezone-aware
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+
+            # Create the event object
+            event = {
+                'summary': summary,
+                'start': {
+                    'dateTime': start_time.isoformat(),
+                    'timeZone': 'UTC',
+                },
+                'end': {
+                    'dateTime': end_time.isoformat(),
+                    'timeZone': 'UTC',
+                },
+            }
+
+            # Add optional fields if provided
+            if "description" in event_details:
+                event['description'] = event_details["description"]
+
+            if "location" in event_details:
+                event['location'] = event_details["location"]
+
+            # Insert the event
+            result = service.events().insert(calendarId='primary', body=event).execute()
+
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create calendar event: {str(e)}"
             )
 
     async def get_upcoming_events(self, service, max_results=10, time_min=None):
@@ -91,7 +196,6 @@ class GoogleCalendarService:
                 time_min = time_min.replace(tzinfo=timezone.utc)
 
             # Format time as RFC3339 timestamp
-            # 'Z' no longer needed as we use timezone-aware objects
             time_min_rfc = time_min.isoformat()
 
             events_result = service.events().list(
@@ -204,16 +308,17 @@ class GoogleCalendarService:
             free_slots = []
             current_day = start_date
 
+            # Get the current time once with timezone awareness
+            current_time = datetime.now(timezone.utc)
+
             # Analyze each day in the range
             while current_day <= end_date and len(free_slots) < max_results:
                 day_start = current_day.replace(
-                    hour=working_hours[0], minute=0, second=0)
+                    hour=working_hours[0], minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
                 day_end = current_day.replace(
-                    hour=working_hours[1], minute=0, second=0)
+                    hour=working_hours[1], minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
 
                 # Skip if current day is already past
-                # Use timezone-aware datetime
-                current_time = datetime.now(timezone.utc)
                 if day_end < current_time:
                     current_day += timedelta(days=1)
                     continue
@@ -223,7 +328,7 @@ class GoogleCalendarService:
                     day_start = current_time.replace(
                         minute=(current_time.minute // 30) * 30,
                         second=0, microsecond=0,
-                        tzinfo=timezone.utc  # Ensure timezone awareness
+                        tzinfo=timezone.utc
                     ) + timedelta(minutes=30)  # Round up to next half hour
 
                 # Find free slots for this day
