@@ -1,5 +1,5 @@
 # models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Float
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Float, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db import Base
@@ -78,6 +78,23 @@ class TranscriptRecord(Base):
     sentences_json = Column(Text)  # JSON string of sentence data
     created_at = Column(DateTime, default=datetime.now())
     user_id = Column(Integer, ForeignKey('users.id'))
+
+    # Enhanced fields for better transcript management
+    # When the actual call occurred
+    call_date = Column(DateTime, nullable=True)
+    # Structured participant data
+    participant_info = Column(JSON, nullable=True)
+    # Ordered conversation with speaker identification
+    conversation_flow = Column(JSON, nullable=True)
+    # Link to original recording if available
+    media_url = Column(String, nullable=True)
+    # "Recording", "ExternalRecording", "Call", etc.
+    source_type = Column(String, nullable=True)
+    call_direction = Column(String, nullable=True)  # "inbound", "outbound"
+    # The scenario used for the call
+    scenario_name = Column(String, nullable=True)
+    # Summary statistics and metadata
+    summary_data = Column(JSON, nullable=True)
 
 
 class CustomScenario(Base):

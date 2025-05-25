@@ -10,7 +10,7 @@ This application provides a complete solution for creating realistic voice assis
 - Process incoming calls with natural language understanding.
 - Schedule calls for later execution.
 - Automatically transcribe call recordings using Twilio Voice Intelligence.
-- Store and retrieve call transcripts, including sentence-level details with speaker identification.
+- Store and retrieve call transcripts with enhanced conversation flow analysis, including sentence-level details with speaker identification and participant roles.
 - Create and manage custom conversation scenarios.
 - Stream real-time audio between users and OpenAI's voice models using WebRTC for interactive sessions.
 - Offer direct audio transcription via OpenAI Whisper API.
@@ -21,7 +21,12 @@ This application provides a complete solution for creating realistic voice assis
 - **Dynamic Voice Interaction**: Engage in natural, real-time conversations powered by OpenAI.
 - **Twilio Integration**: Leverages Twilio for PSTN connectivity (making/receiving calls) and call recording.
 - **OpenAI Realtime API & Whisper**: Utilizes OpenAI for generating voice responses in real-time and for direct audio file transcription.
-- **Twilio Voice Intelligence**: Automated transcription of call recordings, with results stored locally.
+- **Enhanced Twilio Voice Intelligence**:
+  - Automated transcription of call recordings with advanced conversation flow analysis
+  - Speaker identification and role assignment (AI agent vs customer)
+  - Detailed conversation statistics and participant information
+  - Structured conversation flow with timestamps and confidence scores
+  - Results stored locally with enhanced metadata for frontend consumption
 - **Comprehensive Call Management**:
   - Outbound calls to specified phone numbers using predefined or custom scenarios.
   - Incoming call handling with routing to appropriate scenarios.
@@ -29,12 +34,15 @@ This application provides a complete solution for creating realistic voice assis
 - **Scenario Management**:
   - Define custom personas, prompts, and voice configurations for varied call interactions.
   - CRUD operations for custom scenarios.
-- **Transcription Services**:
-  - Automatic transcription of recorded Twilio calls.
-  - Webhook for receiving completed transcripts from Twilio.
-  - Local storage of transcripts for quick retrieval.
-  - Endpoints to list and fetch stored transcripts, including detailed sentence-by-sentence data with speaker channels.
-  - Direct transcription of uploaded audio files using OpenAI Whisper.
+- **Enhanced Transcription Services**:
+  - Automatic transcription of recorded Twilio calls with conversation flow analysis
+  - Enhanced transcript endpoints with participant identification and conversation structure
+  - Webhook for receiving completed transcripts from Twilio with automatic enhancement
+  - Local storage of transcripts with enhanced metadata for quick retrieval
+  - Endpoints to list and fetch enhanced transcripts with filtering options
+  - Detailed sentence-by-sentence data with speaker channels, roles, and conversation flow
+  - Direct transcription of uploaded audio files using OpenAI Whisper
+  - Import functionality to enhance existing Twilio transcripts
 - **Authentication & Authorization**:
   - Secure JWT-based authentication (access and refresh tokens).
   - OAuth2 compatible token endpoint.
@@ -43,7 +51,7 @@ This application provides a complete solution for creating realistic voice assis
   - WebSocket endpoints for streaming audio data between the client, the server, and OpenAI during a live call.
   - WebRTC signaling support for establishing peer-to-peer connections if needed by a frontend.
 - **Database & ORM**:
-  - SQLAlchemy for database interaction.
+  - SQLAlchemy for database interaction with enhanced transcript schema.
   - Alembic for database migrations.
   - Supports SQLite for development and PostgreSQL for production.
 - **Configuration & Logging**:
@@ -98,7 +106,7 @@ This application provides a complete solution for creating realistic voice assis
 5. Set up Twilio Webhooks:
 
    - **TwiML App/Phone Number Status Callback URL (for Recordings):** Point this to `https://YOUR_NGROK_URL/recording-callback` (HTTP POST). This triggers transcription initiation.
-   - **Twilio Voice Intelligence Service Webhook URL (for Transcript Completion):** Point this to `https://YOUR_NGROK_URL/twilio-transcripts/webhook-callback` (HTTP POST). This processes and stores the transcript.
+   - **Twilio Voice Intelligence Service Webhook URL (for Transcript Completion):** Point this to `https://YOUR_NGROK_URL/twilio-transcripts/webhook-callback` (HTTP POST). This processes and stores the transcript with enhanced analysis.
 
 6. Run database migrations:
 
@@ -108,9 +116,38 @@ This application provides a complete solution for creating realistic voice assis
 
 7. Run the backend application:
    ```bash
-   uvicorn app.main:app --reload --port YOUR_BACKEND_PORT # Default port is 8000, ensure it matches Ngrok
+   uvicorn app.main:app --reload --port 5050
    ```
-   Ensure Ngrok is forwarding to this port, e.g., `ngrok http YOUR_BACKEND_PORT`.
+   Ensure Ngrok is forwarding to this port, e.g., `ngrok http 5050`.
+
+### Enhanced Transcript Workflow
+
+The application now provides an enhanced transcript workflow that captures detailed conversation flow and participant information:
+
+1. **Make a Call**: Use any of the call endpoints to initiate a call
+2. **Automatic Processing**: When the call ends and recording is available:
+   - Twilio calls `/recording-callback` webhook
+   - System creates a Twilio Intelligence transcript
+   - When transcript is complete, Twilio calls `/twilio-transcripts/webhook-callback`
+   - System automatically enhances the transcript with conversation flow analysis
+3. **Access Enhanced Data**: Use the enhanced transcript endpoints to retrieve structured conversation data
+
+**Recommended Workflow for Frontend Integration:**
+
+```bash
+# 1. Make a call
+GET /make-call/{phone_number}/{scenario}
+
+# 2. List enhanced transcripts (after call completion)
+GET /api/enhanced-transcripts/
+
+# 3. Get detailed transcript with conversation flow
+GET /api/enhanced-transcripts/{transcript_sid}
+
+# 4. Or manually import/enhance existing transcripts
+POST /api/import-twilio-transcripts
+POST /api/enhanced-twilio-transcripts/fetch-and-store
+```
 
 ### Frontend Installation & Running (Example for a typical React/Vite setup)
 
@@ -132,7 +169,7 @@ This application provides a complete solution for creating realistic voice assis
 
 ## API Endpoint Documentation
 
-The API is documented with OpenAPI and can be accessed at `/docs` when the backend is running (e.g., `http://localhost:YOUR_BACKEND_PORT/docs`).
+The API is documented with OpenAPI and can be accessed at `/docs` when the backend is running (e.g., `http://localhost:5050/docs`).
 
 **Base URL for API calls:** `https://YOUR_PUBLIC_URL` (e.g., your Ngrok URL or production domain)
 
@@ -181,17 +218,89 @@ Used internally by the call handling TwiML to connect audio to OpenAI.
 
 ### Custom Scenarios
 
-| Endpoint                         | Method | Description                | Request Body                        | Response (Success 200/201/204)      |
-| -------------------------------- | ------ | -------------------------- | ----------------------------------- | ----------------------------------- |
-| `/realtime/custom-scenario`      | POST   | Create a custom scenario.  | `CustomScenarioCreate` schema       | `CustomScenarioRead` schema         |
-| `/realtime/custom-scenarios`     | GET    | List all custom scenarios. | None                                | `List[CustomScenarioRead]`          |
-| `/realtime/custom-scenario/{id}` | GET    | Get a specific scenario.   | `id` (path)                         | `CustomScenarioRead` schema         |
-| `/realtime/custom-scenario/{id}` | PUT    | Update a scenario.         | `id` (path), `CustomScenarioUpdate` | `CustomScenarioRead` schema         |
-| `/realtime/custom-scenario/{id}` | DELETE | Delete a scenario.         | `id` (path)                         | `{ "message": "Scenario deleted" }` |
+| Endpoint                          | Method | Description                | Request Body                      | Response (Success 200/201/204)      |
+| --------------------------------- | ------ | -------------------------- | --------------------------------- | ----------------------------------- |
+| `/realtime/custom-scenario`       | POST   | Create a custom scenario.  | `CustomScenarioCreate` schema     | `CustomScenarioRead` schema         |
+| `/custom-scenarios`               | GET    | List all custom scenarios. | None                              | `List[CustomScenarioRead]`          |
+| `/custom-scenarios/{scenario_id}` | GET    | Get a specific scenario.   | `scenario_id` (path)              | `CustomScenarioRead` schema         |
+| `/custom-scenarios/{scenario_id}` | PUT    | Update a scenario.         | `scenario_id` (path), update data | `CustomScenarioRead` schema         |
+| `/custom-scenarios/{scenario_id}` | DELETE | Delete a scenario.         | `scenario_id` (path)              | `{ "message": "Scenario deleted" }` |
 
-### Transcription Services
+### Enhanced Transcription Services
 
-#### Twilio Voice Intelligence Based (Automatic for Recorded Calls)
+#### Enhanced Twilio Voice Intelligence Based (Recommended for Frontend)
+
+**Primary Enhanced Endpoints (Recommended for Frontend Use):**
+
+| Endpoint                                           | Method | Description                                                  | Query Params                                                               | Response (Success 200)                                                   |
+| -------------------------------------------------- | ------ | ------------------------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `/api/enhanced-transcripts/`                       | GET    | List enhanced transcripts with filtering options             | `skip`, `limit`, `call_direction`, `scenario_name`, `date_from`, `date_to` | Enhanced transcript list with conversation flow metadata                 |
+| `/api/enhanced-transcripts/{transcript_sid}`       | GET    | Get detailed enhanced transcript with full conversation flow | `transcript_sid` (path)                                                    | Complete enhanced transcript with participant info and conversation flow |
+| `/api/enhanced-twilio-transcripts/fetch-and-store` | POST   | Fetch and enhance a specific Twilio transcript               | `{ "transcript_sid": "GT..." }`                                            | Enhanced transcript data with conversation analysis                      |
+| `/api/import-twilio-transcripts`                   | POST   | Import and enhance all available Twilio transcripts          | None                                                                       | Bulk import results with success/failure counts                          |
+
+**Enhanced Transcript Data Structure:**
+
+```json
+{
+  "transcript_sid": "GT...",
+  "call_date": "2024-01-15T10:30:00Z",
+  "duration": 180,
+  "call_direction": "outbound",
+  "scenario_name": "default",
+  "participant_info": {
+    "0": {
+      "channel": 0,
+      "role": "customer",
+      "name": "Customer",
+      "total_speaking_time": 90,
+      "word_count": 150,
+      "sentence_count": 12
+    },
+    "1": {
+      "channel": 1,
+      "role": "agent",
+      "name": "AI Agent",
+      "total_speaking_time": 90,
+      "word_count": 200,
+      "sentence_count": 15
+    }
+  },
+  "conversation_flow": [
+    {
+      "sequence": 1,
+      "speaker": {
+        "channel": 1,
+        "role": "agent",
+        "name": "AI Agent"
+      },
+      "text": "Hello, this is Mike Thompson calling about...",
+      "start_time": 0.5,
+      "end_time": 3.2,
+      "duration": 2.7,
+      "confidence": 0.95,
+      "word_count": 8
+    }
+  ],
+  "summary_data": {
+    "total_duration_seconds": 180,
+    "total_sentences": 27,
+    "total_words": 350,
+    "participant_count": 2,
+    "average_confidence": 0.92,
+    "conversation_stats": {
+      "turns": 27,
+      "avg_words_per_turn": 13,
+      "speaking_time_distribution": {
+        "0": { "percentage": 50, "seconds": 90 },
+        "1": { "percentage": 50, "seconds": 90 }
+      }
+    }
+  }
+}
+```
+
+#### Legacy/Direct Twilio Voice Intelligence Access
 
 1.  **Initiation:**
 
@@ -205,13 +314,13 @@ Used internally by the call handling TwiML to connect audio to OpenAI.
 2.  **Webhook (from Twilio VI to your app):**
     | Endpoint | Method | Description |
     |-----------------------------------------|--------|--------------------------------------------------------------------------------|
-    | `/twilio-transcripts/webhook-callback` | POST | Twilio VI sends notification here when transcript is ready. App stores it. |
+    | `/twilio-transcripts/webhook-callback` | POST | Twilio VI sends notification here when transcript is ready. App stores it with enhancement. |
 
-3.  **Retrieving Stored Transcripts (Recommended for Frontend):**
+3.  **Legacy Stored Transcripts Access:**
     | Endpoint | Method | Description | Path/Query Params | Response (Success 200) |
     |-----------------------------------------|--------|-------------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------|
-    | `/stored-transcripts/` | GET | List locally stored transcripts. | `skip`, `limit` (query) | `List[TranscriptRecordRead]` (includes `id`, `transcript_sid`, `status`, `full_text`, `date_created`, `duration`, etc.) |
-    | `/stored-transcripts/{transcript_sid}` | GET | Get a specific locally stored transcript by its Twilio Transcript SID. | `transcript_sid` (path) | `TranscriptRecordRead` |
+    | `/stored-transcripts/` | GET | List locally stored transcripts (legacy format). | `skip`, `limit` (query) | `List[TranscriptRecordRead]` (basic format) |
+    | `/stored-transcripts/{transcript_sid}` | GET | Get a specific locally stored transcript by its Twilio Transcript SID. | `transcript_sid` (path) | `TranscriptRecordRead` (basic format) |
     | `/api/transcripts/{transcript_sid}` | GET | Get detailed locally stored transcript including sentences. | `transcript_sid` (path) | `{ "status": "success", "transcript": { "full_text": "...", "sentences": [...], ...} }` |
 
 4.  **Direct Twilio VI API Access (Less common for frontend, more for admin/debug):**
@@ -249,10 +358,24 @@ _Calendar-aware call endpoint is listed under Call Management._
 | ----------------------------------- | ------ | -------------------------------------------------------------- |
 | `/debug/twilio-intelligence-config` | GET    | Show current Twilio Voice Intelligence config loaded by app.   |
 | `/debug/recent-conversations`       | GET    | List recent conversation records from the database.            |
-| `/debug/recording-callback-status`  | GET    | (May need implementation) Check status of recording callbacks. |
+| `/debug/recording-callback-status`  | GET    | Check status of recording callbacks and transcript processing. |
 | `/debug/transcript-records`         | GET    | List all transcript records directly from the database.        |
-| `/debug/all-users`                  | GET    | List all users (admin only).                                   |
-| `/debug/protected-admin`            | GET    | Example protected admin route.                                 |
+| `/test-db-connection`               | GET    | Test database connectivity.                                    |
+
+## Enhanced Database Schema
+
+The application now includes enhanced database fields for storing detailed transcript analysis:
+
+### TranscriptRecord Model (Enhanced)
+
+- `call_date`: DateTime of the call
+- `participant_info`: JSON field storing participant details and roles
+- `conversation_flow`: JSON field storing structured conversation with timestamps
+- `media_url`: URL to the original recording (if available)
+- `source_type`: Source of the transcript (e.g., "TwilioIntelligence")
+- `call_direction`: Direction of the call ("inbound" or "outbound")
+- `scenario_name`: Name of the scenario used for the call
+- `summary_data`: JSON field storing conversation statistics and analysis
 
 ## Deployment
 
@@ -262,10 +385,8 @@ A `Dockerfile` is included for containerization:
 
 ```bash
 docker build -t speech-assistant-api .
-docker run -p YOUR_CHOSEN_PORT:YOUR_BACKEND_PORT --env-file .env speech-assistant-api
+docker run -p 5050:5050 --env-file .env speech-assistant-api
 ```
-
-(Ensure `YOUR_BACKEND_PORT` inside the container matches what Uvicorn runs on, and `YOUR_CHOSEN_PORT` is what you access it from on your host.)
 
 ### Production Considerations
 

@@ -74,6 +74,7 @@ from app.middleware.security_headers import add_security_headers
 from app.routes import google_calendar
 from app.services.google_calendar import GoogleCalendarService
 from datetime import timedelta
+from dateutil import parser
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -304,7 +305,12 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",  # Vite default dev server
+        "http://localhost:3000",  # Create React App default
+        "http://localhost:5000",  # Other common dev ports
+        "*"  # Temporary for development - remove in production
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -797,7 +803,7 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state):
         shared_state["should_stop"] = True
 
 
-async def process_outgoing_audio(audio_data, call_sid, speaker="AI", scenario_name="unknown"):
+async def process_outgoing_audio(audio_data, call_sid,  speaker="AI", scenario_name="unknown"):
     """Process and transcribe outgoing audio."""
     db = None
     temp_file_path = None
@@ -3520,6 +3526,443 @@ async def import_twilio_transcripts(
         )
 
 
+@app.post("/api/enhanced-twilio-transcripts/fetch-and-store")
+@rate_limit("10/minute")
+@with_twilio_retry(max_retries=3)
+async def fetch_and_store_enhanced_transcript(
+    request: Request,
+    transcript_sid: str = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Enhanced endpoint to fetch Twilio Intelligence transcripts with full conversation flow,
+    participant identification, and structured data for frontend display.
+
+    This endpoint:
+    1. Fetches the transcript from Twilio Intelligence API
+    2. Extracts detailed sentence-level data with speaker identification
+    3. Creates a structured conversation flow
+    4. Identifies participants (AI agent vs customer)
+    5. Stores enhanced data in our database
+    """
+    try:
+        logger.info(
+            f"Fetching enhanced transcript {transcript_sid} for user {current_user.id}")
+
+        # Check if transcript already exists
+        existing_transcript = db.query(TranscriptRecord).filter(
+            TranscriptRecord.transcript_sid == transcript_sid
+        ).first()
+
+        if existing_transcript:
+            logger.info(
+                f"Transcript {transcript_sid} already exists, returning existing data")
+            return {
+                "status": "success",
+                "message": "Transcript already stored",
+                "transcript_data": {
+                    "transcript_sid": existing_transcript.transcript_sid,
+                    "call_date": existing_transcript.call_date.isoformat() if existing_transcript.call_date else None,
+                    "duration": existing_transcript.duration,
+                    "participant_info": existing_transcript.participant_info,
+                    "conversation_flow": existing_transcript.conversation_flow,
+                    "summary_data": existing_transcript.summary_data,
+                    "full_text": existing_transcript.full_text
+                }
+            }
+
+        # Fetch transcript from Twilio Intelligence API
+        logger.info(
+            f"Fetching transcript details from Twilio for {transcript_sid}")
+        transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
+
+        # Fetch sentences with detailed information
+        sentences = get_twilio_client().intelligence.v2.transcripts(
+            transcript_sid).sentences.list()
+
+        if not sentences:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No sentences found for transcript {transcript_sid}"
+            )
+
+        logger.info(
+            f"Retrieved {len(sentences)} sentences for transcript {transcript_sid}")
+
+        # Sort sentences by start time for proper conversation flow
+        sorted_sentences = sorted(
+            sentences, key=lambda s: getattr(s, "start_time", 0))
+
+        # Helper function for decimal conversion
+        def decimal_to_float(obj):
+            from decimal import Decimal
+            if isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+
+        # Analyze participants and conversation flow
+        participants = {}
+        conversation_flow = []
+        speaker_stats = {}
+
+        for sentence in sorted_sentences:
+            # Extract sentence data
+            sentence_text = getattr(sentence, "transcript", "")
+            media_channel = getattr(sentence, "media_channel", 0)
+            start_time = decimal_to_float(getattr(sentence, "start_time", 0))
+            end_time = decimal_to_float(getattr(sentence, "end_time", 0))
+            confidence = decimal_to_float(
+                getattr(sentence, "confidence", None))
+
+            # Determine speaker role based on media channel and content analysis
+            speaker_role = "unknown"
+            speaker_name = f"Speaker {media_channel}"
+
+            # Channel 0 is typically the caller, Channel 1 is typically the called party
+            if media_channel == 0:
+                speaker_role = "customer"
+                speaker_name = "Customer"
+            elif media_channel == 1:
+                speaker_role = "agent"
+                speaker_name = "AI Agent"
+
+            # Track participant information
+            if media_channel not in participants:
+                participants[media_channel] = {
+                    "channel": media_channel,
+                    "role": speaker_role,
+                    "name": speaker_name,
+                    "total_speaking_time": 0,
+                    "word_count": 0,
+                    "sentence_count": 0
+                }
+
+            # Update speaker statistics
+            speaking_duration = end_time - start_time
+            word_count = len(sentence_text.split()) if sentence_text else 0
+
+            participants[media_channel]["total_speaking_time"] += speaking_duration
+            participants[media_channel]["word_count"] += word_count
+            participants[media_channel]["sentence_count"] += 1
+
+            # Add to conversation flow
+            conversation_entry = {
+                "sequence": len(conversation_flow) + 1,
+                "speaker": {
+                    "channel": media_channel,
+                    "role": speaker_role,
+                    "name": speaker_name
+                },
+                "text": sentence_text,
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration": speaking_duration,
+                "confidence": confidence,
+                "word_count": word_count,
+                "timestamp": start_time  # For easy sorting/filtering
+            }
+            conversation_flow.append(conversation_entry)
+
+        # Create full conversation text
+        full_text = " ".join([entry["text"]
+                             for entry in conversation_flow if entry["text"]])
+
+        # Calculate summary statistics
+        total_duration = decimal_to_float(
+            transcript.duration) if transcript.duration else 0
+        total_words = sum([p["word_count"] for p in participants.values()])
+
+        summary_data = {
+            "total_duration_seconds": total_duration,
+            "total_sentences": len(conversation_flow),
+            "total_words": total_words,
+            "participant_count": len(participants),
+            "language_code": transcript.language_code,
+            "average_confidence": sum([entry["confidence"] for entry in conversation_flow if entry["confidence"]]) / len(conversation_flow) if conversation_flow else 0,
+            "conversation_stats": {
+                "turns": len(conversation_flow),
+                "avg_words_per_turn": total_words / len(conversation_flow) if conversation_flow else 0,
+                "speaking_time_distribution": {
+                    str(channel): {
+                        "percentage": (p["total_speaking_time"] / total_duration * 100) if total_duration > 0 else 0,
+                        "seconds": p["total_speaking_time"]
+                    } for channel, p in participants.items()
+                }
+            }
+        }
+
+        # Determine call direction and scenario from conversation context
+        call_direction = "unknown"
+        scenario_name = "unknown"
+
+        # Try to find related conversation record to get more context
+        related_conversation = None
+        if hasattr(transcript, 'call_sid') and transcript.call_sid:
+            related_conversation = db.query(Conversation).filter(
+                Conversation.call_sid == transcript.call_sid
+            ).first()
+
+        if related_conversation:
+            call_direction = related_conversation.direction or "unknown"
+            scenario_name = related_conversation.scenario or "unknown"
+            logger.info(
+                f"Found related conversation: direction={call_direction}, scenario={scenario_name}")
+
+        # Create enhanced TranscriptRecord
+        enhanced_transcript = TranscriptRecord(
+            transcript_sid=transcript_sid,
+            status=transcript.status,
+            full_text=full_text,
+            date_created=transcript.date_created,
+            date_updated=transcript.date_updated,
+            duration=total_duration,
+            language_code=transcript.language_code,
+            user_id=current_user.id,
+
+            # Enhanced fields
+            call_date=transcript.date_created,  # Use transcript creation as call date
+            participant_info=participants,
+            conversation_flow=conversation_flow,
+            media_url=None,  # Could be populated if we have access to recording URL
+            source_type="TwilioIntelligence",
+            call_direction=call_direction,
+            scenario_name=scenario_name,
+            summary_data=summary_data,
+
+            # Keep original sentences_json for backward compatibility
+            sentences_json=json.dumps([{
+                "transcript": entry["text"],
+                "speaker": entry["speaker"]["channel"],
+                "start_time": entry["start_time"],
+                "end_time": entry["end_time"],
+                "confidence": entry["confidence"]
+            } for entry in conversation_flow], default=decimal_to_float)
+        )
+
+        # Save to database
+        db.add(enhanced_transcript)
+        db.commit()
+        db.refresh(enhanced_transcript)
+
+        logger.info(
+            f"Successfully stored enhanced transcript {transcript_sid}")
+
+        # Return structured response for frontend
+        return {
+            "status": "success",
+            "message": "Enhanced transcript fetched and stored successfully",
+            "transcript_data": {
+                "transcript_sid": enhanced_transcript.transcript_sid,
+                "call_date": enhanced_transcript.call_date.isoformat() if enhanced_transcript.call_date else None,
+                "duration": enhanced_transcript.duration,
+                "participant_info": enhanced_transcript.participant_info,
+                "conversation_flow": enhanced_transcript.conversation_flow,
+                "summary_data": enhanced_transcript.summary_data,
+                "full_text": enhanced_transcript.full_text,
+                "call_direction": enhanced_transcript.call_direction,
+                "scenario_name": enhanced_transcript.scenario_name,
+                "source_type": enhanced_transcript.source_type,
+                "language_code": enhanced_transcript.language_code,
+                "status": enhanced_transcript.status
+            }
+        }
+
+    except TwilioResourceError as e:
+        logger.error(f"Transcript not found: {e.message}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transcript not found: {transcript_sid}"
+        )
+    except TwilioAuthError as e:
+        logger.error(f"Authentication error: {e.message}")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication error with Twilio service"
+        )
+    except TwilioApiError as e:
+        logger.error(f"Twilio API error: {e.message}", extra={
+                     "details": e.details})
+        raise HTTPException(
+            status_code=500,
+            detail="Error communicating with Twilio service"
+        )
+    except Exception as e:
+        logger.error(
+            f"Error fetching enhanced transcript: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing enhanced transcript: {str(e)}"
+        )
+
+
+@app.get("/api/enhanced-transcripts/", response_model=List[Dict])
+async def get_enhanced_transcripts(
+    skip: int = 0,
+    limit: int = 10,
+    call_direction: Optional[str] = None,
+    scenario_name: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get enhanced transcripts with filtering options for frontend display.
+
+    This endpoint returns transcripts with full conversation flow and participant data,
+    optimized for frontend consumption.
+    """
+    try:
+        # Start with base query
+        query = db.query(TranscriptRecord)
+
+        # Filter by user (non-admin users only see their own transcripts)
+        if not getattr(current_user, 'is_admin', False):
+            query = query.filter(TranscriptRecord.user_id == current_user.id)
+
+        # Apply filters
+        if call_direction:
+            query = query.filter(
+                TranscriptRecord.call_direction == call_direction)
+
+        if scenario_name:
+            query = query.filter(
+                TranscriptRecord.scenario_name == scenario_name)
+
+        if date_from:
+            try:
+                from_date = datetime.datetime.fromisoformat(
+                    date_from.replace('Z', '+00:00'))
+                query = query.filter(TranscriptRecord.call_date >= from_date)
+            except ValueError:
+                logger.warning(f"Invalid date_from format: {date_from}")
+
+        if date_to:
+            try:
+                to_date = datetime.datetime.fromisoformat(
+                    date_to.replace('Z', '+00:00'))
+                query = query.filter(TranscriptRecord.call_date <= to_date)
+            except ValueError:
+                logger.warning(f"Invalid date_to format: {date_to}")
+
+        # Order by call date (most recent first)
+        query = query.order_by(TranscriptRecord.call_date.desc().nullslast())
+
+        # Apply pagination
+        transcripts = query.offset(skip).limit(limit).all()
+
+        # Format response for frontend
+        formatted_transcripts = []
+        for transcript in transcripts:
+            formatted_transcript = {
+                "id": transcript.id,
+                "transcript_sid": transcript.transcript_sid,
+                "call_date": transcript.call_date.isoformat() if transcript.call_date else None,
+                "duration": transcript.duration,
+                "call_direction": transcript.call_direction,
+                "scenario_name": transcript.scenario_name,
+                "source_type": transcript.source_type,
+                "language_code": transcript.language_code,
+                "status": transcript.status,
+                "participant_count": len(transcript.participant_info) if transcript.participant_info else 0,
+                "conversation_turns": len(transcript.conversation_flow) if transcript.conversation_flow else 0,
+                "total_words": transcript.summary_data.get("total_words", 0) if transcript.summary_data else 0,
+                "created_at": transcript.created_at.isoformat() if transcript.created_at else None,
+
+                # Include summary for quick overview
+                "summary": {
+                    "duration_formatted": f"{transcript.duration // 60}:{transcript.duration % 60:02d}" if transcript.duration else "0:00",
+                    "participant_info": transcript.participant_info,
+                    "conversation_stats": transcript.summary_data.get("conversation_stats", {}) if transcript.summary_data else {}
+                }
+            }
+            formatted_transcripts.append(formatted_transcript)
+
+        return formatted_transcripts
+
+    except Exception as e:
+        logger.error(
+            f"Error retrieving enhanced transcripts: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving enhanced transcripts"
+        )
+
+
+@app.get("/api/enhanced-transcripts/{transcript_sid}", response_model=Dict)
+async def get_enhanced_transcript_details(
+    transcript_sid: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get detailed enhanced transcript data including full conversation flow.
+
+    This endpoint returns the complete transcript with conversation flow,
+    participant details, and summary statistics for frontend display.
+    """
+    try:
+        # Query the specific transcript
+        query = db.query(TranscriptRecord).filter(
+            TranscriptRecord.transcript_sid == transcript_sid
+        )
+
+        # Filter by user (non-admin users only see their own transcripts)
+        if not getattr(current_user, 'is_admin', False):
+            query = query.filter(TranscriptRecord.user_id == current_user.id)
+
+        transcript = query.first()
+
+        if not transcript:
+            raise HTTPException(
+                status_code=404,
+                detail="Enhanced transcript not found"
+            )
+
+        # Format detailed response
+        detailed_transcript = {
+            "id": transcript.id,
+            "transcript_sid": transcript.transcript_sid,
+            "call_date": transcript.call_date.isoformat() if transcript.call_date else None,
+            "duration": transcript.duration,
+            "call_direction": transcript.call_direction,
+            "scenario_name": transcript.scenario_name,
+            "source_type": transcript.source_type,
+            "language_code": transcript.language_code,
+            "status": transcript.status,
+            "full_text": transcript.full_text,
+            "created_at": transcript.created_at.isoformat() if transcript.created_at else None,
+
+            # Enhanced data
+            "participant_info": transcript.participant_info or {},
+            "conversation_flow": transcript.conversation_flow or [],
+            "summary_data": transcript.summary_data or {},
+
+            # Formatted data for easy frontend consumption
+            "formatted_data": {
+                "duration_formatted": f"{transcript.duration // 60}:{transcript.duration % 60:02d}" if transcript.duration else "0:00",
+                "participant_names": [p.get("name", f"Speaker {p.get('channel', 'Unknown')}") for p in (transcript.participant_info or {}).values()],
+                "total_turns": len(transcript.conversation_flow) if transcript.conversation_flow else 0,
+                "total_words": transcript.summary_data.get("total_words", 0) if transcript.summary_data else 0,
+                "average_confidence": transcript.summary_data.get("average_confidence", 0) if transcript.summary_data else 0
+            }
+        }
+
+        return detailed_transcript
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error retrieving enhanced transcript details: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving enhanced transcript details"
+        )
+
+
 @app.websocket("/calendar-media-stream")
 async def handle_calendar_media_stream(websocket: WebSocket):
     """Handle media stream for calendar-related calls"""
@@ -4372,16 +4815,8 @@ async def handle_calendar_event_creation(message, user_id, db):
             f"Error creating calendar event: {str(e)}", exc_info=True)
         return {"success": False, "error": str(e)}
 
-# Modify this part of handle_calendar_media_stream function to update instructions
-# Find the part where it sets the instructions for the calendar assistant
-    "'I'll create that event for you now' and actually create the event in their calendar. "
-    "IMPORTANT: Introduce yourself as a calendar assistant. "
-    "Remain connected and responsive during silences. "
-    "Offer to help with any other calendar-related questions they might have."
 
 # Add this function before the handle_calendar_media_stream function
-
-
 async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user_id, db):
     """Receive messages from Twilio for Calendar WebSocket and handle calendar event creation."""
     import re
