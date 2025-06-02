@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.services.google_calendar import GoogleCalendarService
 from app.models import User, GoogleCalendarCredentials, Conversation
@@ -44,34 +45,215 @@ async def google_callback(
     state: str,
     db: Session = Depends(get_db)
 ):
-    # Extract user ID from state
-    state_parts = state.split(":")
-    if len(state_parts) < 2:
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
+    """
+    Google OAuth callback endpoint that processes the authorization code
+    and redirects back to the frontend with success/error status.
+    """
+    try:
+        # Extract user ID from state
+        state_parts = state.split(":")
+        if len(state_parts) < 2:
+            logger.error(f"Invalid state parameter: {state}")
+            raise HTTPException(
+                status_code=400, detail="Invalid state parameter")
 
-    user_id = state_parts[1]
+        user_id = state_parts[1]
+        logger.info(
+            f"Processing Google Calendar callback for user ID: {user_id}")
 
-    # Get user from database
-    current_user = db.query(User).filter(User.id == user_id).first()
-    if not current_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # Get user from database
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if not current_user:
+            logger.error(f"User not found for ID: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
 
-    calendar_service = GoogleCalendarService()
-    flow = calendar_service.create_oauth_flow()
-    flow.fetch_token(code=code)
-    credentials = flow.credentials
+        # Process OAuth callback
+        calendar_service = GoogleCalendarService()
+        flow = calendar_service.create_oauth_flow()
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
 
-    # Store credentials in database
-    google_creds = GoogleCalendarCredentials(
-        user_id=current_user.id,
-        token=credentials.token,
-        refresh_token=credentials.refresh_token,
-        token_expiry=credentials.expiry
-    )
-    db.add(google_creds)
-    db.commit()
+        # Check if user already has credentials and update them, or create new ones
+        existing_creds = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == current_user.id
+        ).first()
 
-    return {"message": "Calendar integration successful"}
+        if existing_creds:
+            # Update existing credentials
+            existing_creds.token = credentials.token
+            existing_creds.refresh_token = credentials.refresh_token
+            existing_creds.token_expiry = credentials.expiry
+            existing_creds.updated_at = datetime.utcnow()
+            logger.info(
+                f"Updated existing Google Calendar credentials for user {current_user.email}")
+        else:
+            # Create new credentials
+            google_creds = GoogleCalendarCredentials(
+                user_id=current_user.id,
+                token=credentials.token,
+                refresh_token=credentials.refresh_token,
+                token_expiry=credentials.expiry
+            )
+            db.add(google_creds)
+            logger.info(
+                f"Created new Google Calendar credentials for user {current_user.email}")
+
+        db.commit()
+
+        # Get frontend URL from environment variable
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5174")
+
+        # Return HTML that redirects to frontend with success parameters
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Google Calendar Connected</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                }}
+                .container {{
+                    text-align: center;
+                    padding: 2rem;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                    backdrop-filter: blur(10px);
+                    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+                }}
+                .success-icon {{
+                    font-size: 4rem;
+                    margin-bottom: 1rem;
+                }}
+                h1 {{
+                    margin: 0 0 1rem 0;
+                    font-size: 2rem;
+                }}
+                p {{
+                    margin: 0.5rem 0;
+                    opacity: 0.9;
+                }}
+                .redirect-link {{
+                    color: #fff;
+                    text-decoration: underline;
+                }}
+            </style>
+            <script>
+                // Redirect after 3 seconds
+                setTimeout(() => {{
+                    window.location.href = '{frontend_url}/scheduled-meetings?success=true&connected=calendar';
+                }}, 3000);
+                
+                // Also allow immediate redirect if user clicks
+                function redirectNow() {{
+                    window.location.href = '{frontend_url}/scheduled-meetings?success=true&connected=calendar';
+                }}
+            </script>
+        </head>
+        <body>
+            <div class="container">
+                <div class="success-icon">✅</div>
+                <h1>Google Calendar Connected!</h1>
+                <p>Your Google Calendar has been successfully connected to your account.</p>
+                <p>You can now schedule AI calls directly from your calendar events.</p>
+                <br>
+                <p>Redirecting you back to the application in 3 seconds...</p>
+                <p>If you're not redirected automatically, <a href="javascript:redirectNow()" class="redirect-link">click here</a>.</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return HTMLResponse(content=html_content)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"OAuth callback error: {str(e)}", exc_info=True)
+
+        # Get frontend URL for error redirect
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5174")
+
+        # Return error HTML that redirects to frontend with error parameters
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Calendar Connection Failed</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+                    color: white;
+                }}
+                .container {{
+                    text-align: center;
+                    padding: 2rem;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                    backdrop-filter: blur(10px);
+                    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+                }}
+                .error-icon {{
+                    font-size: 4rem;
+                    margin-bottom: 1rem;
+                }}
+                h1 {{
+                    margin: 0 0 1rem 0;
+                    font-size: 2rem;
+                }}
+                p {{
+                    margin: 0.5rem 0;
+                    opacity: 0.9;
+                }}
+                .redirect-link {{
+                    color: #fff;
+                    text-decoration: underline;
+                }}
+            </style>
+            <script>
+                // Redirect after 5 seconds for error case
+                setTimeout(() => {{
+                    window.location.href = '{frontend_url}/scheduled-meetings?error=calendar_connection_failed&message=' + encodeURIComponent('There was an error connecting your Google Calendar. Please try again.');
+                }}, 5000);
+                
+                function redirectNow() {{
+                    window.location.href = '{frontend_url}/scheduled-meetings?error=calendar_connection_failed&message=' + encodeURIComponent('There was an error connecting your Google Calendar. Please try again.');
+                }}
+            </script>
+        </head>
+        <body>
+            <div class="container">
+                <div class="error-icon">❌</div>
+                <h1>Calendar Connection Failed</h1>
+                <p>There was an error connecting your Google Calendar.</p>
+                <p>Please try again or contact support if the problem persists.</p>
+                <br>
+                <p>Redirecting you back to the application in 5 seconds...</p>
+                <p>If you're not redirected automatically, <a href="javascript:redirectNow()" class="redirect-link">click here</a>.</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return HTMLResponse(content=error_html)
 
 
 @router.post("/schedule")

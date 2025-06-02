@@ -11,10 +11,10 @@ This application provides a complete solution for creating realistic voice assis
 - Schedule calls for later execution.
 - Automatically transcribe call recordings using Twilio Voice Intelligence.
 - Store and retrieve call transcripts with enhanced conversation flow analysis, including sentence-level details with speaker identification and participant roles.
-- Create and manage custom conversation scenarios.
+- Create and manage custom conversation scenarios with full user isolation.
 - Stream real-time audio between users and OpenAI's voice models using WebRTC for interactive sessions.
 - Offer direct audio transcription via OpenAI Whisper API.
-- Integrate with Google Calendar for making calendar-aware calls (experimental).
+- Integrate with Google Calendar for making calendar-aware calls with seamless OAuth flow.
 
 ## Core Features
 
@@ -31,9 +31,11 @@ This application provides a complete solution for creating realistic voice assis
   - Outbound calls to specified phone numbers using predefined or custom scenarios.
   - Incoming call handling with routing to appropriate scenarios.
   - Call scheduling for future execution.
-- **Scenario Management**:
+- **User-Specific Scenario Management**:
   - Define custom personas, prompts, and voice configurations for varied call interactions.
-  - CRUD operations for custom scenarios.
+  - Full CRUD operations for custom scenarios with user isolation.
+  - Each user can create up to 20 custom scenarios.
+  - Complete multi-tenant SaaS architecture ensuring users only see their own scenarios.
 - **Enhanced Transcription Services**:
   - Automatic transcription of recorded Twilio calls with conversation flow analysis
   - Enhanced transcript endpoints with participant identification and conversation structure
@@ -43,10 +45,12 @@ This application provides a complete solution for creating realistic voice assis
   - Detailed sentence-by-sentence data with speaker channels, roles, and conversation flow
   - Direct transcription of uploaded audio files using OpenAI Whisper
   - Import functionality to enhance existing Twilio transcripts
+  - User-specific transcript isolation
 - **Authentication & Authorization**:
   - Secure JWT-based authentication (access and refresh tokens).
   - OAuth2 compatible token endpoint.
   - CAPTCHA protection on registration and login.
+  - Complete user isolation for all resources.
 - **Real-time Media Streaming**:
   - WebSocket endpoints for streaming audio data between the client, the server, and OpenAI during a live call.
   - WebRTC signaling support for establishing peer-to-peer connections if needed by a frontend.
@@ -60,18 +64,22 @@ This application provides a complete solution for creating realistic voice assis
 - **Security**:
   - Rate limiting on sensitive endpoints.
   - Standard security headers (CSP, HSTS, XSS Protection, etc.).
-- **Google Calendar Integration (Experimental)**:
-  - OAuth2 flow for connecting a user's Google Calendar.
+- **Google Calendar Integration**:
+  - Complete OAuth2 flow for connecting a user's Google Calendar.
+  - Seamless frontend redirect after OAuth authorization.
+  - User-specific calendar credentials storage.
   - Endpoints to make calls that can reference calendar events.
+  - Calendar-aware AI conversations.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Python 3.8+
-- Node.js and npm/yarn (if running the frontend module)
+- Node.js and npm/yarn (for Vite React frontend)
 - OpenAI API key with access to the Realtime API and Whisper.
 - Twilio account with Voice services, a Twilio phone number, and a Voice Intelligence Service configured.
+- Google Cloud Console project with Calendar API enabled (for calendar integration).
 - PostgreSQL (optional, SQLite available for development by default).
 - Ngrok or similar tunneling service for local development with Twilio webhooks.
 
@@ -100,25 +108,101 @@ This application provides a complete solution for creating realistic voice assis
 4. Configure environment variables:
 
    - Copy `.env.example` to `.env`.
-   - Edit `.env` with your API keys (OpenAI, Twilio Account SID, Auth Token, Phone Number, Voice Intelligence Service SID), database URL, secret key, and `PUBLIC_URL` (your Ngrok URL without `https://` for local development, e.g., `your-ngrok-id.ngrok-free.app`).
-   - Ensure `USE_TWILIO_VOICE_INTELLIGENCE=true` and your `TWILIO_VOICE_INTELLIGENCE_SID` are correctly set.
+   - Edit `.env` with your API keys and configuration:
+
+   ```bash
+   # Core Configuration
+   SECRET_KEY=your_secret_key_here
+   DATABASE_URL=sqlite:///./sql_app.db  # or PostgreSQL URL for production
+
+   # Public URL (your Ngrok URL without https:// for local development)
+   PUBLIC_URL=your-ngrok-id.ngrok-free.app
+
+   # Frontend URL (for OAuth redirects)
+   FRONTEND_URL=http://localhost:5173
+
+   # OpenAI Configuration
+   OPENAI_API_KEY=your_openai_api_key
+
+   # Twilio Configuration
+   TWILIO_ACCOUNT_SID=your_twilio_account_sid
+   TWILIO_AUTH_TOKEN=your_twilio_auth_token
+   TWILIO_PHONE_NUMBER=+1234567890
+   USE_TWILIO_VOICE_INTELLIGENCE=true
+   TWILIO_VOICE_INTELLIGENCE_SID=your_voice_intelligence_sid
+
+   # Google Calendar Configuration
+   GOOGLE_CLIENT_ID=your_google_client_id
+   GOOGLE_CLIENT_SECRET=your_google_client_secret
+   GOOGLE_REDIRECT_URI=http://localhost:5050/google-calendar/callback
+   ```
 
 5. Set up Twilio Webhooks:
 
    - **TwiML App/Phone Number Status Callback URL (for Recordings):** Point this to `https://YOUR_NGROK_URL/recording-callback` (HTTP POST). This triggers transcription initiation.
    - **Twilio Voice Intelligence Service Webhook URL (for Transcript Completion):** Point this to `https://YOUR_NGROK_URL/twilio-transcripts/webhook-callback` (HTTP POST). This processes and stores the transcript with enhanced analysis.
 
-6. Run database migrations:
+6. Set up Google Calendar OAuth:
+
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select existing project
+   - Enable the Google Calendar API
+   - Create OAuth 2.0 credentials
+   - Add `http://localhost:5050/google-calendar/callback` to authorized redirect URIs
+   - Copy the client ID and secret to your `.env` file
+
+7. Run database migrations:
 
    ```bash
    alembic upgrade head
    ```
 
-7. Run the backend application:
+8. Run the backend application:
    ```bash
    uvicorn app.main:app --reload --port 5050
    ```
    Ensure Ngrok is forwarding to this port, e.g., `ngrok http 5050`.
+
+### Frontend Installation & Running (Vite React)
+
+1. Navigate to the frontend directory:
+
+   ```bash
+   cd frontend
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+3. Create frontend environment configuration:
+
+   ```bash
+   # Create .env file in frontend directory
+   echo "VITE_API_URL=http://localhost:5050" > .env
+   ```
+
+4. Start the frontend development server:
+   ```bash
+   npm run dev
+   ```
+   The frontend will run on `http://localhost:5173` by default.
+
+### Google Calendar OAuth Flow
+
+The application now provides a seamless OAuth flow for Google Calendar integration:
+
+1. **Frontend initiates OAuth**: User clicks "Connect Google Calendar" button
+2. **Backend provides authorization URL**: `/google-calendar/auth` endpoint returns Google OAuth URL
+3. **User authorizes**: User is redirected to Google for authorization
+4. **Google redirects to backend**: Google sends authorization code to `/google-calendar/callback`
+5. **Backend processes and redirects**: Backend stores credentials and redirects to frontend with success/error parameters
+6. **Frontend handles result**: Frontend receives redirect with parameters and shows appropriate message
+
+**Success redirect**: `http://localhost:5173/scheduled-meetings?success=true&connected=calendar`
+**Error redirect**: `http://localhost:5173/scheduled-meetings?error=calendar_connection_failed&message=...`
 
 ### Enhanced Transcript Workflow
 
@@ -148,24 +232,6 @@ GET /api/enhanced-transcripts/{transcript_sid}
 POST /api/import-twilio-transcripts
 POST /api/enhanced-twilio-transcripts/fetch-and-store
 ```
-
-### Frontend Installation & Running (Example for a typical React/Vite setup)
-
-(Instructions to be confirmed once `package.json` location and scripts are verified)
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend # Or the correct path to your frontend's package.json
-   ```
-2. Install dependencies:
-   ```bash
-   npm install # or yarn install
-   ```
-3. Start the frontend development server:
-   ```bash
-   npm run dev # or npm start, or yarn dev/start
-   ```
-   The frontend will likely run on a different port (e.g., `http://localhost:5173` or `http://localhost:3000`). Ensure this origin is added to the `CORSMiddleware` in `app/main.py`.
 
 ## API Endpoint Documentation
 
