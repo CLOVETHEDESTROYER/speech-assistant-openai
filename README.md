@@ -1,26 +1,63 @@
-# Speech Assistant API
+# Speech Assistant SaaS API
 
-A powerful API for creating and managing voice assistants powered by OpenAI's Realtime API and Twilio Voice Services.
+A comprehensive multi-tenant SaaS platform for creating and managing AI voice assistants powered by OpenAI's Realtime API and Twilio Voice Services.
 
 ## Overview
 
-This application provides a complete solution for creating realistic voice assistants that can:
+This application provides a complete SaaS solution for creating realistic voice assistants with full user onboarding and phone number management:
 
-- Make outbound calls with AI-powered voice interaction using various scenarios.
-- Process incoming calls with natural language understanding.
-- Schedule calls for later execution.
-- Automatically transcribe call recordings using Twilio Voice Intelligence.
-- Store and retrieve call transcripts with enhanced conversation flow analysis, including sentence-level details with speaker identification and participant roles.
-- Create and manage custom conversation scenarios with full user isolation.
-- Stream real-time audio between users and OpenAI's voice models using WebRTC for interactive sessions.
-- Offer direct audio transcription via OpenAI Whisper API.
-- Integrate with Google Calendar for making calendar-aware calls with seamless OAuth flow.
+- **Complete User Onboarding**: Automated setup flow for new users with phone number provisioning and calendar integration.
+- **User-Specific Phone Numbers**: Each user gets their own dedicated Twilio phone number for making AI calls.
+- **Multi-Tenant Architecture**: Full user isolation for all resources including scenarios, transcripts, and phone numbers.
+- **Make outbound calls** with AI-powered voice interaction using various scenarios.
+- **Process incoming calls** with natural language understanding.
+- **Schedule calls** for later execution.
+- **Automatically transcribe** call recordings using Twilio Voice Intelligence.
+- **Store and retrieve** call transcripts with enhanced conversation flow analysis.
+- **Create and manage** custom conversation scenarios with full user isolation.
+- **Stream real-time audio** between users and OpenAI's voice models using WebRTC.
+- **Direct audio transcription** via OpenAI Whisper API.
+- **Google Calendar integration** for making calendar-aware calls with seamless OAuth flow.
+
+## 🆕 New Features (Latest Update)
+
+### **🎯 Complete User Onboarding System**
+
+- **One-time setup flow** for new users with progress tracking
+- **Automatic onboarding initialization** upon registration
+- **Step-by-step wizard**: Phone setup → Calendar → Scenarios → Welcome call
+- **Progress preservation**: Users can resume onboarding where they left off
+- **Smart completion detection**: Automatically detects completed steps
+
+### **📞 User-Specific Phone Number Management**
+
+- **Dedicated phone numbers**: Each user gets their own Twilio phone number
+- **Phone number provisioning**: Search and provision numbers via Twilio API
+- **Phone number management**: View, release, and manage user phone numbers
+- **Development mode support**: Fallback to system phone number for testing
+- **Production ready**: Full user isolation for phone numbers
+
+### **🔄 Hybrid Phone Number System**
+
+- **Development Mode** (`DEVELOPMENT_MODE=true`): Uses system phone number for testing
+- **Production Mode** (`DEVELOPMENT_MODE=false`): Requires user-specific phone numbers
+- **Backward compatibility**: Existing functionality preserved for development
+
+### **⚡ Updated OpenAI Integration**
+
+- **Latest OpenAI Realtime API**: Updated to `gpt-4o-realtime-preview-2025-06-03`
+- **Enhanced performance**: Latest model improvements and capabilities
 
 ## Core Features
 
 - **Dynamic Voice Interaction**: Engage in natural, real-time conversations powered by OpenAI.
 - **Twilio Integration**: Leverages Twilio for PSTN connectivity (making/receiving calls) and call recording.
 - **OpenAI Realtime API & Whisper**: Utilizes OpenAI for generating voice responses in real-time and for direct audio file transcription.
+- **User Onboarding & Phone Management**:
+  - Complete onboarding flow for new users
+  - User-specific phone number provisioning and management
+  - Progress tracking with step completion detection
+  - Clean account setup for multi-tenant SaaS architecture
 - **Enhanced Twilio Voice Intelligence**:
   - Automated transcription of call recordings with advanced conversation flow analysis
   - Speaker identification and role assignment (AI agent vs customer)
@@ -31,6 +68,7 @@ This application provides a complete solution for creating realistic voice assis
   - Outbound calls to specified phone numbers using predefined or custom scenarios.
   - Incoming call handling with routing to appropriate scenarios.
   - Call scheduling for future execution.
+  - User-specific phone numbers for isolated call management.
 - **User-Specific Scenario Management**:
   - Define custom personas, prompts, and voice configurations for varied call interactions.
   - Full CRUD operations for custom scenarios with user isolation.
@@ -51,6 +89,7 @@ This application provides a complete solution for creating realistic voice assis
   - OAuth2 compatible token endpoint.
   - CAPTCHA protection on registration and login.
   - Complete user isolation for all resources.
+  - Automatic onboarding initialization for new users.
 - **Real-time Media Streaming**:
   - WebSocket endpoints for streaming audio data between the client, the server, and OpenAI during a live call.
   - WebRTC signaling support for establishing peer-to-peer connections if needed by a frontend.
@@ -58,9 +97,11 @@ This application provides a complete solution for creating realistic voice assis
   - SQLAlchemy for database interaction with enhanced transcript schema.
   - Alembic for database migrations.
   - Supports SQLite for development and PostgreSQL for production.
+  - Enhanced schema for user onboarding and phone number management.
 - **Configuration & Logging**:
   - Environment variable-based configuration.
   - Detailed logging with rotation and sensitive data filtering.
+  - Development mode flag for easy testing.
 - **Security**:
   - Rate limiting on sensitive endpoints.
   - Standard security headers (CSP, HSTS, XSS Protection, etc.).
@@ -78,7 +119,7 @@ This application provides a complete solution for creating realistic voice assis
 - Python 3.8+
 - Node.js and npm/yarn (for Vite React frontend)
 - OpenAI API key with access to the Realtime API and Whisper.
-- Twilio account with Voice services, a Twilio phone number, and a Voice Intelligence Service configured.
+- Twilio account with Voice services, and a Voice Intelligence Service configured.
 - Google Cloud Console project with Calendar API enabled (for calendar integration).
 - PostgreSQL (optional, SQLite available for development by default).
 - Ngrok or similar tunneling service for local development with Twilio webhooks.
@@ -115,6 +156,9 @@ This application provides a complete solution for creating realistic voice assis
    SECRET_KEY=your_secret_key_here
    DATABASE_URL=sqlite:///./sql_app.db  # or PostgreSQL URL for production
 
+   # Development Mode (set to false for production)
+   DEVELOPMENT_MODE=true
+
    # Public URL (your Ngrok URL without https:// for local development)
    PUBLIC_URL=your-ngrok-id.ngrok-free.app
 
@@ -127,7 +171,7 @@ This application provides a complete solution for creating realistic voice assis
    # Twilio Configuration
    TWILIO_ACCOUNT_SID=your_twilio_account_sid
    TWILIO_AUTH_TOKEN=your_twilio_auth_token
-   TWILIO_PHONE_NUMBER=+1234567890
+   TWILIO_PHONE_NUMBER=+1234567890  # System phone number (for development mode)
    USE_TWILIO_VOICE_INTELLIGENCE=true
    TWILIO_VOICE_INTELLIGENCE_SID=your_voice_intelligence_sid
 
@@ -190,48 +234,41 @@ This application provides a complete solution for creating realistic voice assis
    ```
    The frontend will run on `http://localhost:5173` by default.
 
-### Google Calendar OAuth Flow
+## 🎯 User Onboarding Flow
 
-The application now provides a seamless OAuth flow for Google Calendar integration:
+### New User Experience
 
-1. **Frontend initiates OAuth**: User clicks "Connect Google Calendar" button
-2. **Backend provides authorization URL**: `/google-calendar/auth` endpoint returns Google OAuth URL
-3. **User authorizes**: User is redirected to Google for authorization
-4. **Google redirects to backend**: Google sends authorization code to `/google-calendar/callback`
-5. **Backend processes and redirects**: Backend stores credentials and redirects to frontend with success/error parameters
-6. **Frontend handles result**: Frontend receives redirect with parameters and shows appropriate message
+1. **Registration**: User creates account → Onboarding automatically initialized
+2. **Phone Setup**: User searches and provisions their own Twilio phone number
+3. **Calendar Connection**: User connects Google Calendar (optional)
+4. **First Scenario**: User creates their first AI scenario
+5. **Welcome Call**: User makes their first test call
+6. **Complete**: User gains full access to the platform
 
-**Success redirect**: `http://localhost:5173/scheduled-meetings?success=true&connected=calendar`
-**Error redirect**: `http://localhost:5173/scheduled-meetings?error=calendar_connection_failed&message=...`
+### Onboarding Progress Tracking
 
-### Enhanced Transcript Workflow
+The system tracks completion of each step and preserves progress:
 
-The application now provides an enhanced transcript workflow that captures detailed conversation flow and participant information:
+- **One-time setup**: Once completed, users never see onboarding again
+- **Resumable**: Users can stop and resume onboarding at any step
+- **Smart detection**: System automatically detects completed steps
+- **Clean experience**: New users get a guided setup flow
 
-1. **Make a Call**: Use any of the call endpoints to initiate a call
-2. **Automatic Processing**: When the call ends and recording is available:
-   - Twilio calls `/recording-callback` webhook
-   - System creates a Twilio Intelligence transcript
-   - When transcript is complete, Twilio calls `/twilio-transcripts/webhook-callback`
-   - System automatically enhances the transcript with conversation flow analysis
-3. **Access Enhanced Data**: Use the enhanced transcript endpoints to retrieve structured conversation data
+### Development vs Production Modes
 
-**Recommended Workflow for Frontend Integration:**
+#### Development Mode (`DEVELOPMENT_MODE=true`)
 
-```bash
-# 1. Make a call
-GET /make-call/{phone_number}/{scenario}
+- Uses system-wide `TWILIO_PHONE_NUMBER` for all calls
+- Bypasses user phone number requirements
+- Perfect for testing and development
+- Maintains backward compatibility
 
-# 2. List enhanced transcripts (after call completion)
-GET /api/enhanced-transcripts/
+#### Production Mode (`DEVELOPMENT_MODE=false`)
 
-# 3. Get detailed transcript with conversation flow
-GET /api/enhanced-transcripts/{transcript_sid}
-
-# 4. Or manually import/enhance existing transcripts
-POST /api/import-twilio-transcripts
-POST /api/enhanced-twilio-transcripts/fetch-and-store
-```
+- Requires users to have provisioned phone numbers
+- Full user isolation with dedicated phone numbers
+- Multi-tenant SaaS ready
+- Clean onboarding experience for new users
 
 ## API Endpoint Documentation
 
@@ -243,14 +280,34 @@ The API is documented with OpenAPI and can be accessed at `/docs` when the backe
 
 All protected endpoints require a JWT Bearer token in the `Authorization` header.
 
-| Endpoint            | Method | Description                                        | Request Body                          | Response (Success 200/201)                   |
-| ------------------- | ------ | -------------------------------------------------- | ------------------------------------- | -------------------------------------------- |
-| `/auth/register`    | POST   | Register a new user.                               | `UserCreate` schema (email, password) | `UserRead` schema                            |
-| `/auth/login`       | POST   | Login to get JWT tokens.                           | `UserLogin` schema (email, password)  | `Token` schema (access_token, refresh_token) |
-| `/auth/refresh`     | POST   | Refresh an expired access token.                   | `RefreshToken` schema                 | `Token` schema (access_token)                |
-| `/token`            | POST   | OAuth2 compatible token endpoint (form data).      | `username`, `password` (form data)    | `Token` schema (access_token, token_type)    |
-| `/auth/captcha-key` | GET    | Get reCAPTCHA site key (if frontend CAPTCHA used). | None                                  | `{ "captcha_key": "YOUR_SITE_KEY" }`         |
-| `/users/me`         | GET    | Get current authenticated user's details.          | None                                  | `UserRead` schema                            |
+| Endpoint         | Method | Description                                        | Request Body                          | Response (Success 200/201)                   |
+| ---------------- | ------ | -------------------------------------------------- | ------------------------------------- | -------------------------------------------- |
+| `/auth/register` | POST   | Register a new user (auto-initializes onboarding). | `UserCreate` schema (email, password) | `UserRead` schema                            |
+| `/auth/login`    | POST   | Login to get JWT tokens.                           | `UserLogin` schema (email, password)  | `Token` schema (access_token, refresh_token) |
+| `/auth/refresh`  | POST   | Refresh an expired access token.                   | `RefreshToken` schema                 | `Token` schema (access_token)                |
+| `/token`         | POST   | OAuth2 compatible token endpoint (form data).      | `username`, `password` (form data)    | `Token` schema (access_token, token_type)    |
+| `/users/me`      | GET    | Get current authenticated user's details.          | None                                  | `UserRead` schema                            |
+
+### 🆕 User Onboarding Management
+
+| Endpoint                        | Method | Description                                      | Request Body                     | Response (Success 200)                               |
+| ------------------------------- | ------ | ------------------------------------------------ | -------------------------------- | ---------------------------------------------------- |
+| `/onboarding/status`            | GET    | Get current user's onboarding progress.          | None                             | Detailed onboarding status with step completion      |
+| `/onboarding/next-action`       | GET    | Get recommended next action for user.            | None                             | Next step recommendation with endpoint and priority  |
+| `/onboarding/complete-step`     | POST   | Mark a specific onboarding step as completed.    | `{ "step": "phone_setup" }`      | Updated onboarding status                            |
+| `/onboarding/initialize`        | POST   | Manually initialize onboarding for current user. | None                             | New onboarding status record                         |
+| `/onboarding/check-step/{step}` | GET    | Check if a specific step has been completed.     | `step` (path: phone_setup, etc.) | `{ "completed": true/false, "step": "phone_setup" }` |
+
+### 🆕 Twilio Phone Number Management
+
+| Endpoint                                | Method | Description                                      | Request Body                          | Response (Success 200)                                |
+| --------------------------------------- | ------ | ------------------------------------------------ | ------------------------------------- | ----------------------------------------------------- |
+| `/twilio/account`                       | GET    | Get Twilio account information and balance.      | None                                  | Account details with balance and capabilities         |
+| `/twilio/search-numbers`                | POST   | Search for available phone numbers to provision. | `{ "area_code": "505", "limit": 10 }` | List of available phone numbers with pricing          |
+| `/twilio/provision-number`              | POST   | Provision a phone number for the current user.   | `{ "phone_number": "+15059675418" }`  | Provisioned phone number details                      |
+| `/twilio/user-numbers`                  | GET    | Get all phone numbers owned by current user.     | None                                  | List of user's phone numbers with status              |
+| `/twilio/user-primary-number`           | GET    | Get user's primary phone number.                 | None                                  | Primary phone number details                          |
+| `/twilio/release-number/{phone_number}` | DELETE | Release a phone number back to Twilio.           | `phone_number` (path)                 | `{ "message": "Phone number released successfully" }` |
 
 ### Call Management
 
@@ -261,191 +318,109 @@ All protected endpoints require a JWT Bearer token in the `Authorization` header
 | `/schedule-call`                              | POST   | Schedule a call for a future time.                           | None                              | `CallScheduleCreate` (phone, scenario, time) | `CallScheduleRead`                                           |
 | `/make-calendar-call-scenario/{phone_number}` | GET    | (Experimental) Make a call informed by Google Calendar data. | `phone_number` (path)             | None                                         | `{ "status": "success", "call_sid": "CA..." }`               |
 
-_Callbacks (primarily for Twilio integration, not direct frontend use):_
-| Endpoint | Method | Description |
-|----------------------------------|-------------|---------------------------------------------------------------------------|
-| `/outgoing-call/{scenario}` | GET, POST | TwiML webhook for handling outgoing call logic (dialing, connecting stream).|
-| `/incoming-call/{scenario}` | GET, POST | TwiML webhook for handling incoming call logic. |
-| `/incoming-call-webhook/{scenario}`| GET, POST | Compatibility TwiML webhook for incoming calls. |
-| `/incoming-custom-call/{scenario_id}`| GET, POST | TwiML webhook for custom scenario incoming calls. |
-| `/handle-user-input` | POST | TwiML webhook for `<Gather>` results (speech input during call). |
-| `/recording-callback` | POST | Twilio webhook: call recording is ready. Initiates transcription. |
-| `/twilio-callback` | POST | Twilio webhook: general call status updates (completed, failed, etc.). |
+**📝 Note on Phone Number Usage:**
 
-### Real-time Media Streaming (WebSockets)
+- **Development Mode**: All calls use system `TWILIO_PHONE_NUMBER`
+- **Production Mode**: Calls use user's provisioned phone numbers
+- **Hybrid Support**: Automatic fallback ensures compatibility
 
-Used internally by the call handling TwiML to connect audio to OpenAI.
-
-| Endpoint                             | Protocol  | Description                                                              |
-| ------------------------------------ | --------- | ------------------------------------------------------------------------ |
-| `/media-stream/{scenario}`           | WebSocket | Streams Twilio call audio to OpenAI and vice-versa for a given scenario. |
-| `/media-stream-custom/{scenario_id}` | WebSocket | Streams audio for custom scenarios.                                      |
-| `/calendar-media-stream`             | WebSocket | Streams audio for calendar-integrated calls.                             |
-
-### Custom Scenarios
-
-| Endpoint                          | Method | Description                | Request Body                      | Response (Success 200/201/204)      |
-| --------------------------------- | ------ | -------------------------- | --------------------------------- | ----------------------------------- |
-| `/realtime/custom-scenario`       | POST   | Create a custom scenario.  | `CustomScenarioCreate` schema     | `CustomScenarioRead` schema         |
-| `/custom-scenarios`               | GET    | List all custom scenarios. | None                              | `List[CustomScenarioRead]`          |
-| `/custom-scenarios/{scenario_id}` | GET    | Get a specific scenario.   | `scenario_id` (path)              | `CustomScenarioRead` schema         |
-| `/custom-scenarios/{scenario_id}` | PUT    | Update a scenario.         | `scenario_id` (path), update data | `CustomScenarioRead` schema         |
-| `/custom-scenarios/{scenario_id}` | DELETE | Delete a scenario.         | `scenario_id` (path)              | `{ "message": "Scenario deleted" }` |
-
-### Enhanced Transcription Services
-
-#### Enhanced Twilio Voice Intelligence Based (Recommended for Frontend)
-
-**Primary Enhanced Endpoints (Recommended for Frontend Use):**
-
-| Endpoint                                           | Method | Description                                                  | Query Params                                                               | Response (Success 200)                                                   |
-| -------------------------------------------------- | ------ | ------------------------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `/api/enhanced-transcripts/`                       | GET    | List enhanced transcripts with filtering options             | `skip`, `limit`, `call_direction`, `scenario_name`, `date_from`, `date_to` | Enhanced transcript list with conversation flow metadata                 |
-| `/api/enhanced-transcripts/{transcript_sid}`       | GET    | Get detailed enhanced transcript with full conversation flow | `transcript_sid` (path)                                                    | Complete enhanced transcript with participant info and conversation flow |
-| `/api/enhanced-twilio-transcripts/fetch-and-store` | POST   | Fetch and enhance a specific Twilio transcript               | `{ "transcript_sid": "GT..." }`                                            | Enhanced transcript data with conversation analysis                      |
-| `/api/import-twilio-transcripts`                   | POST   | Import and enhance all available Twilio transcripts          | None                                                                       | Bulk import results with success/failure counts                          |
-
-**Enhanced Transcript Data Structure:**
-
-```json
-{
-  "transcript_sid": "GT...",
-  "call_date": "2024-01-15T10:30:00Z",
-  "duration": 180,
-  "call_direction": "outbound",
-  "scenario_name": "default",
-  "participant_info": {
-    "0": {
-      "channel": 0,
-      "role": "customer",
-      "name": "Customer",
-      "total_speaking_time": 90,
-      "word_count": 150,
-      "sentence_count": 12
-    },
-    "1": {
-      "channel": 1,
-      "role": "agent",
-      "name": "AI Agent",
-      "total_speaking_time": 90,
-      "word_count": 200,
-      "sentence_count": 15
-    }
-  },
-  "conversation_flow": [
-    {
-      "sequence": 1,
-      "speaker": {
-        "channel": 1,
-        "role": "agent",
-        "name": "AI Agent"
-      },
-      "text": "Hello, this is Mike Thompson calling about...",
-      "start_time": 0.5,
-      "end_time": 3.2,
-      "duration": 2.7,
-      "confidence": 0.95,
-      "word_count": 8
-    }
-  ],
-  "summary_data": {
-    "total_duration_seconds": 180,
-    "total_sentences": 27,
-    "total_words": 350,
-    "participant_count": 2,
-    "average_confidence": 0.92,
-    "conversation_stats": {
-      "turns": 27,
-      "avg_words_per_turn": 13,
-      "speaking_time_distribution": {
-        "0": { "percentage": 50, "seconds": 90 },
-        "1": { "percentage": 50, "seconds": 90 }
-      }
-    }
-  }
-}
-```
-
-#### Legacy/Direct Twilio Voice Intelligence Access
-
-1.  **Initiation:**
-
-    - Automatic: When a call is recorded, `/recording-callback` is hit, which (if configured) calls Twilio VI to create a transcript.
-    - Manual:
-      | Endpoint | Method | Description | Request Body | Response (Success 200) |
-      |---------------------------------------------------|--------|-------------------------------------------------|----------------------------------------------|-----------------------------------------------------------------|
-      | `/twilio-transcripts/create-with-media-url` | POST | Create transcript from a public audio URL. | `media_url`, `language_code`, etc. | `{ "status": "success", "transcript_sid": "GT..." }` |
-      | `/twilio-transcripts/create-with-participants` | POST | Create transcript from recording SID & participants. | `recording_sid`, `participants` array | `{ "status": "success", "transcript_sid": "GT..." }` |
-
-2.  **Webhook (from Twilio VI to your app):**
-    | Endpoint | Method | Description |
-    |-----------------------------------------|--------|--------------------------------------------------------------------------------|
-    | `/twilio-transcripts/webhook-callback` | POST | Twilio VI sends notification here when transcript is ready. App stores it with enhancement. |
-
-3.  **Legacy Stored Transcripts Access:**
-    | Endpoint | Method | Description | Path/Query Params | Response (Success 200) |
-    |-----------------------------------------|--------|-------------------------------------------------------------------------|--------------------------------|----------------------------------------------------------------------------------------------------------------------|
-    | `/stored-transcripts/` | GET | List locally stored transcripts (legacy format). | `skip`, `limit` (query) | `List[TranscriptRecordRead]` (basic format) |
-    | `/stored-transcripts/{transcript_sid}` | GET | Get a specific locally stored transcript by its Twilio Transcript SID. | `transcript_sid` (path) | `TranscriptRecordRead` (basic format) |
-    | `/api/transcripts/{transcript_sid}` | GET | Get detailed locally stored transcript including sentences. | `transcript_sid` (path) | `{ "status": "success", "transcript": { "full_text": "...", "sentences": [...], ...} }` |
-
-4.  **Direct Twilio VI API Access (Less common for frontend, more for admin/debug):**
-    | Endpoint | Method | Description | Path/Query Params |
-    |---------------------------------------------------|--------|-----------------------------------------------|-----------------------------------|
-    | `/twilio-transcripts/{transcript_sid}` | GET | Fetch transcript directly from Twilio. | `transcript_sid` (path) |
-    | `/twilio-transcripts` | GET | List transcripts directly from Twilio. | `page_size`, `page_token`, etc. |
-    | `/twilio-transcripts/recording/{recording_sid}` | GET | Get transcript from Twilio by recording SID. | `recording_sid` (path) |
-    | `/twilio-transcripts/{transcript_sid}` | DELETE | Delete a transcript from Twilio. | `transcript_sid` (path) |
-
-#### OpenAI Whisper Based (Direct File Upload)
-
-| Endpoint              | Method | Description                                      | Request Body (multipart/form-data) | Response (Success 200)                                |
-| --------------------- | ------ | ------------------------------------------------ | ---------------------------------- | ----------------------------------------------------- |
-| `/whisper/transcribe` | POST   | Transcribe an uploaded audio file using Whisper. | `file` (audio file)                | `{ "status": "success", "transcription": "Text..." }` |
-
-### Google Calendar Integration (Experimental)
+### Google Calendar Integration
 
 Requires user authentication with Google.
 
-| Endpoint                              | Method | Description                                                      |
-| ------------------------------------- | ------ | ---------------------------------------------------------------- |
-| `/google-calendar/auth`               | GET    | Initiates Google OAuth2 flow.                                    |
-| `/google-calendar/callback`           | GET    | Google redirects here after user authorization.                  |
-| `/google-calendar/events`             | GET    | Get upcoming calendar events for the authenticated user.         |
-| `/google-calendar/free-busy`          | POST   | Check free/busy information.                                     |
-| `/google-calendar/revoke`             | POST   | Revoke Google Calendar access for the user.                      |
-| `/google-calendar/credentials-status` | GET    | Check if current user has connected Google Calendar credentials. |
+| Endpoint                              | Method | Description                                              |
+| ------------------------------------- | ------ | -------------------------------------------------------- |
+| `/google-calendar/auth`               | GET    | Initiates Google OAuth2 flow.                            |
+| `/google-calendar/callback`           | GET    | Google redirects here after user authorization.          |
+| `/google-calendar/events`             | GET    | Get upcoming calendar events for the authenticated user. |
+| `/google-calendar/check-availability` | POST   | Check free/busy information.                             |
+| `/google-calendar/find-slots`         | POST   | Find available time slots.                               |
 
-_Calendar-aware call endpoint is listed under Call Management._
+### Google Calendar OAuth Flow
 
-### Debug Endpoints (For Development/Admin Use)
+The application provides a seamless OAuth flow for Google Calendar integration:
 
-| Endpoint                            | Method | Description                                                    |
-| ----------------------------------- | ------ | -------------------------------------------------------------- |
-| `/debug/twilio-intelligence-config` | GET    | Show current Twilio Voice Intelligence config loaded by app.   |
-| `/debug/recent-conversations`       | GET    | List recent conversation records from the database.            |
-| `/debug/recording-callback-status`  | GET    | Check status of recording callbacks and transcript processing. |
-| `/debug/transcript-records`         | GET    | List all transcript records directly from the database.        |
-| `/test-db-connection`               | GET    | Test database connectivity.                                    |
+1. **Frontend initiates OAuth**: User clicks "Connect Google Calendar" button
+2. **Backend provides authorization URL**: `/google-calendar/auth` endpoint returns Google OAuth URL
+3. **User authorizes**: User is redirected to Google for authorization
+4. **Google redirects to backend**: Google sends authorization code to `/google-calendar/callback`
+5. **Backend processes and redirects**: Backend stores credentials and redirects to frontend with success/error parameters
+6. **Frontend handles result**: Frontend receives redirect with parameters and shows appropriate message
 
-## Enhanced Database Schema
+**Success redirect**: `http://localhost:5173/scheduled-meetings?success=true&connected=calendar`
+**Error redirect**: `http://localhost:5173/scheduled-meetings?error=calendar_connection_failed&message=...`
 
-The application now includes enhanced database fields for storing detailed transcript analysis:
+## 🆕 Enhanced Database Schema
 
-### TranscriptRecord Model (Enhanced)
+### New Models for Onboarding & Phone Management
 
-- `call_date`: DateTime of the call
-- `participant_info`: JSON field storing participant details and roles
-- `conversation_flow`: JSON field storing structured conversation with timestamps
-- `media_url`: URL to the original recording (if available)
-- `source_type`: Source of the transcript (e.g., "TwilioIntelligence")
-- `call_direction`: Direction of the call ("inbound" or "outbound")
-- `scenario_name`: Name of the scenario used for the call
-- `summary_data`: JSON field storing conversation statistics and analysis
+#### UserPhoneNumber Model
+
+- `user_id`: Foreign key to User
+- `phone_number`: User's dedicated Twilio phone number
+- `twilio_sid`: Twilio SID for the phone number
+- `friendly_name`: Optional custom name for the number
+- `is_active`: Whether the number is currently active
+- `voice_capable`, `sms_capable`: Twilio capabilities
+
+#### UserOnboardingStatus Model
+
+- `user_id`: Foreign key to User (unique)
+- `phone_number_setup`: Boolean - phone number provisioned
+- `calendar_connected`: Boolean - Google Calendar connected
+- `first_scenario_created`: Boolean - first custom scenario created
+- `welcome_call_completed`: Boolean - first test call made
+- `started_at`: When onboarding began
+- `completed_at`: When onboarding was completed (null if incomplete)
+- `current_step`: Current step in onboarding process
+
+## 🎯 SaaS Multi-Tenant Architecture
+
+### User Isolation Features
+
+- **Complete data separation**: All resources isolated by user_id
+- **Phone number management**: Each user has their own dedicated numbers
+- **Scenario isolation**: Users only see their own custom scenarios
+- **Transcript isolation**: Call transcripts separated by user
+- **Onboarding tracking**: Individual progress tracking per user
+- **Calendar integration**: User-specific Google Calendar connections
+
+### Development vs Production Deployment
+
+#### Development Setup
+
+```bash
+# .env configuration for development
+DEVELOPMENT_MODE=true
+TWILIO_PHONE_NUMBER=+1234567890  # Your system phone number
+DATABASE_URL=sqlite:///./sql_app.db
+```
+
+#### Production Setup
+
+```bash
+# .env configuration for production
+DEVELOPMENT_MODE=false
+# TWILIO_PHONE_NUMBER not needed - users provision their own
+DATABASE_URL=postgresql://user:pass@localhost/dbname
+```
 
 ## Deployment
 
-### Docker
+### Production Considerations
+
+For production deployments:
+
+1. **Configure production database**: Use PostgreSQL instead of SQLite
+2. **Set environment variables**: Configure all required environment variables
+3. **Disable development mode**: Set `DEVELOPMENT_MODE=false`
+4. **Set up reverse proxy**: Use Nginx or similar for SSL termination
+5. **Configure domain**: Update `PUBLIC_URL` and `FRONTEND_URL` for your domain
+6. **Enable HTTPS**: Ensure all traffic uses SSL/TLS
+7. **Security hardening**: Review security settings and CSP policies
+8. **Monitoring setup**: Configure logging and monitoring for production
+
+### Docker Deployment
 
 A `Dockerfile` is included for containerization:
 
@@ -454,25 +429,13 @@ docker build -t speech-assistant-api .
 docker run -p 5050:5050 --env-file .env speech-assistant-api
 ```
 
-### Production Considerations
-
-For production deployments:
-
-1.  Configure a production-ready database (PostgreSQL recommended). Update `DATABASE_URL` in `.env`.
-2.  Set up a reverse proxy (e.g., Nginx, Traefik) to handle incoming traffic, SSL termination, and potentially serve static files if you integrate the frontend build.
-3.  Enable HTTPS with proper SSL certificates.
-4.  Configure `PUBLIC_URL` in `.env` to your production domain name (e.g., `api.yourdomain.com`).
-5.  Ensure `CORSMiddleware` in `app/main.py` includes your production frontend's origin.
-6.  Review and harden security settings (e.g., `SECRET_KEY` should be strong and unique, disable debug mode if Uvicorn runs with it).
-7.  Configure logging for production (e.g., appropriate log levels, centralized logging).
-8.  Set `ENABLE_SECURITY_HEADERS=true` and review CSP and other security header policies in `app/config.py` for your production domain.
-
 ## License
 
-This project is licensed under the MIT License - see the `LICENSE` file for details (if one exists, otherwise assume standard MIT).
+This project is licensed under the MIT License.
 
 ## Acknowledgements
 
-- OpenAI for the powerful AI models
-- Twilio for voice and transcription services
+- OpenAI for the powerful AI models and Realtime API
+- Twilio for voice services and phone number management
 - FastAPI for the excellent API framework
+- Google for Calendar API integration

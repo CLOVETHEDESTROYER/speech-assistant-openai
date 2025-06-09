@@ -2,7 +2,30 @@
 
 ## Overview
 
-This guide provides comprehensive documentation for integrating with the Speech Assistant backend API. The backend is a multi-tenant SaaS platform that provides AI-powered voice calling, Google Calendar integration, user-specific scenarios, and enhanced transcript management.
+This guide provides comprehensive documentation for integrating with the Speech Assistant backend API. The backend is a multi-tenant SaaS platform that provides AI-powered voice calling, user onboarding, phone number management, Google Calendar integration, user-specific scenarios, and enhanced transcript management.
+
+## 🆕 Latest Features (Current Update)
+
+### **Complete User Onboarding System**
+
+- Automated onboarding flow for new users
+- Phone number provisioning and management
+- Progress tracking with step completion
+- One-time setup with progress preservation
+
+### **User-Specific Phone Number Management**
+
+- Dedicated Twilio phone numbers per user
+- Phone number search and provisioning
+- Development/production mode support
+- Full user isolation for phone numbers
+
+### **Enhanced Multi-Tenant Architecture**
+
+- Complete user data isolation
+- Individual phone number management
+- User-specific onboarding tracking
+- Clean account setup for new users
 
 ## Architecture
 

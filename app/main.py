@@ -28,7 +28,7 @@ import sqlalchemy
 import threading
 import time
 from app.auth import router as auth_router, get_current_user
-from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript
+from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript, UserPhoneNumber
 from app.utils import (
     get_password_hash,
     verify_password,
@@ -151,6 +151,7 @@ logger.info(
 # requires OpenAI Realtime API Access
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
+DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
 
 USER_CONFIG = {
     "name": None,
@@ -554,17 +555,42 @@ async def make_call(
     db: Session = Depends(get_db)
 ):
     try:
-        # Get user's primary phone number
-        from app.services.twilio_service import TwilioPhoneService
-        twilio_service = TwilioPhoneService()
-        user_primary_number = twilio_service.get_user_primary_number(
-            current_user.id, db)
+        # Determine which phone number to use
+        from_number = None
 
-        if not user_primary_number:
-            raise HTTPException(
-                status_code=400,
-                detail="No phone number available. Please provision a phone number in Settings first."
-            )
+        if DEVELOPMENT_MODE:
+            # In development mode, always use system number
+            from_number = os.getenv('TWILIO_PHONE_NUMBER')
+            if not from_number:
+                raise HTTPException(
+                    status_code=400,
+                    detail="System phone number not configured for development mode. Please set TWILIO_PHONE_NUMBER in your environment."
+                )
+            logger.info(
+                f"Development mode: using system phone number: {from_number}")
+        else:
+            # Production mode: check for user-specific phone numbers first
+            user_phone_numbers = db.query(UserPhoneNumber).filter(
+                UserPhoneNumber.user_id == current_user.id,
+                UserPhoneNumber.is_active == True,
+                UserPhoneNumber.voice_capable == True
+            ).all()
+
+            if user_phone_numbers:
+                # User has provisioned phone numbers - use the first active one
+                from_number = user_phone_numbers[0].phone_number
+                logger.info(
+                    f"Using user's provisioned phone number: {from_number}")
+            else:
+                # Fallback to system-wide Twilio phone number for backward compatibility
+                from_number = os.getenv('TWILIO_PHONE_NUMBER')
+                if not from_number:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No phone number available. Please provision a phone number in Settings or configure TWILIO_PHONE_NUMBER."
+                    )
+                logger.info(
+                    f"Using system-wide phone number for backward compatibility: {from_number}")
 
         # Build the media stream URL with user name and direction parameters
         base_url = clean_and_validate_url(config.PUBLIC_URL)
@@ -572,11 +598,11 @@ async def make_call(
         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
 
-        # Make the call using user's phone number
+        # Make the call
         client = get_twilio_client()
         call = client.calls.create(
             to=phone_number,
-            from_=user_primary_number.phone_number,  # Use user's number
+            from_=from_number,
             url=outgoing_call_url,
             record=True
         )
@@ -588,16 +614,20 @@ async def make_call(
             phone_number=phone_number,
             direction="outbound",
             status="in-progress",
-            call_sid=call.sid  # Now we have a valid call_sid
+            call_sid=call.sid
         )
         db.add(conversation)
         db.commit()
 
         # Return the call details
+        mode_message = "development mode" if DEVELOPMENT_MODE else ("using your provisioned number" if not DEVELOPMENT_MODE and db.query(
+            UserPhoneNumber).filter(UserPhoneNumber.user_id == current_user.id).first() else "using system number")
+
         return {
             "status": "success",
             "call_sid": call.sid,
-            "from_number": user_primary_number.phone_number
+            "from_number": from_number,
+            "message": f"Call initiated successfully ({mode_message})"
         }
 
     except HTTPException:
