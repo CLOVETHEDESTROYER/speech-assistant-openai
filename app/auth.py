@@ -80,6 +80,22 @@ async def register(request: Request, user: UserCreate, db: Session = Depends(get
         logger.error(
             f"Failed to initialize onboarding for user {new_user.id}: {e}")
 
+    # Initialize usage limits based on app type
+    try:
+        from app.services.usage_service import UsageService
+        from app.models import AppType
+
+        # Detect app type from request
+        app_type = UsageService.detect_app_type_from_request(request)
+        UsageService.initialize_user_usage(new_user.id, app_type, db)
+
+    except Exception as e:
+        # Log the error but don't fail registration
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            f"Failed to initialize usage limits for user {new_user.id}: {e}")
+
     access_token = create_access_token(
         data={"sub": new_user.email, "user_id": new_user.id})
     refresh_token = create_refresh_token()

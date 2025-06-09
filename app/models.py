@@ -1,9 +1,29 @@
 # models.py
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Float, JSON
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, Float, JSON, Enum, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db import Base
-from datetime import datetime
+from datetime import datetime, date
+import enum
+
+# Add enums for app types and subscription tiers
+
+
+class AppType(enum.Enum):
+    MOBILE_CONSUMER = "mobile_consumer"
+    WEB_BUSINESS = "web_business"
+
+
+class SubscriptionTier(enum.Enum):
+    # Mobile Consumer Tiers
+    MOBILE_FREE_TRIAL = "mobile_free_trial"
+    MOBILE_WEEKLY = "mobile_weekly"
+
+    # Business Tiers
+    BUSINESS_FREE_TRIAL = "business_free_trial"
+    BUSINESS_BASIC = "business_basic"        # $49.99/month, 20 calls/week
+    BUSINESS_PROFESSIONAL = "business_professional"  # $99/month
+    BUSINESS_ENTERPRISE = "business_enterprise"      # $299/month
 
 
 class User(Base):
@@ -25,6 +45,8 @@ class User(Base):
     phone_numbers = relationship("UserPhoneNumber", back_populates="user")
     onboarding_status = relationship(
         "UserOnboardingStatus", back_populates="user", uselist=False)
+    usage_limits = relationship(
+        "UsageLimits", back_populates="user", uselist=False)
 
 
 class CallSchedule(Base):
@@ -208,6 +230,63 @@ class UserOnboardingStatus(Base):
     user = relationship("User", back_populates="onboarding_status")
 
 
+class UsageLimits(Base):
+    __tablename__ = "usage_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"),
+                     nullable=False, unique=True)
+    app_type = Column(Enum(AppType), nullable=False)
+
+    # Call tracking
+    calls_made_today = Column(Integer, default=0)
+    calls_made_this_week = Column(Integer, default=0)
+    calls_made_this_month = Column(Integer, default=0)
+    calls_made_total = Column(Integer, default=0)
+
+    # Date tracking for resets
+    last_call_date = Column(Date, nullable=True)
+    week_start_date = Column(Date, nullable=True)  # For weekly limits
+    month_start_date = Column(Date, nullable=True)  # For monthly limits
+
+    # Trial and free calls
+    # 3 for mobile, 4 for business
+    trial_calls_remaining = Column(Integer, default=0)
+    trial_calls_used = Column(Integer, default=0)
+    trial_start_date = Column(DateTime, nullable=True)
+    trial_end_date = Column(DateTime, nullable=True)
+    is_trial_active = Column(Boolean, default=True)
+
+    # Subscription status
+    subscription_tier = Column(Enum(SubscriptionTier), default=None)
+    is_subscribed = Column(Boolean, default=False)
+    subscription_start_date = Column(DateTime, nullable=True)
+    subscription_end_date = Column(DateTime, nullable=True)
+
+    # Weekly/Monthly limits based on subscription
+    # For business basic: 20
+    weekly_call_limit = Column(Integer, nullable=True)
+    monthly_call_limit = Column(Integer, nullable=True)
+
+    # Payment tracking
+    billing_cycle = Column(String, nullable=True)  # "weekly", "monthly"
+    last_payment_date = Column(DateTime, nullable=True)
+    next_payment_date = Column(DateTime, nullable=True)
+
+    # App Store integration
+    app_store_transaction_id = Column(String, nullable=True)
+    app_store_product_id = Column(String, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+    # Relationship
+    user = relationship("User", back_populates="usage_limits")
+
+
 __all__ = ["User", "Token", "Base", "CallSchedule",
            "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials",
-           "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus"]
+           "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus",
+           "UsageLimits", "AppType", "SubscriptionTier"]

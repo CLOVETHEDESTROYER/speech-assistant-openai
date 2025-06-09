@@ -1,3 +1,4 @@
+from app.routes.mobile_app import router as mobile_router
 import os
 import json
 import base64
@@ -384,6 +385,9 @@ app.include_router(google_calendar.router, tags=["google-calendar"])
 app.include_router(twilio_router, tags=["twilio"])
 app.include_router(onboarding_router, tags=["onboarding"])
 
+# Import and include mobile router
+app.include_router(mobile_router, tags=["mobile"])
+
 if not OPENAI_API_KEY:
     raise ValueError(
         'Missing the OpenAI API key. Please set it in the .env file.')
@@ -555,6 +559,50 @@ async def make_call(
     db: Session = Depends(get_db)
 ):
     try:
+        # Check usage limits for business web app users (not in development mode)
+        if not DEVELOPMENT_MODE:
+            from app.services.usage_service import UsageService
+            from app.models import AppType, UsageLimits
+
+            # Initialize or get usage limits
+            usage_limits = db.query(UsageLimits).filter(
+                UsageLimits.user_id == current_user.id).first()
+            if not usage_limits:
+                # Auto-detect as web business if not found
+                app_type = UsageService.detect_app_type_from_request(request)
+                usage_limits = UsageService.initialize_user_usage(
+                    current_user.id, app_type, db)
+
+            # Check if user can make a call (only for business users)
+            if usage_limits.app_type == AppType.WEB_BUSINESS:
+                can_call, status_code, details = UsageService.can_make_call(
+                    current_user.id, db)
+
+                if not can_call:
+                    if status_code == "trial_calls_exhausted":
+                        raise HTTPException(
+                            status_code=402,  # Payment Required
+                            detail={
+                                "error": "trial_exhausted",
+                                "message": "Your 4 free trial calls have been used. Upgrade to Basic ($49.99/month) for 20 calls per week!",
+                                "upgrade_url": "/pricing",
+                                "pricing": details.get("pricing")
+                            }
+                        )
+                    elif status_code == "weekly_limit_reached":
+                        raise HTTPException(
+                            status_code=402,
+                            detail={
+                                "error": "weekly_limit_reached",
+                                "message": details.get("message"),
+                                "resets_on": details.get("resets_on"),
+                                "upgrade_url": "/pricing"
+                            }
+                        )
+                    else:
+                        raise HTTPException(status_code=400, detail=details.get(
+                            "message", "Cannot make call"))
+
         # Determine which phone number to use
         from_number = None
 
@@ -619,16 +667,44 @@ async def make_call(
         db.add(conversation)
         db.commit()
 
+        # Record the call in usage statistics (only for business users not in development mode)
+        if not DEVELOPMENT_MODE:
+            from app.services.usage_service import UsageService
+            from app.models import UsageLimits, AppType
+
+            usage_limits = db.query(UsageLimits).filter(
+                UsageLimits.user_id == current_user.id).first()
+            if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
+                UsageService.record_call(current_user.id, db)
+
         # Return the call details
         mode_message = "development mode" if DEVELOPMENT_MODE else ("using your provisioned number" if not DEVELOPMENT_MODE and db.query(
             UserPhoneNumber).filter(UserPhoneNumber.user_id == current_user.id).first() else "using system number")
 
-        return {
+        response_data = {
             "status": "success",
             "call_sid": call.sid,
             "from_number": from_number,
             "message": f"Call initiated successfully ({mode_message})"
         }
+
+        # Add usage stats for business users
+        if not DEVELOPMENT_MODE:
+            from app.services.usage_service import UsageService
+            from app.models import UsageLimits, AppType
+
+            usage_limits = db.query(UsageLimits).filter(
+                UsageLimits.user_id == current_user.id).first()
+            if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
+                updated_stats = UsageService.get_usage_stats(
+                    current_user.id, db)
+                response_data["usage_stats"] = {
+                    "calls_remaining_this_week": (updated_stats.get("weekly_call_limit", 0) - updated_stats.get("calls_made_this_week", 0)) if updated_stats.get("weekly_call_limit") else "unlimited",
+                    "trial_calls_remaining": updated_stats.get("trial_calls_remaining", 0),
+                    "upgrade_recommended": updated_stats.get("upgrade_recommended", False)
+                }
+
+        return response_data
 
     except HTTPException:
         raise
