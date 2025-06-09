@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def test_openai_connection():
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    openai_ws_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+    openai_ws_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03"
 
     try:
         async with websockets.connect(

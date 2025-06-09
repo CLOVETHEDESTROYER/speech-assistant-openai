@@ -75,6 +75,9 @@ from app.routes import google_calendar
 from app.services.google_calendar import GoogleCalendarService
 from datetime import timedelta
 from dateutil import parser
+from app.routes.twilio_management import router as twilio_router
+from app.routes.onboarding import router as onboarding_router
+from app.services.twilio_service import TwilioPhoneService
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -377,6 +380,8 @@ Base.metadata.create_all(bind=engine)
 # Include routers
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(google_calendar.router, tags=["google-calendar"])
+app.include_router(twilio_router, tags=["twilio"])
+app.include_router(onboarding_router, tags=["onboarding"])
 
 if not OPENAI_API_KEY:
     raise ValueError(
@@ -549,17 +554,29 @@ async def make_call(
     db: Session = Depends(get_db)
 ):
     try:
+        # Get user's primary phone number
+        from app.services.twilio_service import TwilioPhoneService
+        twilio_service = TwilioPhoneService()
+        user_primary_number = twilio_service.get_user_primary_number(
+            current_user.id, db)
+
+        if not user_primary_number:
+            raise HTTPException(
+                status_code=400,
+                detail="No phone number available. Please provision a phone number in Settings first."
+            )
+
         # Build the media stream URL with user name and direction parameters
         base_url = clean_and_validate_url(config.PUBLIC_URL)
         user_name = USER_CONFIG.get("name", "")
         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
 
-        # Make the call first to get the call_sid
+        # Make the call using user's phone number
         client = get_twilio_client()
         call = client.calls.create(
             to=phone_number,
-            from_=config.TWILIO_PHONE_NUMBER,
+            from_=user_primary_number.phone_number,  # Use user's number
             url=outgoing_call_url,
             record=True
         )
@@ -577,8 +594,14 @@ async def make_call(
         db.commit()
 
         # Return the call details
-        return {"status": "success", "call_sid": call.sid}
+        return {
+            "status": "success",
+            "call_sid": call.sid,
+            "from_number": user_primary_number.phone_number
+        }
 
+    except HTTPException:
+        raise
     except TwilioRestException as e:
         logger.exception(
             f"Twilio error when calling {phone_number} with scenario {scenario}")
@@ -916,7 +939,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
                 try:
                     async with websockets.connect(
-                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
                         extra_headers={
                             "Authorization": f"Bearer {OPENAI_API_KEY}",
                             "OpenAI-Beta": "realtime=v1"
@@ -1172,7 +1195,7 @@ async def handle_scenario_update(websocket: WebSocket, scenario: str):
     await websocket.accept()
     try:
         async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
             extra_headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1"
@@ -1960,7 +1983,7 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
             while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
                 try:
                     async with websockets.connect(
-                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
                         extra_headers={
                             "Authorization": f"Bearer {OPENAI_API_KEY}",
                             "OpenAI-Beta": "realtime=v1"
@@ -4159,7 +4182,7 @@ async def handle_calendar_media_stream(websocket: WebSocket):
             while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
                 try:
                     async with websockets.connect(
-                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
                         extra_headers={
                             "Authorization": f"Bearer {OPENAI_API_KEY}",
                             "OpenAI-Beta": "realtime=v1"

@@ -22,6 +22,9 @@ class User(Base):
         "GoogleCalendarCredentials", back_populates="user")
     stored_transcripts = relationship(
         "StoredTwilioTranscript", back_populates="user")
+    phone_numbers = relationship("UserPhoneNumber", back_populates="user")
+    onboarding_status = relationship(
+        "UserOnboardingStatus", back_populates="user", uselist=False)
 
 
 class CallSchedule(Base):
@@ -163,5 +166,48 @@ class StoredTwilioTranscript(Base):
     user = relationship("User", back_populates="stored_transcripts")
 
 
+class UserPhoneNumber(Base):
+    __tablename__ = "user_phone_numbers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    phone_number = Column(String, unique=True, nullable=False, index=True)
+    twilio_sid = Column(String, unique=True, nullable=False)
+    friendly_name = Column(String, nullable=True)
+    date_provisioned = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+
+    # Twilio capabilities
+    voice_capable = Column(Boolean, default=True)
+    sms_capable = Column(Boolean, default=True)
+
+    # Relationship
+    user = relationship("User", back_populates="phone_numbers")
+
+
+class UserOnboardingStatus(Base):
+    __tablename__ = "user_onboarding_status"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"),
+                     nullable=False, unique=True)
+
+    # Onboarding steps completion tracking
+    phone_number_setup = Column(Boolean, default=False)
+    calendar_connected = Column(Boolean, default=False)
+    first_scenario_created = Column(Boolean, default=False)
+    welcome_call_completed = Column(Boolean, default=False)
+
+    # Metadata
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    # phone_setup, calendar, scenarios, complete
+    current_step = Column(String, default="phone_setup")
+
+    # Relationship
+    user = relationship("User", back_populates="onboarding_status")
+
+
 __all__ = ["User", "Token", "Base", "CallSchedule",
-           "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials", "StoredTwilioTranscript"]
+           "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials",
+           "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus"]

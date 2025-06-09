@@ -57,15 +57,28 @@ def create_refresh_token():
 
 @router.post("/register", response_model=TokenResponse)
 @rate_limit("5/minute")
-def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
+async def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+
     hashed_password = get_password_hash(user.password)
     new_user = User(email=user.email, hashed_password=hashed_password)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # Initialize onboarding for new user
+    try:
+        from app.services.onboarding_service import OnboardingService
+        onboarding_service = OnboardingService()
+        await onboarding_service.initialize_user_onboarding(new_user.id, db)
+    except Exception as e:
+        # Log the error but don't fail registration
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            f"Failed to initialize onboarding for user {new_user.id}: {e}")
 
     access_token = create_access_token(
         data={"sub": new_user.email, "user_id": new_user.id})

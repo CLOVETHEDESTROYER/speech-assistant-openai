@@ -27,7 +27,7 @@ class OpenAIRealtimeManager:
 
             # Connect to OpenAI's Realtime API
             async with websockets.connect(
-                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
 
                 extra_headers={
                     "Authorization": f"Bearer {self.openai_api_key}",
