@@ -20,6 +20,8 @@ class User(Base):
     custom_scenarios = relationship("CustomScenario", back_populates="user")
     google_credentials = relationship(
         "GoogleCalendarCredentials", back_populates="user")
+    stored_transcripts = relationship(
+        "StoredTwilioTranscript", back_populates="user")
 
 
 class CallSchedule(Base):
@@ -128,5 +130,38 @@ class GoogleCalendarCredentials(Base):
     user = relationship("User", back_populates="google_credentials")
 
 
+class StoredTwilioTranscript(Base):
+    __tablename__ = "stored_twilio_transcripts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"),
+                     nullable=False)  # User isolation
+
+    # Store exact Twilio response format
+    transcript_sid = Column(String, unique=True,
+                            nullable=False, index=True)  # Twilio's sid
+    status = Column(String, nullable=False)  # "completed", "processing", etc.
+    # Keep as ISO string like Twilio
+    date_created = Column(String, nullable=False)
+    # Keep as ISO string like Twilio
+    date_updated = Column(String, nullable=False)
+    duration = Column(Integer, nullable=False)  # seconds
+    language_code = Column(String, nullable=False, default="en-US")
+    # CRITICAL: Store full Twilio sentences array
+    sentences = Column(JSON, nullable=False)
+
+    # Optional call metadata (can be enhanced later)
+    call_sid = Column(String, nullable=True)
+    scenario_name = Column(String, default="Voice Call")
+    call_direction = Column(String, default="outbound")
+    phone_number = Column(String, nullable=True)
+
+    # Storage metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="stored_transcripts")
+
+
 __all__ = ["User", "Token", "Base", "CallSchedule",
-           "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials"]
+           "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials", "StoredTwilioTranscript"]

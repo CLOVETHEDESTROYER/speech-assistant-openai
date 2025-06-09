@@ -2,7 +2,23 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 
-interface Transcript {
+interface TwilioTranscript {
+  sid: string;
+  status: string;
+  date_created: string;
+  date_updated: string;
+  duration: number;
+  language_code: string;
+  sentences: Array<{
+    text: string;
+    speaker: number;
+    start_time: number;
+    end_time: number;
+    confidence: number;
+  }>;
+}
+
+interface LegacyTranscript {
   id: number;
   transcript_sid: string;
   status: string;
@@ -13,7 +29,7 @@ interface Transcript {
 }
 
 export const TranscriptList: React.FC = () => {
-  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [transcripts, setTranscripts] = useState<TwilioTranscript[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,12 +37,45 @@ export const TranscriptList: React.FC = () => {
     const fetchTranscripts = async () => {
       try {
         setLoading(true);
-        const response = await axios.get('/stored-transcripts/', {
+        
+        // Try the new stored-twilio-transcripts endpoint first
+        try {
+          const response = await axios.get('/stored-twilio-transcripts', {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('access_token')}`
+            }
+          });
+          
+          // Handle Twilio API format response
+          if (response.data.transcripts) {
+            setTranscripts(response.data.transcripts);
+            return;
+          }
+        } catch (newEndpointError) {
+          console.log('New endpoint failed, falling back to legacy:', newEndpointError);
+        }
+        
+        // Fallback to legacy stored-transcripts endpoint
+        const legacyResponse = await axios.get('/stored-transcripts/', {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('access_token')}`
           }
         });
-        setTranscripts(response.data);
+        
+        // Transform legacy format to Twilio format
+        const legacyTranscripts: LegacyTranscript[] = legacyResponse.data;
+        const transformedTranscripts: TwilioTranscript[] = legacyTranscripts.map(legacy => ({
+          sid: legacy.transcript_sid,
+          status: legacy.status,
+          date_created: legacy.date_created,
+          date_updated: legacy.date_created, // Use same date if updated not available
+          duration: legacy.duration,
+          language_code: legacy.language_code,
+          sentences: [] // Legacy format doesn't have sentences
+        }));
+        
+        setTranscripts(transformedTranscripts);
+        
       } catch (err) {
         setError('Failed to load transcripts');
         console.error('Error fetching transcripts:', err);
@@ -74,15 +123,18 @@ export const TranscriptList: React.FC = () => {
                 Language
               </th>
               <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Sentences
+              </th>
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {transcripts.map((transcript) => (
-              <tr key={transcript.transcript_sid} className="hover:bg-gray-50">
+              <tr key={transcript.sid} className="hover:bg-gray-50">
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {transcript.transcript_sid.substring(0, 10)}...
+                  {transcript.sid.substring(0, 10)}...
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <span className={`px-2 py-1 rounded-full text-xs ${
@@ -102,9 +154,12 @@ export const TranscriptList: React.FC = () => {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {transcript.language_code}
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {transcript.sentences ? transcript.sentences.length : 0} sentences
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   <Link 
-                    to={`/stored-transcripts/${transcript.transcript_sid}`} 
+                    to={`/stored-twilio-transcripts/${transcript.sid}`} 
                     className="text-indigo-600 hover:text-indigo-900"
                   >
                     View Details

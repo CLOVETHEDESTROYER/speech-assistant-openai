@@ -18,6 +18,120 @@ AIFriend Web is a React-based SaaS application that enables users to create and 
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
+## ✅ COMPLETED: Stored Transcripts Implementation
+
+### Problem Solved
+
+The frontend was making expensive Twilio API calls for every transcript request. This has been **SOLVED** with the new stored transcripts feature.
+
+### ✅ Implementation Complete
+
+#### Database Model ✅
+
+- **Table**: `stored_twilio_transcripts`
+- **Fields**: user_id, transcript_sid, status, date_created, date_updated, duration, language_code, sentences (JSON)
+- **User isolation**: All queries filter by current_user.id
+
+#### API Endpoints ✅
+
+- **GET /stored-twilio-transcripts** (list endpoint, paginated) ✅
+- **GET /stored-twilio-transcripts/{transcript_sid}** (detail endpoint) ✅
+- **POST /store-transcript/{transcript_sid}** (storage endpoint) ✅
+
+#### Twilio API Format Compatibility ✅
+
+- Returns data in **EXACT same format** as Twilio API ✅
+- Frontend expects specific JSON structure with "sentences" array ✅
+- Each sentence has: text, speaker, start_time, end_time, confidence ✅
+
+#### Frontend Integration ✅
+
+- Frontend components updated to call `/stored-twilio-transcripts` first ✅
+- Falls back to Twilio API if no stored data ✅
+- No breaking changes - existing functionality preserved ✅
+
+### Usage Instructions
+
+#### For Backend Developers
+
+1. **Store a transcript from Twilio**:
+
+```bash
+POST /store-transcript/{transcript_sid}
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+
+{
+  "call_sid": "optional_call_sid",
+  "scenario_name": "Voice Call"
+}
+```
+
+2. **List stored transcripts**:
+
+```bash
+GET /stored-twilio-transcripts?page_size=10&page_token=0
+Authorization: Bearer {jwt_token}
+```
+
+3. **Get transcript details**:
+
+```bash
+GET /stored-twilio-transcripts/{transcript_sid}
+Authorization: Bearer {jwt_token}
+```
+
+#### For Frontend Developers
+
+The frontend components automatically:
+
+1. Try `/stored-twilio-transcripts` first
+2. Fall back to legacy endpoints if needed
+3. Handle both Twilio and legacy formats seamlessly
+
+**No frontend changes needed** - the implementation is backward compatible.
+
+#### Response Format (Exact Twilio API Format)
+
+```json
+{
+  "transcripts": [
+    {
+      "sid": "GT1234567890abcdef",
+      "status": "completed",
+      "date_created": "2024-01-15T10:30:00Z",
+      "date_updated": "2024-01-15T10:35:00Z",
+      "duration": 120,
+      "language_code": "en-US",
+      "sentences": [
+        {
+          "text": "Hello, this is Mike Thompson calling about your property listing.",
+          "speaker": 1,
+          "start_time": 0.5,
+          "end_time": 4.2,
+          "confidence": 0.95
+        },
+        {
+          "text": "Hi Mike, thanks for calling. Which property are you interested in?",
+          "speaker": 0,
+          "start_time": 4.8,
+          "end_time": 8.1,
+          "confidence": 0.92
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Benefits Achieved
+
+- ✅ **Reduced API Costs**: No more expensive Twilio API calls for stored transcripts
+- ✅ **Improved Performance**: Database queries are much faster than API calls
+- ✅ **Search Capability**: Can now search and filter stored transcripts
+- ✅ **User Notes/Tags**: Ready for future enhancement with user annotations
+- ✅ **Offline Access**: Transcripts available even if Twilio API is down
+
 ## Frontend-Backend Connection
 
 ### 1. API Client Configuration

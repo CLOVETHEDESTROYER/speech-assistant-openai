@@ -28,7 +28,7 @@ import sqlalchemy
 import threading
 import time
 from app.auth import router as auth_router, get_current_user
-from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials
+from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript
 from app.utils import (
     get_password_hash,
     verify_password,
@@ -2878,6 +2878,29 @@ async def get_stored_transcript(
         # If user is not an admin, filter by user_id
         if not getattr(current_user, 'is_admin', False):
             query = query.filter(TranscriptRecord.user_id == current_user.id)
+
+        transcript = query.first()
+
+        if not transcript:
+            raise HTTPException(
+                status_code=404,
+                detail="Transcript not found"
+            )
+
+        return {
+            "id": transcript.id,
+            "transcript_sid": transcript.transcript_sid,
+            "status": transcript.status,
+            "full_text": transcript.full_text,
+            "date_created": str(transcript.date_created) if transcript.date_created else None,
+            "date_updated": str(transcript.date_updated) if transcript.date_updated else None,
+            "duration": transcript.duration,
+            "language_code": transcript.language_code,
+            "created_at": str(transcript.created_at) if transcript.created_at else None
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error filtering transcript records: {str(e)}")
         raise HTTPException(
@@ -4977,3 +5000,159 @@ async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user
         logger.error(
             f"Error receiving from Twilio for calendar: {str(e)}", exc_info=True)
         shared_state["should_stop"] = True
+
+
+# NEW STORED TWILIO TRANSCRIPTS ENDPOINTS - EXACT TWILIO API FORMAT
+@app.get("/stored-twilio-transcripts")
+async def get_stored_twilio_transcripts(
+    page_size: int = Query(10, le=100),
+    page_token: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return stored transcripts in EXACT same format as Twilio API"""
+    try:
+        query = db.query(StoredTwilioTranscript).filter(
+            StoredTwilioTranscript.user_id == current_user.id
+        ).order_by(StoredTwilioTranscript.date_created.desc())
+
+        skip = int(page_token) if page_token else 0
+        transcripts = query.offset(skip).limit(page_size).all()
+
+        # Return in EXACT same format as Twilio API
+        return {
+            "transcripts": [
+                {
+                    "sid": t.transcript_sid,
+                    "status": t.status,
+                    "date_created": t.date_created,
+                    "date_updated": t.date_updated,
+                    "duration": t.duration,
+                    "language_code": t.language_code,
+                    "sentences": t.sentences  # This is the critical part!
+                }
+                for t in transcripts
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving stored Twilio transcripts: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving stored transcripts"
+        )
+
+
+@app.get("/stored-twilio-transcripts/{transcript_sid}")
+async def get_stored_twilio_transcript_detail(
+    transcript_sid: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return stored transcript detail in EXACT same format as Twilio API"""
+    try:
+        transcript = db.query(StoredTwilioTranscript).filter(
+            StoredTwilioTranscript.transcript_sid == transcript_sid,
+            StoredTwilioTranscript.user_id == current_user.id
+        ).first()
+
+        if not transcript:
+            raise HTTPException(status_code=404, detail="Transcript not found")
+
+        # Return in EXACT same format as Twilio detail API
+        return {
+            "sid": transcript.transcript_sid,
+            "status": transcript.status,
+            "date_created": transcript.date_created,
+            "date_updated": transcript.date_updated,
+            "duration": transcript.duration,
+            "language_code": transcript.language_code,
+            "sentences": transcript.sentences  # Full Twilio sentences array
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error retrieving stored Twilio transcript detail: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving transcript detail"
+        )
+
+
+@app.post("/store-transcript/{transcript_sid}")
+async def store_transcript_from_twilio(
+    transcript_sid: str,
+    call_sid: Optional[str] = Body(None),
+    scenario_name: str = Body("Voice Call"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Fetch transcript from Twilio and store in our database"""
+    try:
+        # Check if already stored
+        existing = db.query(StoredTwilioTranscript).filter(
+            StoredTwilioTranscript.transcript_sid == transcript_sid
+        ).first()
+
+        if existing:
+            return {"status": "already_stored", "transcript_sid": transcript_sid}
+
+        # Fetch from Twilio
+        from app.services.twilio_client import get_twilio_client
+        twilio_client = get_twilio_client()
+        transcript = twilio_client.intelligence.v2.transcripts(
+            transcript_sid).fetch()
+
+        # Fetch sentences
+        sentences = twilio_client.intelligence.v2.transcripts(
+            transcript_sid).sentences.list()
+
+        # Sort sentences by start time
+        sorted_sentences = sorted(
+            sentences, key=lambda s: getattr(s, "start_time", 0))
+
+        # Helper function for decimal conversion
+        def decimal_to_float(obj):
+            from decimal import Decimal
+            if isinstance(obj, Decimal):
+                return float(obj)
+            return obj
+
+        # Format sentences in Twilio format
+        formatted_sentences = [
+            {
+                "text": getattr(s, "transcript", "No text available"),
+                "speaker": getattr(s, "media_channel", 0),
+                "start_time": decimal_to_float(getattr(s, "start_time", 0)),
+                "end_time": decimal_to_float(getattr(s, "end_time", 0)),
+                "confidence": decimal_to_float(getattr(s, "confidence", 0.0))
+            }
+            for s in sorted_sentences
+        ]
+
+        # Store in our database with exact Twilio format
+        stored_transcript = StoredTwilioTranscript(
+            user_id=current_user.id,
+            transcript_sid=transcript.sid,
+            status=transcript.status,
+            date_created=transcript.date_created.isoformat() if transcript.date_created else None,
+            date_updated=transcript.date_updated.isoformat() if transcript.date_updated else None,
+            duration=decimal_to_float(
+                transcript.duration) if transcript.duration else 0,
+            language_code=transcript.language_code or "en-US",
+            sentences=formatted_sentences,  # Store formatted Twilio sentences
+            call_sid=call_sid,
+            scenario_name=scenario_name
+        )
+
+        db.add(stored_transcript)
+        db.commit()
+
+        logger.info(
+            f"Successfully stored transcript {transcript_sid} for user {current_user.id}")
+        return {"status": "stored", "transcript_sid": transcript_sid}
+
+    except Exception as e:
+        logger.error(f"Failed to store transcript {transcript_sid}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to store transcript: {str(e)}")
