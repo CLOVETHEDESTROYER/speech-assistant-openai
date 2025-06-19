@@ -1,8 +1,10 @@
-# AIFriend Web - Frontend Documentation
+# Speech Assistant Business Web App - Frontend Documentation
 
 ## Overview
 
-AIFriend Web is a React-based SaaS application that enables users to create and manage AI-powered voice calls with custom scenarios. Each user has their own isolated workspace with personalized scenarios, call history, and Google Calendar integration.
+Speech Assistant Business Web App is a React-based SaaS application that enables business users to create and manage AI-powered voice calls with custom scenarios. Each user has their own isolated workspace with personalized scenarios, call history, Google Calendar integration, and dedicated phone numbers.
+
+**Note**: This frontend is for the **Business Web App** only. The mobile app has its own iOS implementation documented in `mobileApp.md`.
 
 ## Architecture Overview
 
@@ -15,8 +17,36 @@ AIFriend Web is a React-based SaaS application that enables users to create and 
 │ • Scenarios     │    │ • User Data     │    │ • OpenAI API    │
 │ • Call History  │    │ • Call Logic    │    │ • Twilio        │
 │ • Calendar      │    │ • Transcripts   │    │                 │
+│ • Onboarding    │    │ • Usage Limits  │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
+
+## 🏗️ Dual-Platform Architecture
+
+### **Single Backend, Multiple Frontends**
+
+This backend serves both platforms:
+
+- **Business Web App** (React) → Standard endpoints (no special headers)
+- **Mobile App** (iOS) → `/mobile/*` endpoints with `X-App-Type: mobile` header
+
+### **Platform Detection**
+
+The backend automatically detects platform type:
+
+```python
+# Business web app (default)
+if request.headers.get("X-App-Type") == "mobile":
+    # Mobile logic: 3 trial calls, $4.99/week
+    trial_calls = 3
+    pricing = "$4.99/week"
+else:
+    # Business logic: 4 trial calls, $49.99/month
+    trial_calls = 4
+    pricing = "$49.99/month"
+```
+
+---
 
 ## ✅ COMPLETED: Stored Transcripts Implementation
 
@@ -132,6 +162,8 @@ The frontend components automatically:
 - ✅ **User Notes/Tags**: Ready for future enhancement with user annotations
 - ✅ **Offline Access**: Transcripts available even if Twilio API is down
 
+---
+
 ## Frontend-Backend Connection
 
 ### 1. API Client Configuration
@@ -171,7 +203,7 @@ VITE_API_URL=http://localhost:5050  # Backend API URL
 ### 3. Authentication Flow
 
 ```typescript
-// Login Process
+// Login Process (Business web app - no special headers needed)
 const loginResponse = await api.auth.login({
   username: email,
   password: password,
@@ -183,13 +215,80 @@ localStorage.setItem("token", loginResponse.token.access_token);
 // All subsequent API calls automatically include the token
 ```
 
-## Google Calendar Integration
+---
+
+## 🎓 User Onboarding System
+
+### Onboarding Flow
+
+The business web app includes a comprehensive onboarding system:
+
+1. **Phone Number Setup**: Provision dedicated Twilio phone number
+2. **Calendar Integration**: Connect Google Calendar for scheduling
+3. **Scenario Creation**: Create first custom AI scenario
+4. **Welcome Call**: Complete first test call
+
+### Onboarding Components
+
+```typescript
+// Check onboarding status
+const getOnboardingStatus = async () => {
+  const response = await apiClient.get("/onboarding/status");
+  return response.data;
+};
+
+// Complete onboarding step
+const completeOnboardingStep = async (step: string, data?: any) => {
+  const response = await apiClient.post("/onboarding/complete-step", {
+    step,
+    ...data,
+  });
+  return response.data;
+};
+```
+
+---
+
+## 📞 Phone Number Management
+
+### Business-Specific Features
+
+Business users get dedicated phone numbers (unlike mobile users who share system numbers):
+
+```typescript
+// Search available numbers
+const searchNumbers = async (areaCode?: string) => {
+  const response = await apiClient.post("/twilio/search-numbers", {
+    area_code: areaCode,
+    limit: 10,
+  });
+  return response.data;
+};
+
+// Provision phone number
+const provisionNumber = async (phoneNumber: string) => {
+  const response = await apiClient.post("/twilio/provision-number", {
+    phone_number: phoneNumber,
+  });
+  return response.data;
+};
+
+// Get user's phone numbers
+const getUserNumbers = async () => {
+  const response = await apiClient.get("/twilio/user-numbers");
+  return response.data;
+};
+```
+
+---
+
+## 📅 Google Calendar Integration
 
 ### Current Implementation Status
 
 - ✅ OAuth flow initiated from frontend
 - ✅ Frontend retry logic for token timing
-- ❌ Backend redirect to frontend (needs fix)
+- ✅ Backend redirect to frontend (implemented)
 - ✅ Calendar events display
 - ✅ Schedule AI calls for meetings
 
@@ -197,457 +296,241 @@ localStorage.setItem("token", loginResponse.token.access_token);
 
 #### 1. Update OAuth Callback Endpoint
 
-**Backend File: `main.py` (or equivalent)**
+**Backend File: `app/routes/google_calendar.py`**
 
 ```python
-from fastapi.responses import HTMLResponse, FileResponse
-import os
-
-@app.get("/google-calendar/callback")
+@router.get("/callback")
 async def google_calendar_callback(
-    request: Request,
-    code: str = None,
-    state: str = None,
-    current_user: User = Depends(get_current_user)
-):
-    try:
-        # Process OAuth callback (existing logic)
-        # ... existing OAuth token processing ...
-
-        # Instead of returning JSON, serve redirect HTML
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Google Calendar Connected</title>
-            <script>
-                setTimeout(() => {{
-                    const frontendUrl = window.location.hostname === 'localhost'
-                        ? 'http://localhost:5174'  // Dev environment
-                        : 'https://your-frontend-domain.com';  // Production
-
-                    window.location.href = `${{frontendUrl}}/scheduled-meetings?code={code}&state={state}`;
-                }}, 2000);
-            </script>
-        </head>
-        <body>
-            <h1>✅ Google Calendar Connected!</h1>
-            <p>Redirecting you back to the application...</p>
-        </body>
-        </html>
-        """
-
-        return HTMLResponse(content=html_content)
-
-    except Exception as e:
-        logger.error(f"OAuth callback error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-```
-
-#### 2. User-Specific Calendar Storage
-
-```python
-# Add to your User model
-class GoogleCalendarCredentials(Base):
-    __tablename__ = "google_calendar_credentials"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
-    access_token = Column(String, nullable=False)
-    refresh_token = Column(String, nullable=False)
-    token_expiry = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    user = relationship("User", back_populates="calendar_credentials")
-
-# Update User model
-class User(Base):
-    # ... existing fields ...
-    calendar_credentials = relationship("GoogleCalendarCredentials", back_populates="user", uselist=False)
-```
-
-### Frontend Calendar Integration
-
-**File: `src/pages/ScheduledMeetings.tsx`**
-
-The frontend handles:
-
-- OAuth initiation
-- Callback parameter processing
-- Retry logic for token timing
-- Calendar events display
-- AI call scheduling
-
-## User-Specific Features Implementation
-
-### 1. Custom Scenarios (Per User)
-
-#### Backend Requirements
-
-```python
-# Update CustomScenario model for user isolation
-class CustomScenario(Base):
-    __tablename__ = "custom_scenarios"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User isolation
-    name = Column(String, nullable=False)
-    persona = Column(Text, nullable=False)
-    prompt = Column(Text, nullable=False)
-    voice_type = Column(String, nullable=False)
-    temperature = Column(Float, default=0.7)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    user = relationship("User", back_populates="scenarios")
-
-# Update User model
-class User(Base):
-    # ... existing fields ...
-    scenarios = relationship("CustomScenario", back_populates="user")
-
-# Update API endpoints for user isolation
-@app.get("/custom-scenarios")
-async def list_user_scenarios(
+    code: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    scenarios = db.query(CustomScenario).filter(
-        CustomScenario.user_id == current_user.id
-    ).all()
-    return scenarios
+    # ... existing OAuth logic ...
 
-@app.post("/custom-scenarios")
-async def create_scenario(
-    scenario_data: CustomScenarioCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    scenario = CustomScenario(
-        user_id=current_user.id,  # Ensure user isolation
-        **scenario_data.dict()
-    )
-    db.add(scenario)
-    db.commit()
-    return scenario
+    # Redirect to frontend with success/error parameters
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+    if success:
+        redirect_url = f"{frontend_url}/dashboard?calendar=connected&success=true"
+    else:
+        redirect_url = f"{frontend_url}/dashboard?calendar=error&message={error_message}"
+
+    return RedirectResponse(url=redirect_url)
 ```
 
-#### Frontend Implementation
+#### 2. Frontend Callback Handler
 
-**File: `src/context/ScenarioContext.tsx`**
+**Frontend File: `src/components/CalendarCallback.tsx`**
 
 ```typescript
-export const ScenarioProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const { user } = useAuth(); // Get current user
+import { useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
-  const loadUserScenarios = async () => {
-    if (!user) return;
-
-    try {
-      const userScenarios = await api.scenarios.list(); // Only returns user's scenarios
-      setScenarios(userScenarios);
-    } catch (error) {
-      console.error("Failed to load user scenarios:", error);
-    }
-  };
+const CalendarCallback = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    loadUserScenarios();
-  }, [user]);
+    const success = searchParams.get("success");
+    const calendar = searchParams.get("calendar");
+    const message = searchParams.get("message");
 
-  // ... rest of context implementation
-};
-```
-
-### 2. Call Notes & Transcripts (Per User)
-
-#### Backend Requirements
-
-```python
-# Enhanced transcript model with user isolation
-class CallTranscript(Base):
-    __tablename__ = "call_transcripts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User isolation
-    transcript_sid = Column(String, unique=True, nullable=False)
-    call_sid = Column(String, nullable=False)
-    scenario_id = Column(Integer, ForeignKey("custom_scenarios.id"), nullable=True)
-    scenario_name = Column(String, nullable=False)
-
-    # Call metadata
-    call_direction = Column(String, nullable=False)  # 'outbound', 'inbound'
-    phone_number = Column(String, nullable=False)
-    call_date = Column(DateTime, nullable=False)
-    duration = Column(Integer, nullable=False)  # seconds
-
-    # Transcript data
-    full_text = Column(Text, nullable=False)
-    conversation_flow = Column(JSON, nullable=True)  # Enhanced transcript data
-    participant_info = Column(JSON, nullable=True)
-    summary_data = Column(JSON, nullable=True)
-
-    # User notes
-    user_notes = Column(Text, nullable=True)  # User can add personal notes
-    tags = Column(JSON, nullable=True)  # User-defined tags
-    is_favorite = Column(Boolean, default=False)
-
-    # Metadata
-    status = Column(String, default="completed")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    user = relationship("User", back_populates="call_transcripts")
-    scenario = relationship("CustomScenario", back_populates="transcripts")
-
-# API endpoints with user isolation
-@app.get("/call-transcripts")
-async def get_user_transcripts(
-    skip: int = 0,
-    limit: int = 10,
-    scenario_filter: str = None,
-    date_from: str = None,
-    date_to: str = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    query = db.query(CallTranscript).filter(
-        CallTranscript.user_id == current_user.id
-    )
-
-    # Apply filters
-    if scenario_filter:
-        query = query.filter(CallTranscript.scenario_name.ilike(f"%{scenario_filter}%"))
-
-    if date_from:
-        query = query.filter(CallTranscript.call_date >= date_from)
-
-    if date_to:
-        query = query.filter(CallTranscript.call_date <= date_to)
-
-    transcripts = query.offset(skip).limit(limit).all()
-    return transcripts
-
-@app.put("/call-transcripts/{transcript_id}/notes")
-async def update_transcript_notes(
-    transcript_id: int,
-    notes_data: dict,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    transcript = db.query(CallTranscript).filter(
-        CallTranscript.id == transcript_id,
-        CallTranscript.user_id == current_user.id  # Ensure user owns this transcript
-    ).first()
-
-    if not transcript:
-        raise HTTPException(status_code=404, detail="Transcript not found")
-
-    transcript.user_notes = notes_data.get('notes')
-    transcript.tags = notes_data.get('tags', [])
-    transcript.is_favorite = notes_data.get('is_favorite', False)
-
-    db.commit()
-    return transcript
-```
-
-#### Frontend Implementation
-
-**File: `src/pages/CallNotes.tsx`**
-
-```typescript
-export const CallNotes: React.FC = () => {
-  const [transcripts, setTranscripts] = useState<CallTranscript[]>([]);
-  const [filters, setFilters] = useState({
-    scenario: "",
-    dateFrom: "",
-    dateTo: "",
-    tags: [],
-  });
-  const { user } = useAuth();
-
-  const loadUserTranscripts = async () => {
-    if (!user) return;
-
-    try {
-      const userTranscripts = await api.calls.getEnhancedTranscripts(
-        0,
-        50,
-        filters
-      );
-      setTranscripts(userTranscripts);
-    } catch (error) {
-      console.error("Failed to load user transcripts:", error);
+    if (calendar === "connected" && success === "true") {
+      // Show success message
+      showSuccessNotification("Google Calendar connected successfully!");
+      navigate("/dashboard");
+    } else if (calendar === "error") {
+      // Show error message
+      showErrorNotification(message || "Failed to connect Google Calendar");
+      navigate("/dashboard");
     }
-  };
+  }, [searchParams, navigate]);
 
-  const updateTranscriptNotes = async (
-    transcriptId: string,
-    notes: string,
-    tags: string[]
-  ) => {
-    try {
-      await api.calls.updateTranscriptNotes(transcriptId, {
-        notes,
-        tags,
-        is_favorite: false,
-      });
-
-      // Refresh the list
-      loadUserTranscripts();
-      toast.success("Notes updated successfully");
-    } catch (error) {
-      toast.error("Failed to update notes");
-    }
-  };
-
-  // ... rest of component implementation
+  return <div>Processing calendar connection...</div>;
 };
 ```
 
-## SaaS Multi-Tenancy Implementation
+---
 
-### 1. User Isolation Strategy
+## 📊 Usage & Analytics
+
+### Business-Specific Usage Tracking
+
+Business users have different usage limits and analytics:
 
 ```typescript
-// All API calls automatically include user context via JWT token
-// Backend enforces user isolation at the database level
-
-// Example: Scenario creation
-const createScenario = async (scenarioData: ScenarioData) => {
-  // Token automatically attached by interceptor
-  // Backend extracts user_id from token and associates with scenario
-  return await api.scenarios.create(scenarioData);
+// Get usage statistics
+const getUsageStats = async () => {
+  const response = await apiClient.get('/usage-stats');
+  return response.data;
 };
+
+// Response format for business users:
+{
+  "app_type": "web_business",
+  "is_trial_active": false,
+  "trial_calls_remaining": 0,
+  "calls_made_today": 2,
+  "calls_made_this_week": 15,
+  "calls_made_total": 45,
+  "is_subscribed": true,
+  "subscription_tier": "business_basic",
+  "weekly_call_limit": 20,
+  "calls_remaining_this_week": 5,
+  "upgrade_recommended": false
+}
 ```
 
-### 2. Data Segregation
+---
 
-```sql
--- All user-specific tables include user_id foreign key
--- Database queries always filter by current user
+## 🎭 Custom Scenario Management
 
--- Example queries:
-SELECT * FROM custom_scenarios WHERE user_id = ?;
-SELECT * FROM call_transcripts WHERE user_id = ?;
-SELECT * FROM google_calendar_credentials WHERE user_id = ?;
-```
+### Business-Specific Features
 
-### 3. Frontend State Management
-
-**File: `src/context/AuthContext.tsx`**
+Business users can create unlimited custom scenarios:
 
 ```typescript
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+// Get user's custom scenarios
+const getCustomScenarios = async () => {
+  const response = await apiClient.get("/custom-scenarios");
+  return response.data;
+};
 
-  // On login, all user-specific data is loaded
-  const login = async (email: string, password: string) => {
-    const response = await api.auth.login({ username: email, password });
-
-    setUser(response.user);
-    setIsAuthenticated(true);
-
-    // Trigger loading of user-specific data across the app
-    // This happens automatically via context providers
-  };
-
-  // On logout, clear all user-specific data
-  const logout = async () => {
-    localStorage.removeItem("token");
-    setUser(null);
-    setIsAuthenticated(false);
-
-    // Clear all cached user data
-    // Navigate to login page
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>
-      {children}
-    </AuthContext.Provider>
+// Create custom scenario
+const createCustomScenario = async (scenarioData: any) => {
+  const response = await apiClient.post(
+    "/realtime/custom-scenario",
+    scenarioData
   );
+  return response.data;
 };
 ```
 
-## Required Implementation Steps
+---
 
-### Phase 1: Google Calendar Integration
+## 📞 Making Calls
 
-1. ✅ Frontend OAuth flow (completed)
-2. ❌ **Backend OAuth callback redirect** (needs implementation)
-3. ❌ **User-specific calendar credentials storage** (needs implementation)
-4. ❌ **Calendar events API with user isolation** (needs implementation)
+### Business Call Interface
 
-### Phase 2: User-Specific Scenarios
+```typescript
+// Make standard call
+const makeCall = async (phoneNumber: string, scenario: string) => {
+  const response = await apiClient.get(`/make-call/${phoneNumber}/${scenario}`);
+  return response.data;
+};
 
-1. ❌ **Database schema updates** (add user_id to scenarios table)
-2. ❌ **Backend API updates** (enforce user isolation)
-3. ❌ **Frontend context updates** (load user-specific scenarios)
-4. ❌ **Scenario management UI** (CRUD operations)
+// Make custom scenario call
+const makeCustomCall = async (phoneNumber: string, scenarioId: string) => {
+  const response = await apiClient.get(
+    `/make-custom-call/${phoneNumber}/${scenarioId}`
+  );
+  return response.data;
+};
 
-### Phase 3: User-Specific Call Notes
+// Schedule future call
+const scheduleCall = async (callData: any) => {
+  const response = await apiClient.post("/schedule-call", callData);
+  return response.data;
+};
+```
 
-1. ❌ **Enhanced transcript model** (add user_id, notes, tags)
-2. ❌ **Call notes API endpoints** (CRUD for notes)
-3. ❌ **Frontend call notes interface** (enhanced CallNotes.tsx)
-4. ❌ **Search and filtering** (by scenario, date, tags)
+---
 
-### Phase 4: SaaS Features
+## 🔧 Error Handling
 
-1. ❌ **User registration/billing integration**
-2. ❌ **Usage tracking and limits**
-3. ❌ **Admin dashboard**
-4. ❌ **Multi-tenant deployment**
+### Business-Specific Error Handling
 
-## Security Considerations
+```typescript
+// Handle payment required errors
+const handlePaymentRequired = (error: any) => {
+  if (error.response?.status === 402) {
+    const detail = error.response.data.detail;
 
-### 1. JWT Token Management
+    if (detail.error === "trial_exhausted") {
+      showUpgradeModal(detail.pricing);
+    } else if (detail.error === "weekly_limit_reached") {
+      showLimitReachedModal(detail);
+    }
+  }
+};
 
-- Tokens stored in localStorage (consider httpOnly cookies for production)
-- Automatic token refresh on expiry
-- Secure token validation on backend
+// Handle phone number errors
+const handlePhoneNumberError = (error: any) => {
+  if (
+    error.response?.status === 404 &&
+    error.response.data.detail.includes("phone number")
+  ) {
+    navigate("/onboarding?step=phone_setup");
+  }
+};
+```
 
-### 2. User Data Isolation
+---
 
-- All database queries filtered by user_id
-- No cross-user data access possible
-- API endpoints validate user ownership
+## 🚀 Deployment Configuration
 
-### 3. OAuth Security
+### Environment Variables
 
-- State parameter validation
-- Secure token storage per user
-- Proper scope limitations
+```bash
+# Frontend (.env)
+VITE_API_URL=https://api.speechassistant.com
+VITE_GOOGLE_CLIENT_ID=your_google_client_id
 
-## Development Workflow
+# Backend (.env)
+FRONTEND_URL=https://business.speechassistant.com
+PUBLIC_URL=https://api.speechassistant.com
+DEVELOPMENT_MODE=false
+```
 
-1. **Start Backend**: `uvicorn app.main:app --reload --port 5050`
-2. **Start Frontend**: `npm run dev` (runs on port 5174)
-3. **Environment Setup**: Ensure `.env` files configured for both frontend and backend
-4. **Database Migrations**: Run Alembic migrations for schema updates
-5. **Testing**: Test user isolation and multi-tenancy features
+### Production Build
 
-## Production Deployment
+```bash
+# Install dependencies
+npm install
 
-### Frontend
+# Build for production
+npm run build
 
-- Build: `npm run build`
-- Deploy to CDN/Static hosting
-- Environment variables for production API URL
+# Deploy to hosting service (Netlify, Vercel, etc.)
+# Configure environment variables in hosting platform
+```
 
-### Backend
+---
 
-- Deploy FastAPI application
-- Configure production database
-- Set up proper OAuth redirect URLs
-- Implement proper logging and monitoring
+## 📱 Mobile vs Business Comparison
 
-This documentation provides a comprehensive roadmap for implementing the user-specific features and Google Calendar integration needed for your SaaS application.
+| Feature           | Business Web App            | Mobile App            |
+| ----------------- | --------------------------- | --------------------- |
+| **Trial Calls**   | 4 calls                     | 3 calls               |
+| **Pricing**       | $49.99-$299/month           | $4.99/week            |
+| **Phone Numbers** | Dedicated per user          | Shared system numbers |
+| **Scenarios**     | Unlimited custom            | 5 pre-selected        |
+| **Onboarding**    | Multi-step wizard           | Instant access        |
+| **Calendar**      | Google Calendar integration | Not available         |
+| **Transcripts**   | Full analysis               | Basic history         |
+| **Endpoints**     | Standard API                | `/mobile/*` endpoints |
+
+---
+
+## 🎯 Key Differences from Mobile App
+
+### **Business Web App Features**
+
+- **Dedicated Phone Numbers**: Each user gets their own Twilio number
+- **Custom Scenarios**: Create unlimited personalized AI scenarios
+- **Advanced Onboarding**: Step-by-step setup with progress tracking
+- **Google Calendar**: Full calendar integration for scheduling
+- **Usage Analytics**: Detailed call tracking and insights
+- **Professional Pricing**: Multiple tiers with usage limits
+
+### **Mobile App Features**
+
+- **Shared Infrastructure**: Uses system phone numbers
+- **Fun Scenarios**: 5 pre-selected entertainment scenarios
+- **Simple Onboarding**: Just sign up and start calling
+- **App Store Integration**: In-app purchases for subscriptions
+- **Quick Access**: Instant calling without complex setup
+
+---
+
+This comprehensive frontend documentation covers the business web app implementation. For mobile app integration, see `mobileApp.md`. Both apps share the same backend with automatic platform detection! 🚀

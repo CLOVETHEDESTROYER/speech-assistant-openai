@@ -16,6 +16,389 @@ This document provides comprehensive integration guidelines for the **Speech Ass
 
 ---
 
+## 📱 Complete API Endpoints Reference
+
+### **Authentication Endpoints**
+
+#### **POST /auth/register**
+
+**Purpose**: Register a new mobile user account
+**Headers Required**:
+
+- `Content-Type: application/json`
+- `X-App-Type: mobile`
+- `User-Agent: Speech-Assistant-Mobile-iOS/1.0`
+
+**Request Body**:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Response**:
+
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer"
+}
+```
+
+**What it does**: Creates a new user account with mobile-specific settings (3 trial calls, 7-day trial period). Automatically initializes usage limits for mobile consumers.
+
+---
+
+#### **POST /auth/login**
+
+**Purpose**: Authenticate existing mobile user
+**Headers Required**:
+
+- `Content-Type: application/x-www-form-urlencoded`
+- `X-App-Type: mobile`
+
+**Request Body** (form data):
+
+```
+username=user@example.com&password=securepassword123
+```
+
+**Response**: Same as register endpoint
+**What it does**: Authenticates user and returns JWT tokens for API access. Automatically detects mobile platform from headers.
+
+---
+
+#### **POST /auth/refresh**
+
+**Purpose**: Refresh expired access token
+**Headers Required**:
+
+- `Content-Type: application/json`
+
+**Request Body**:
+
+```json
+{
+  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response**: Same as register endpoint
+**What it does**: Uses refresh token to get new access token without requiring user to log in again.
+
+---
+
+### **Usage & Trial Management Endpoints**
+
+#### **GET /mobile/usage-stats**
+
+**Purpose**: Get current usage statistics and trial/subscription status
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Response**:
+
+```json
+{
+  "app_type": "mobile_consumer",
+  "is_trial_active": true,
+  "trial_calls_remaining": 2,
+  "trial_calls_used": 1,
+  "calls_made_today": 1,
+  "calls_made_total": 1,
+  "is_subscribed": false,
+  "subscription_tier": null,
+  "upgrade_recommended": false,
+  "pricing": {
+    "weekly_plan": {
+      "price": "$4.99",
+      "billing": "weekly",
+      "features": ["Unlimited calls", "Fun scenarios", "Call friends"]
+    }
+  }
+}
+```
+
+**What it does**: Returns comprehensive usage statistics including trial status, call counts, subscription info, and pricing details. Automatically initializes usage limits if not found.
+
+---
+
+#### **POST /mobile/check-call-permission**
+
+**Purpose**: Check if user can make a call before initiating
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Response**:
+
+```json
+{
+  "can_make_call": true,
+  "status": "trial_active",
+  "details": {
+    "calls_remaining": 2,
+    "trial_ends": "2024-01-15T10:30:00Z",
+    "app_type": "mobile_consumer",
+    "message": "You have 2 trial calls remaining"
+  }
+}
+```
+
+**What it does**: Validates if user has available trial calls or active subscription before allowing call initiation. Prevents unnecessary API calls when user can't make calls.
+
+---
+
+#### **GET /mobile/pricing**
+
+**Purpose**: Get mobile app pricing information
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Response**:
+
+```json
+{
+  "weekly_plan": {
+    "price": "$4.99",
+    "billing": "weekly",
+    "features": ["Unlimited calls", "Fun scenarios", "Call friends"]
+  }
+}
+```
+
+**What it does**: Returns mobile-specific pricing information for display in upgrade prompts and pricing screens.
+
+---
+
+### **Call Management Endpoints**
+
+#### **GET /mobile/scenarios**
+
+**Purpose**: Get available fun scenarios for mobile users
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Response**:
+
+```json
+{
+  "scenarios": [
+    {
+      "id": "default",
+      "name": "Friendly Chat",
+      "description": "A casual, friendly conversation",
+      "icon": "💬"
+    },
+    {
+      "id": "celebrity",
+      "name": "Celebrity Interview",
+      "description": "Chat with a virtual celebrity",
+      "icon": "🌟"
+    },
+    {
+      "id": "comedian",
+      "name": "Stand-up Comedian",
+      "description": "Funny jokes and comedy bits",
+      "icon": "😂"
+    },
+    {
+      "id": "therapist",
+      "name": "Life Coach",
+      "description": "Supportive and motivational conversation",
+      "icon": "🧠"
+    },
+    {
+      "id": "storyteller",
+      "name": "Storyteller",
+      "description": "Engaging stories and tales",
+      "icon": "📚"
+    }
+  ]
+}
+```
+
+**What it does**: Returns the 5 pre-selected fun scenarios available to mobile users. These are simplified, entertainment-focused scenarios.
+
+---
+
+#### **POST /mobile/make-call**
+
+**Purpose**: Initiate a phone call with usage tracking
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+- `Content-Type: application/json`
+
+**Request Body**:
+
+```json
+{
+  "phone_number": "+1234567890",
+  "scenario": "default"
+}
+```
+
+**Success Response**:
+
+```json
+{
+  "call_sid": "CA1234567890abcdef",
+  "status": "initiated",
+  "usage_stats": {
+    "trial_calls_remaining": 1,
+    "calls_made_total": 2,
+    "upgrade_recommended": false
+  }
+}
+```
+
+**Error Response (402 - Payment Required)**:
+
+```json
+{
+  "detail": {
+    "error": "trial_exhausted",
+    "message": "Your 3 free trial calls have been used. Upgrade to $4.99/week for unlimited calls!",
+    "upgrade_url": "/mobile/upgrade"
+  }
+}
+```
+
+**What it does**:
+
+1. Validates user can make calls (trial/subscription)
+2. Uses shared system phone number (no individual provisioning needed)
+3. Initiates Twilio call with selected scenario
+4. Records call in usage statistics
+5. Returns updated usage stats
+
+---
+
+#### **POST /mobile/schedule-call**
+
+**Purpose**: Schedule a call for future execution
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+- `Content-Type: application/json`
+
+**Request Body**:
+
+```json
+{
+  "phone_number": "+1234567890",
+  "scenario": "default",
+  "scheduled_time": "2024-01-15T14:30:00Z"
+}
+```
+
+**Response**:
+
+```json
+{
+  "schedule_id": 123,
+  "phone_number": "+1234567890",
+  "scenario": "default",
+  "scheduled_time": "2024-01-15T14:30:00Z",
+  "status": "scheduled"
+}
+```
+
+**What it does**: Schedules a call to be executed at a specific time. Validates user permissions before scheduling. Defaults to 1 minute from now if no time specified.
+
+---
+
+#### **GET /mobile/call-history**
+
+**Purpose**: Get user's call history
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Query Parameters**:
+
+- `limit` (optional): Number of calls to return (default: 10)
+
+**Response**:
+
+```json
+{
+  "call_history": [
+    {
+      "id": 456,
+      "phone_number": "+1234567890",
+      "scenario": "default",
+      "status": "completed",
+      "created_at": "2024-01-14T10:30:00Z",
+      "call_sid": "CA1234567890abcdef"
+    }
+  ],
+  "total_calls": 1
+}
+```
+
+**What it does**: Returns recent call history for the authenticated user, including call status and metadata.
+
+---
+
+### **Subscription Management Endpoints**
+
+#### **POST /mobile/upgrade-subscription**
+
+**Purpose**: Handle App Store subscription purchases
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+- `Content-Type: application/json`
+
+**Request Body**:
+
+```json
+{
+  "app_store_transaction_id": "1000000123456789",
+  "subscription_tier": "mobile_weekly"
+}
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "message": "Successfully upgraded to weekly subscription!",
+  "subscription_tier": "mobile_weekly",
+  "usage_stats": {
+    "is_subscribed": true,
+    "subscription_tier": "mobile_weekly",
+    "trial_calls_remaining": 0
+  }
+}
+```
+
+**What it does**:
+
+1. Validates App Store transaction ID
+2. Upgrades user to paid subscription
+3. Removes trial limitations
+4. Returns updated usage statistics
+
+---
+
 ## Authentication Flow
 
 ### **1. User Registration**
@@ -692,6 +1075,37 @@ struct APIConfig {
 
 // Usage
 let config = APIConfig.development // Switch for production
+```
+
+---
+
+## Testing Endpoints
+
+### **Quick Test Commands**
+
+```bash
+# Register mobile user
+curl -X POST http://localhost:5050/auth/register \
+  -H "Content-Type: application/json" \
+  -H "X-App-Type: mobile" \
+  -d '{"email":"mobile@test.com","password":"password123"}'
+
+# Get usage stats
+curl -X GET http://localhost:5050/mobile/usage-stats \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-App-Type: mobile"
+
+# Get scenarios
+curl -X GET http://localhost:5050/mobile/scenarios \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-App-Type: mobile"
+
+# Make a call
+curl -X POST http://localhost:5050/mobile/make-call \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-App-Type: mobile" \
+  -d '{"phone_number":"+1234567890","scenario":"default"}'
 ```
 
 This comprehensive guide provides everything your iOS development team needs to integrate with the Speech Assistant backend API. The mobile app will have a clean, simple user experience focused on fun calling scenarios with a straightforward trial-to-subscription conversion flow.

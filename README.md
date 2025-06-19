@@ -4,7 +4,7 @@ A comprehensive **dual-platform SaaS solution** for creating and managing AI voi
 
 ## 🎯 Overview
 
-This application provides a complete SaaS backend that powers two different types of applications:
+This application provides a complete SaaS backend that powers two different types of applications from a **single, unified backend**:
 
 ### **📱 Consumer Mobile App** (Fun & Social)
 
@@ -13,6 +13,7 @@ This application provides a complete SaaS backend that powers two different type
 - **Fun Scenarios**: Pre-selected entertaining conversation scenarios
 - **Easy Setup**: Just sign up and start calling - no complex onboarding
 - **Shared Infrastructure**: Uses system phone numbers (no individual provisioning)
+- **App Store Ready**: Complete iOS integration with in-app purchases
 
 ### **💼 Business Web App** (Professional)
 
@@ -21,6 +22,38 @@ This application provides a complete SaaS backend that powers two different type
 - **Complete Onboarding**: Phone number provisioning, calendar integration
 - **Custom Scenarios**: Create unlimited personalized conversation flows
 - **Advanced Features**: Transcripts, analytics, calendar integration, dedicated phone numbers
+
+---
+
+## 🏗️ Architecture Decision: Single Backend
+
+### **Why Single Backend? (Recommended)**
+
+✅ **Cost Effective**: One server, one database, one deployment  
+✅ **Shared Infrastructure**: Authentication, Twilio, OpenAI costs are shared  
+✅ **Easier Maintenance**: One codebase to update and monitor  
+✅ **Your Current Setup**: Already working perfectly with platform detection  
+✅ **Faster to Ship**: No need to split and redeploy
+
+### **Platform Detection**
+
+The backend automatically detects platform type based on:
+
+- **Request Headers**: `X-App-Type: mobile` or `X-App-Type: web`
+- **User Agent**: `Speech-Assistant-Mobile-iOS` or browser agents
+- **Endpoint Prefix**: `/mobile/*` vs standard endpoints
+
+```python
+# Automatic platform detection
+if request.headers.get("X-App-Type") == "mobile":
+    # Mobile logic: 3 trial calls, $4.99/week
+    trial_calls = 3
+    pricing = "$4.99/week"
+else:
+    # Business logic: 4 trial calls, $49.99/month
+    trial_calls = 4
+    pricing = "$49.99/month"
+```
 
 ---
 
@@ -110,6 +143,7 @@ conversations          # Call history and transcripts
 ```bash
 POST /auth/register     # Register with mobile headers
 POST /auth/login        # Login with mobile detection
+POST /auth/refresh      # Refresh expired tokens
 ```
 
 ### **Usage & Trial Management**
@@ -235,98 +269,101 @@ Features: Custom scenarios, dedicated phone numbers, transcripts
 
 ---
 
+## 🚀 Deployment Strategy
+
+### **Single Backend Deployment**
+
+```bash
+# One deployment serves both platforms
+api.speechassistant.com
+├── Mobile App (iOS) → X-App-Type: mobile
+└── Business Web (React) → X-App-Type: web (or no header)
+```
+
+### **Environment Variables**
+
+```bash
+# .env
+FRONTEND_URL=http://localhost:5173  # Business web app
+MOBILE_APP_ENABLED=true
+BUSINESS_APP_ENABLED=true
+```
+
+### **Cost Comparison**
+
+**Single Backend (Current)**
+
+- **Server**: $50-100/month (one instance)
+- **Database**: $20-50/month (shared)
+- **Twilio**: Shared costs
+- **OpenAI**: Shared costs
+- **Total**: ~$100-200/month
+
+**Separate Backends (Future - Only if needed)**
+
+- **Mobile Server**: $50-100/month
+- **Business Server**: $100-200/month
+- **Mobile Database**: $20-50/month
+- **Business Database**: $50-100/month
+- **Total**: ~$220-450/month
+
+---
+
 ## 🔧 Environment Configuration
 
 ### **Required Environment Variables**
 
 ```bash
-# Core Configuration
-SECRET_KEY=your_secret_key_here
+# Core API Keys
+OPENAI_API_KEY=your_openai_key
+TWILIO_ACCOUNT_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_token
+TWILIO_PHONE_NUMBER=+1234567890
+
+# Database
 DATABASE_URL=sqlite:///./sql_app.db
 
-# Platform Mode
-DEVELOPMENT_MODE=true  # false for production usage limits
+# Security
+SECRET_KEY=your_secret_key
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# URLs
-PUBLIC_URL=your-ngrok-id.ngrok-free.app
-FRONTEND_URL=http://localhost:5173
-
-# OpenAI (Updated to latest model)
-OPENAI_API_KEY=your_openai_api_key
-
-# Twilio
-TWILIO_ACCOUNT_SID=your_twilio_account_sid
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-TWILIO_PHONE_NUMBER=+1234567890  # System number (mobile users)
-
-# Google Calendar
+# Google Calendar (Business only)
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:5050/google-calendar/callback
-```
 
-### **Development vs Production**
+# Frontend URLs
+FRONTEND_URL=http://localhost:5173
+PUBLIC_URL=https://your-domain.com
 
-```bash
-# Development Mode
+# Development
 DEVELOPMENT_MODE=true
-- Bypasses usage limits for testing
-- Uses system phone number for all users
-- Allows unlimited calling for development
-
-# Production Mode
-DEVELOPMENT_MODE=false
-- Enforces all usage limits and trials
-- Requires user-specific phone numbers for business users
-- Mobile users share system phone number
 ```
 
----
-
-## 🚀 Getting Started
-
-### **1. Installation**
+### **Quick Setup**
 
 ```bash
-git clone https://github.com/yourusername/speech-assistant-api.git
-cd speech-assistant-api
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# 1. Clone repository
+git clone <repository-url>
+cd speech-assistant-openai-realtime-api-python
+
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### **2. Configuration**
-
-```bash
+# 3. Set up environment
 cp .env.example .env
-# Edit .env with your API keys and configuration
-```
+# Edit .env with your API keys
 
-### **3. Database Setup**
+# 4. Initialize database
+python -c "from app.db import engine; from app.models import Base; Base.metadata.create_all(bind=engine)"
 
-```bash
-alembic upgrade head  # Apply all migrations including new dual-platform tables
-```
+# 5. Run backend
+uvicorn app.main:app --reload --port 5050
 
-### **4. Run the Application**
-
-```bash
-# Development server
-python -m uvicorn app.main:app --host 0.0.0.0 --port 5050 --reload
-
-# Server will start with both mobile and business APIs available
-```
-
-### **5. Test the APIs**
-
-```bash
-# Test mobile endpoints
-curl http://localhost:5050/mobile/pricing
-curl http://localhost:5050/mobile/scenarios
-
-# Test business endpoints
-curl http://localhost:5050/twilio/account
-curl http://localhost:5050/onboarding/status
+# 6. Run frontend (in separate terminal)
+cd frontend
+npm install
+npm run dev
 ```
 
 ---
@@ -362,7 +399,8 @@ curl -X POST http://localhost:5050/auth/register \
 
 # Check usage stats
 curl -X GET http://localhost:5050/mobile/usage-stats \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-App-Type: mobile"
 ```
 
 ### **Test Business Flow**
@@ -404,38 +442,72 @@ curl -X GET http://localhost:5050/onboarding/status \
 - **Rate Limiting**: Prevent API abuse
 - **User Isolation**: Complete data separation
 - **Usage Validation**: Server-side limit enforcement
-- **App Store Verification**: Transaction validation ready
-- **Development Safeguards**: Safe testing environment
 
 ---
 
-## 🚢 Deployment Ready
+## 🎯 When to Consider Separate Backends
 
-### **Mobile App Deployment**
+You should only consider separate backends when:
 
-- App Store ready with subscription handling
-- Production API endpoints configured
-- Usage limits enforced
-- Subscription management integrated
+### **🚀 Scale Indicators**
 
-### **Business Web App Deployment**
+- **Mobile app**: 10,000+ active users
+- **Business app**: 1,000+ paying customers
+- **Different growth rates**: One platform growing much faster
+- **Different requirements**: Mobile needs different features than business
 
-- Complete onboarding flow
-- Phone number provisioning
-- Advanced feature access
-- Scalable architecture
+### **💰 Business Reasons**
 
----
+- **Different pricing models**: Mobile $4.99/week vs Business $299/month
+- **Different compliance needs**: Business might need SOC2, HIPAA, etc.
+- **Different SLAs**: Business users need 99.9% uptime, mobile can be 99%
+- **Different support**: Business needs dedicated support, mobile can be self-service
 
-## 📈 Future Enhancements
+### **🔧 Technical Reasons**
 
-- **Analytics Dashboard**: Usage insights and metrics
-- **Advanced Subscription Tiers**: Custom pricing plans
-- **Multi-language Support**: International expansion
-- **Advanced AI Features**: Custom voice models
-- **Enterprise Features**: SSO, team management
-- **API Rate Limiting**: Advanced usage controls
+- **Different databases**: Mobile needs simple storage, business needs complex analytics
+- **Different APIs**: Mobile needs simple endpoints, business needs advanced features
+- **Different deployment cycles**: Mobile updates weekly, business updates monthly
 
 ---
 
-This dual-platform backend provides everything needed to launch both a consumer mobile app and a professional business web application, with distinct user experiences, pricing models, and feature sets - all from a single, well-architected backend! 🚀
+## 🚀 Recommended Timeline
+
+### **Phase 1: Launch (Next 3-6 months)**
+
+```
+Single Backend: api.speechassistant.com
+├── Mobile App → /mobile/* endpoints
+└── Business Web → /business/* endpoints
+```
+
+### **Phase 2: Scale (6-12 months)**
+
+```
+Monitor usage and growth:
+- Mobile: 5,000+ users
+- Business: 500+ customers
+- Revenue: $50K+ monthly
+```
+
+### **Phase 3: Separate (12+ months)**
+
+```
+If needed:
+├── Mobile API: mobile-api.speechassistant.com
+└── Business API: business-api.speechassistant.com
+```
+
+---
+
+## 🎯 Bottom Line
+
+**Keep your current single backend** because:
+
+1. **It's already working** - your mobile app is connected and functional
+2. **Cost effective** - one deployment, shared resources
+3. **Easier to manage** - one codebase, one deployment pipeline
+4. **Faster to ship** - no need to split and redeploy
+5. **Your architecture supports it** - platform detection already implemented
+
+**Focus on shipping instead** of over-engineering. Your current setup is perfect for launching both products! 🚀

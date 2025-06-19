@@ -4,6 +4,8 @@
 
 This guide provides comprehensive integration documentation for the **Speech Assistant Business Web Application**. The backend offers a complete professional SaaS platform with advanced features including user onboarding, usage tracking, subscription management, phone number provisioning, Google Calendar integration, and custom AI scenario creation.
 
+**Note**: This backend serves both mobile and business applications from a single unified API. Platform detection is automatic based on request headers.
+
 ## **Professional Business Features**
 
 ### **🎯 Target Audience**
@@ -23,6 +25,15 @@ This guide provides comprehensive integration documentation for the **Speech Ass
 - **Enhanced Transcripts**: Full conversation analysis with speaker identification
 - **Subscription Management**: Multiple professional tiers with usage limits
 
+### **🏗️ Architecture Note**
+
+This backend automatically detects platform type:
+
+- **Business Web App**: Uses standard endpoints (no special headers)
+- **Mobile App**: Uses `/mobile/*` endpoints with `X-App-Type: mobile` header
+- **Shared Infrastructure**: Authentication, database, and core services are shared
+- **Platform-Specific Logic**: Usage limits, pricing, and features vary by platform
+
 ---
 
 ## 🚀 Getting Started
@@ -32,7 +43,7 @@ This guide provides comprehensive integration documentation for the **Speech Ass
 #### **User Registration**
 
 ```javascript
-// Register new business user
+// Register new business user (no special headers needed)
 const registerUser = async (email, password) => {
   const response = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
@@ -198,31 +209,32 @@ const OnboardingWizard = () => {
       case "phone_setup":
         return <PhoneNumberSetup onComplete={loadOnboardingStatus} />;
       case "calendar":
-        return <CalendarConnection onComplete={loadOnboardingStatus} />;
-      case "scenarios":
-        return <ScenarioCreation onComplete={loadOnboardingStatus} />;
+        return <CalendarSetup onComplete={loadOnboardingStatus} />;
+      case "scenario":
+        return <ScenarioSetup onComplete={loadOnboardingStatus} />;
+      case "welcome_call":
+        return <WelcomeCall onComplete={loadOnboardingStatus} />;
       case "complete":
-        return <WelcomeComplete />;
+        return <OnboardingComplete />;
       default:
         return <div>Loading...</div>;
     }
   };
 
-  if (loading) return <div>Loading onboarding status...</div>;
+  if (loading) {
+    return <div>Loading onboarding status...</div>;
+  }
 
   return (
     <div className="onboarding-wizard">
       <div className="progress-bar">
         <div
           className="progress-fill"
-          style={{ width: `${status.progress_percentage}%` }}
+          style={{ width: `${status?.progress_percentage || 0}%` }}
         />
       </div>
 
-      <h1>Welcome to Speech Assistant Business</h1>
-      <p>Let's get your account set up (Step {status.current_step})</p>
-
-      {renderCurrentStep()}
+      <div className="step-content">{renderCurrentStep()}</div>
     </div>
   );
 };
@@ -232,643 +244,100 @@ const OnboardingWizard = () => {
 
 ## 📞 Phone Number Management
 
-### **1. Search Available Numbers**
+### **1. Get Twilio Account Info**
 
 ```javascript
-const searchPhoneNumbers = async (areaCode = '', country = 'US') => {
-  const params = new URLSearchParams({ area_code: areaCode, country });
-  const response = await fetch(`${API_BASE}/twilio/search-numbers?${params}`, {
+const getTwilioAccount = async () => {
+  const response = await fetch(`${API_BASE}/twilio/account`, {
     headers: authManager.getAuthHeaders()
   });
 
   return await response.json();
 };
 
-// Response example:
+// Response:
 {
-  "available_numbers": [
-    {
-      "phone_number": "+12025551234",
-      "friendly_name": "(202) 555-1234",
-      "locality": "Washington",
-      "region": "DC",
-      "postal_code": "20001",
-      "iso_country": "US",
-      "capabilities": {
-        "voice": true,
-        "sms": true,
-        "mms": false
-      }
-    }
-  ],
-  "search_params": {
-    "area_code": "202",
-    "country": "US"
-  }
+  "account_sid": "AC1234567890abcdef",
+  "friendly_name": "Speech Assistant Business",
+  "status": "active",
+  "balance": "$50.00"
 }
 ```
 
-### **2. Provision Phone Number**
+### **2. Search Available Phone Numbers**
 
 ```javascript
-const provisionPhoneNumber = async (phoneNumber, friendlyName) => {
-  const response = await fetch(`${API_BASE}/twilio/provision-number`, {
-    method: 'POST',
-    headers: authManager.getAuthHeaders(),
-    body: JSON.stringify({
-      phone_number: phoneNumber,
-      friendly_name: friendlyName
-    })
-  });
-
-  return await response.json();
-};
-
-// Response example:
-{
-  "success": true,
-  "phone_number": "+12025551234",
-  "twilio_sid": "PN1234567890abcdef",
-  "friendly_name": "My Business Line",
-  "capabilities": {
-    "voice": true,
-    "sms": true
-  },
-  "date_provisioned": "2024-01-15T10:30:00Z"
-}
-```
-
-### **3. Get User's Phone Numbers**
-
-```javascript
-const getUserPhoneNumbers = async () => {
-  const response = await fetch(`${API_BASE}/twilio/user-numbers`, {
-    headers: authManager.getAuthHeaders()
-  });
-
-  return await response.json();
-};
-
-// Response example:
-{
-  "phone_numbers": [
-    {
-      "id": 1,
-      "phone_number": "+12025551234",
-      "twilio_sid": "PN1234567890abcdef",
-      "friendly_name": "My Business Line",
-      "is_active": true,
-      "voice_capable": true,
-      "sms_capable": true,
-      "date_provisioned": "2024-01-15T10:30:00Z"
-    }
-  ],
-  "primary_number": "+12025551234",
-  "total_count": 1
-}
-```
-
-### **4. Phone Number Setup Component**
-
-```jsx
-const PhoneNumberSetup = ({ onComplete }) => {
-  const [searchResults, setSearchResults] = useState([]);
-  const [areaCode, setAreaCode] = useState("");
-  const [selectedNumber, setSelectedNumber] = useState(null);
-  const [provisioning, setProvisioning] = useState(false);
-
-  const searchNumbers = async () => {
-    try {
-      const results = await searchPhoneNumbers(areaCode);
-      setSearchResults(results.available_numbers);
-    } catch (error) {
-      console.error("Search failed:", error);
-    }
-  };
-
-  const handleProvisionNumber = async (number) => {
-    setProvisioning(true);
-    try {
-      await provisionPhoneNumber(number.phone_number, "Business Line");
-      await completeOnboardingStep("phone_number_setup", {
-        phone_number: number.phone_number,
-      });
-      onComplete();
-    } catch (error) {
-      console.error("Provisioning failed:", error);
-    } finally {
-      setProvisioning(false);
-    }
-  };
-
-  return (
-    <div className="phone-setup">
-      <h2>Choose Your Business Phone Number</h2>
-
-      <div className="search-form">
-        <input
-          type="text"
-          placeholder="Area code (optional)"
-          value={areaCode}
-          onChange={(e) => setAreaCode(e.target.value)}
-        />
-        <button onClick={searchNumbers}>Search Numbers</button>
-      </div>
-
-      <div className="number-results">
-        {searchResults.map((number) => (
-          <div key={number.phone_number} className="number-option">
-            <span className="number">{number.friendly_name}</span>
-            <span className="location">
-              {number.locality}, {number.region}
-            </span>
-            <button
-              onClick={() => handleProvisionNumber(number)}
-              disabled={provisioning}
-            >
-              {provisioning ? "Provisioning..." : "Select"}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-```
-
----
-
-## 🔄 Usage Tracking & Subscription Management
-
-### **1. Check Usage Statistics**
-
-```javascript
-const getUsageStats = async () => {
-  const response = await fetch(`${API_BASE}/usage/stats`, {
-    headers: authManager.getAuthHeaders()
-  });
-
-  return await response.json();
-};
-
-// Response example:
-{
-  "app_type": "web_business",
-  "subscription_tier": "business_free_trial",
-  "is_subscribed": false,
-  "is_trial_active": true,
-  "trial_calls_remaining": 3,
-  "trial_calls_used": 1,
-  "trial_end_date": "2024-01-22T10:30:00Z",
-  "calls_made_today": 1,
-  "calls_made_this_week": 1,
-  "calls_made_this_month": 1,
-  "calls_made_total": 1,
-  "weekly_call_limit": null,
-  "monthly_call_limit": null,
-  "billing_cycle": null,
-  "upgrade_recommended": false,
-  "pricing": {
-    "basic_plan": {
-      "price": "$49.99",
-      "billing": "monthly",
-      "features": ["20 calls per week", "Basic scenarios", "Call transcripts"]
-    },
-    "professional_plan": {
-      "price": "$99.00",
-      "billing": "monthly",
-      "features": ["50 calls per week", "Custom scenarios", "Calendar integration"]
-    },
-    "enterprise_plan": {
-      "price": "$299.00",
-      "billing": "monthly",
-      "features": ["Unlimited calls", "Advanced features", "Priority support"]
-    }
-  }
-}
-```
-
-### **2. Check Call Permissions**
-
-```javascript
-const checkCallPermission = async () => {
-  const response = await fetch(`${API_BASE}/usage/check-permission`, {
-    method: 'POST',
-    headers: authManager.getAuthHeaders()
-  });
-
-  return await response.json();
-};
-
-// Response examples:
-// Can make call:
-{
-  "can_make_call": true,
-  "status": "trial_call_available",
-  "details": {
-    "calls_remaining": 3,
-    "trial_ends": "2024-01-22T10:30:00Z",
-    "app_type": "web_business"
-  }
-}
-
-// Trial exhausted:
-{
-  "can_make_call": false,
-  "status": "trial_calls_exhausted",
-  "details": {
-    "message": "Trial calls exhausted. Please upgrade to continue.",
-    "pricing": { /* pricing object */ }
-  }
-}
-```
-
-### **3. Usage Display Component**
-
-```jsx
-const UsageDisplay = () => {
-  const [usage, setUsage] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadUsageStats();
-  }, []);
-
-  const loadUsageStats = async () => {
-    try {
-      const data = await getUsageStats();
-      setUsage(data);
-    } catch (error) {
-      console.error("Failed to load usage stats:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) return <div>Loading usage stats...</div>;
-  if (!usage) return <div>Unable to load usage information</div>;
-
-  return (
-    <div className="usage-display">
-      <div className="usage-header">
-        <h3>Your Usage</h3>
-        <span
-          className={`status ${usage.is_subscribed ? "subscribed" : "trial"}`}
-        >
-          {usage.is_subscribed ? "Subscribed" : "Free Trial"}
-        </span>
-      </div>
-
-      {usage.is_trial_active && !usage.is_subscribed && (
-        <div className="trial-info">
-          <div className="calls-remaining">
-            <span className="number">{usage.trial_calls_remaining}</span>
-            <span className="label">Trial calls remaining</span>
-          </div>
-          <div className="trial-expires">
-            Trial expires: {new Date(usage.trial_end_date).toLocaleDateString()}
-          </div>
-        </div>
-      )}
-
-      <div className="usage-stats">
-        <div className="stat">
-          <span className="number">{usage.calls_made_today}</span>
-          <span className="label">Today</span>
-        </div>
-        <div className="stat">
-          <span className="number">{usage.calls_made_this_week}</span>
-          <span className="label">This week</span>
-        </div>
-        <div className="stat">
-          <span className="number">{usage.calls_made_total}</span>
-          <span className="label">Total</span>
-        </div>
-      </div>
-
-      {usage.upgrade_recommended && (
-        <div className="upgrade-prompt">
-          <h4>Ready to upgrade?</h4>
-          <p>Continue making unlimited calls with our professional plans</p>
-          <button onClick={() => showPricingModal(usage.pricing)}>
-            View Plans
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-```
-
----
-
-## 📞 Making Calls with Usage Tracking
-
-### **1. Make Standard Call**
-
-```javascript
-const makeCall = async (phoneNumber, scenario) => {
-  // First check permission
-  const permission = await checkCallPermission();
-
-  if (!permission.can_make_call) {
-    if (permission.status === "trial_calls_exhausted") {
-      throw new Error("TRIAL_EXHAUSTED");
-    } else if (permission.status === "weekly_limit_reached") {
-      throw new Error("WEEKLY_LIMIT_REACHED");
-    } else {
-      throw new Error("CALL_NOT_PERMITTED");
-    }
-  }
-
-  const response = await fetch(
-    `${API_BASE}/make-call/${phoneNumber}/${scenario}`,
-    {
-      method: "GET",
-      headers: authManager.getAuthHeaders(),
-    }
-  );
-
-  if (response.status === 402) {
-    // Payment required
-    const errorData = await response.json();
-    throw new Error(`PAYMENT_REQUIRED: ${errorData.detail}`);
-  }
-
-  return await response.json();
-};
-```
-
-### **2. Make Custom Scenario Call**
-
-```javascript
-const makeCustomCall = async (phoneNumber, scenarioId) => {
-  const response = await fetch(
-    `${API_BASE}/make-custom-call/${phoneNumber}/${scenarioId}`,
-    {
-      method: "GET",
-      headers: authManager.getAuthHeaders(),
-    }
-  );
-
-  return await response.json();
-};
-```
-
-### **3. Call Interface Component**
-
-```jsx
-const CallInterface = () => {
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [selectedScenario, setSelectedScenario] = useState("default");
-  const [scenarios, setScenarios] = useState([]);
-  const [calling, setCalling] = useState(false);
-  const [callPermission, setCallPermission] = useState(null);
-
-  useEffect(() => {
-    loadScenarios();
-    checkPermissions();
-  }, []);
-
-  const checkPermissions = async () => {
-    try {
-      const permission = await checkCallPermission();
-      setCallPermission(permission);
-    } catch (error) {
-      console.error("Permission check failed:", error);
-    }
-  };
-
-  const handleMakeCall = async () => {
-    if (!callPermission?.can_make_call) {
-      alert("Cannot make call. Please check your subscription status.");
-      return;
-    }
-
-    setCalling(true);
-    try {
-      await makeCall(phoneNumber, selectedScenario);
-      alert("Call initiated successfully!");
-      await checkPermissions(); // Refresh permissions
-    } catch (error) {
-      if (error.message === "TRIAL_EXHAUSTED") {
-        alert("Your trial has ended. Please upgrade to continue making calls.");
-      } else if (error.message === "WEEKLY_LIMIT_REACHED") {
-        alert("You have reached your weekly call limit.");
-      } else {
-        alert(`Call failed: ${error.message}`);
-      }
-    } finally {
-      setCalling(false);
-    }
-  };
-
-  return (
-    <div className="call-interface">
-      <h2>Make a Call</h2>
-
-      <div className="form-group">
-        <label>Phone Number</label>
-        <input
-          type="tel"
-          value={phoneNumber}
-          onChange={(e) => setPhoneNumber(e.target.value)}
-          placeholder="+1234567890"
-        />
-      </div>
-
-      <div className="form-group">
-        <label>Scenario</label>
-        <select
-          value={selectedScenario}
-          onChange={(e) => setSelectedScenario(e.target.value)}
-        >
-          {scenarios.map((scenario) => (
-            <option key={scenario.id} value={scenario.id}>
-              {scenario.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <button
-        onClick={handleMakeCall}
-        disabled={calling || !callPermission?.can_make_call}
-        className={`call-button ${calling ? "calling" : ""}`}
-      >
-        {calling ? "Calling..." : "Make Call"}
-      </button>
-
-      {callPermission && !callPermission.can_make_call && (
-        <div className="permission-warning">
-          <p>{callPermission.details.message}</p>
-          {callPermission.status === "trial_calls_exhausted" && (
-            <button onClick={() => showUpgradeModal()}>Upgrade Now</button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-```
-
----
-
-## 🎭 Custom Scenario Management
-
-### **1. Create Custom Scenario**
-
-```javascript
-const createCustomScenario = async (scenarioData) => {
-  const response = await fetch(`${API_BASE}/realtime/custom-scenario`, {
+const searchPhoneNumbers = async (areaCode = null, limit = 10) => {
+  const response = await fetch(`${API_BASE}/twilio/search-numbers`, {
     method: "POST",
     headers: authManager.getAuthHeaders(),
     body: JSON.stringify({
-      persona: scenarioData.persona,
-      prompt: scenarioData.prompt,
-      voice_type: scenarioData.voiceType,
-      temperature: scenarioData.temperature || 0.7,
+      area_code: areaCode,
+      limit: limit
     }),
   });
 
   return await response.json();
 };
 
-// Usage example:
-const newScenario = await createCustomScenario({
-  persona:
-    "You are a professional sales trainer helping someone practice cold calling techniques.",
-  prompt:
-    "Help the user practice their sales pitch. Provide constructive feedback and simulate realistic customer responses.",
-  voiceType: "concerned_female",
-  temperature: 0.8,
-});
+// Response:
+{
+  "availableNumbers": [
+    {
+      "phoneNumber": "+1234567890",
+      "friendlyName": "(234) 567-8900",
+      "locality": "New York",
+      "region": "NY",
+      "country": "US"
+    }
+  ]
+}
 ```
 
-### **2. List User's Custom Scenarios**
+### **3. Provision Phone Number**
 
 ```javascript
-const getCustomScenarios = async () => {
-  const response = await fetch(`${API_BASE}/custom-scenarios`, {
+const provisionPhoneNumber = async (phoneNumber) => {
+  const response = await fetch(`${API_BASE}/twilio/provision-number`, {
+    method: "POST",
+    headers: authManager.getAuthHeaders(),
+    body: JSON.stringify({ phone_number: phoneNumber }),
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "success": true,
+  "phone_number": "+1234567890",
+  "twilio_sid": "PN1234567890abcdef",
+  "friendly_name": "Business User Phone",
+  "is_active": true
+}
+```
+
+### **4. Get User's Phone Numbers**
+
+```javascript
+const getUserPhoneNumbers = async () => {
+  const response = await fetch(`${API_BASE}/twilio/user-numbers`, {
     headers: authManager.getAuthHeaders(),
   });
 
   return await response.json();
 };
 
-// Response example:
+// Response:
 [
   {
-    id: 1,
-    scenario_id: "custom_1_1640995200",
-    persona: "You are a professional sales trainer...",
-    prompt: "Help the user practice their sales pitch...",
-    voice_type: "concerned_female",
-    temperature: 0.8,
-    created_at: "2024-01-15T10:30:00Z",
+    phone_number: "+1234567890",
+    twilio_sid: "PN1234567890abcdef",
+    friendly_name: "Primary Business Number",
+    is_active: true,
+    is_primary: true,
   },
 ];
-```
-
-### **3. Custom Scenario Editor Component**
-
-```jsx
-const ScenarioEditor = ({ scenario, onSave, onCancel }) => {
-  const [formData, setFormData] = useState({
-    persona: scenario?.persona || "",
-    prompt: scenario?.prompt || "",
-    voiceType: scenario?.voice_type || "concerned_female",
-    temperature: scenario?.temperature || 0.7,
-  });
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (scenario) {
-        // Update existing scenario
-        await updateCustomScenario(scenario.scenario_id, formData);
-      } else {
-        // Create new scenario
-        await createCustomScenario(formData);
-      }
-      onSave();
-    } catch (error) {
-      console.error("Save failed:", error);
-      alert("Failed to save scenario");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="scenario-editor">
-      <h3>{scenario ? "Edit Scenario" : "Create New Scenario"}</h3>
-
-      <div className="form-group">
-        <label>Persona</label>
-        <textarea
-          value={formData.persona}
-          onChange={(e) =>
-            setFormData({ ...formData, persona: e.target.value })
-          }
-          placeholder="Describe who the AI should be (e.g., 'You are a friendly customer service representative...')"
-          rows="4"
-        />
-      </div>
-
-      <div className="form-group">
-        <label>Prompt</label>
-        <textarea
-          value={formData.prompt}
-          onChange={(e) => setFormData({ ...formData, prompt: e.target.value })}
-          placeholder="What should the AI do in this conversation?"
-          rows="4"
-        />
-      </div>
-
-      <div className="form-group">
-        <label>Voice Type</label>
-        <select
-          value={formData.voiceType}
-          onChange={(e) =>
-            setFormData({ ...formData, voiceType: e.target.value })
-          }
-        >
-          <option value="concerned_female">Concerned Female</option>
-          <option value="aggressive_male">Aggressive Male</option>
-          <option value="friendly_female">Friendly Female</option>
-          <option value="professional_male">Professional Male</option>
-        </select>
-      </div>
-
-      <div className="form-group">
-        <label>Temperature: {formData.temperature}</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.1"
-          value={formData.temperature}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              temperature: parseFloat(e.target.value),
-            })
-          }
-        />
-        <small>Lower = more predictable, Higher = more creative</small>
-      </div>
-
-      <div className="button-group">
-        <button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Scenario"}
-        </button>
-        <button onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  );
-};
 ```
 
 ---
@@ -878,63 +347,307 @@ const ScenarioEditor = ({ scenario, onSave, onCancel }) => {
 ### **1. Initiate OAuth Flow**
 
 ```javascript
-const connectCalendar = () => {
-  // Redirect user to backend OAuth endpoint
-  window.location.href = `${API_BASE}/google-calendar/auth`;
-};
+const initiateGoogleAuth = () => {
+  const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+  const redirectUri = `${window.location.origin}/auth/callback`;
+  const scope = "https://www.googleapis.com/auth/calendar";
 
-// After successful OAuth, user will be redirected to:
-// http://localhost:5173/scheduled-meetings?success=true&connected=calendar
+  const authUrl =
+    `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `scope=${encodeURIComponent(scope)}&` +
+    `response_type=code&` +
+    `access_type=offline&` +
+    `prompt=consent`;
+
+  window.location.href = authUrl;
+};
 ```
 
 ### **2. Handle OAuth Callback**
 
-```jsx
-const CalendarCallback = () => {
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const success = urlParams.get("success");
-    const connected = urlParams.get("connected");
+```javascript
+const handleGoogleCallback = async (code) => {
+  const response = await fetch(`${API_BASE}/google-calendar/callback?code=${code}`, {
+    headers: authManager.getAuthHeaders()
+  });
 
-    if (success === "true" && connected === "calendar") {
-      // Calendar successfully connected
-      completeOnboardingStep("calendar_connected");
-      showSuccessMessage("Google Calendar connected successfully!");
-    } else {
-      showErrorMessage("Failed to connect Google Calendar");
-    }
-  }, []);
-
-  return <div>Processing calendar connection...</div>;
+  return await response.json();
 };
+
+// Response:
+{
+  "success": true,
+  "message": "Google Calendar connected successfully",
+  "calendar_info": {
+    "primary_calendar": "user@gmail.com",
+    "timezone": "America/New_York"
+  }
+}
 ```
 
-### **3. Schedule Calendar Events**
+### **3. Find Available Time Slots**
 
 ```javascript
-const scheduleCalendarEvent = async (eventData) => {
-  const response = await fetch(`${API_BASE}/google-calendar/schedule`, {
+const findAvailableSlots = async (startDate, endDate, minDuration = 30) => {
+  const params = new URLSearchParams({
+    start_date: startDate.toISOString(),
+    end_date: endDate.toISOString(),
+    min_duration: minDuration,
+    max_results: 5
+  });
+
+  const response = await fetch(`${API_BASE}/google-calendar/find-slots?${params}`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "free_slots": [
+    {
+      "start": "2024-01-15T10:00:00Z",
+      "end": "2024-01-15T10:30:00Z"
+    },
+    {
+      "start": "2024-01-15T14:00:00Z",
+      "end": "2024-01-15T14:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## 🎭 Custom Scenario Management
+
+### **1. Get User's Custom Scenarios**
+
+```javascript
+const getCustomScenarios = async () => {
+  const response = await fetch(`${API_BASE}/custom-scenarios`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "scenarios": [
+    {
+      "id": "custom_123",
+      "name": "Sales Pitch Practice",
+      "description": "Practice sales calls with AI",
+      "system_prompt": "You are a sales trainer...",
+      "created_at": "2024-01-15T10:30:00Z",
+      "is_active": true
+    }
+  ]
+}
+```
+
+### **2. Create Custom Scenario**
+
+```javascript
+const createCustomScenario = async (scenarioData) => {
+  const response = await fetch(`${API_BASE}/realtime/custom-scenario`, {
     method: "POST",
     headers: authManager.getAuthHeaders(),
-    body: JSON.stringify({
-      summary: eventData.title,
-      start_time: eventData.startTime,
-      end_time: eventData.endTime,
-      description: eventData.description,
-      attendees: eventData.attendees || [],
-    }),
+    body: JSON.stringify(scenarioData),
   });
+
+  return await response.json();
+};
+
+// Request body:
+{
+  "name": "Customer Service Training",
+  "description": "Practice customer service scenarios",
+  "system_prompt": "You are a difficult customer...",
+  "example_conversation": "Customer: I'm very upset...",
+  "tags": ["training", "customer-service"]
+}
+```
+
+---
+
+## 📞 Making Calls
+
+### **1. Make Standard Call**
+
+```javascript
+const makeCall = async (phoneNumber, scenario) => {
+  const response = await fetch(`${API_BASE}/make-call/${phoneNumber}/${scenario}`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "call_sid": "CA1234567890abcdef",
+  "status": "initiated",
+  "from_number": "+1234567890",
+  "to_number": "+0987654321",
+  "scenario": "default",
+  "usage_stats": {
+    "calls_remaining_this_week": 19,
+    "trial_calls_remaining": 0,
+    "upgrade_recommended": false
+  }
+}
+```
+
+### **2. Make Custom Scenario Call**
+
+```javascript
+const makeCustomCall = async (phoneNumber, scenarioId) => {
+  const response = await fetch(
+    `${API_BASE}/make-custom-call/${phoneNumber}/${scenarioId}`,
+    {
+      headers: authManager.getAuthHeaders(),
+    }
+  );
 
   return await response.json();
 };
 ```
 
-### **4. Get Upcoming Events**
+### **3. Schedule Future Call**
 
 ```javascript
-const getUpcomingEvents = async (maxResults = 10) => {
+const scheduleCall = async (callData) => {
+  const response = await fetch(`${API_BASE}/schedule-call`, {
+    method: "POST",
+    headers: authManager.getAuthHeaders(),
+    body: JSON.stringify(callData),
+  });
+
+  return await response.json();
+};
+
+// Request body:
+{
+  "phone_number": "+1234567890",
+  "scenario": "custom_123",
+  "scheduled_time": "2024-01-15T14:30:00Z",
+  "notes": "Follow up call with client"
+}
+```
+
+---
+
+## 📊 Usage & Analytics
+
+### **1. Get Usage Statistics**
+
+```javascript
+const getUsageStats = async () => {
+  const response = await fetch(`${API_BASE}/usage-stats`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "app_type": "web_business",
+  "is_trial_active": false,
+  "trial_calls_remaining": 0,
+  "calls_made_today": 2,
+  "calls_made_this_week": 15,
+  "calls_made_total": 45,
+  "is_subscribed": true,
+  "subscription_tier": "business_basic",
+  "weekly_call_limit": 20,
+  "calls_remaining_this_week": 5,
+  "upgrade_recommended": false
+}
+```
+
+### **2. Get Call History**
+
+```javascript
+const getCallHistory = async (limit = 20, offset = 0) => {
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString()
+  });
+
+  const response = await fetch(`${API_BASE}/call-history?${params}`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "calls": [
+    {
+      "id": 123,
+      "call_sid": "CA1234567890abcdef",
+      "phone_number": "+1234567890",
+      "scenario": "custom_123",
+      "status": "completed",
+      "duration": 180,
+      "created_at": "2024-01-15T10:30:00Z",
+      "transcript_available": true
+    }
+  ],
+  "total": 45,
+  "has_more": true
+}
+```
+
+---
+
+## 📝 Transcript Management
+
+### **1. Get Stored Transcripts**
+
+```javascript
+const getStoredTranscripts = async (limit = 10) => {
+  const response = await fetch(`${API_BASE}/stored-transcripts?limit=${limit}`, {
+    headers: authManager.getAuthHeaders()
+  });
+
+  return await response.json();
+};
+
+// Response:
+{
+  "transcripts": [
+    {
+      "id": 456,
+      "call_sid": "CA1234567890abcdef",
+      "phone_number": "+1234567890",
+      "scenario": "custom_123",
+      "transcript_text": "Hello, this is John...",
+      "speaker_analysis": {
+        "user_speaking_time": 120,
+        "ai_speaking_time": 60,
+        "conversation_flow": "positive"
+      },
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 25
+}
+```
+
+### **2. Get Specific Transcript**
+
+```javascript
+const getTranscript = async (transcriptId) => {
   const response = await fetch(
-    `${API_BASE}/google-calendar/events?max_results=${maxResults}`,
+    `${API_BASE}/stored-transcripts/${transcriptId}`,
     {
       headers: authManager.getAuthHeaders(),
     }
@@ -946,293 +659,104 @@ const getUpcomingEvents = async (maxResults = 10) => {
 
 ---
 
-## 📊 Enhanced Transcripts & Analytics
+## 🔧 Error Handling
 
-### **1. Get Call Transcripts**
+### **1. Common Error Responses**
 
 ```javascript
-const getTranscripts = async (filters = {}) => {
-  const params = new URLSearchParams(filters);
-  const response = await fetch(`${API_BASE}/stored-transcripts/?${params}`, {
-    headers: authManager.getAuthHeaders()
-  });
-
-  return await response.json();
-};
-
-// Response example:
+// 402 - Payment Required (Trial Exhausted)
 {
-  "transcripts": [
-    {
-      "id": 1,
-      "transcript_sid": "TR1234567890abcdef",
-      "status": "completed",
-      "date_created": "2024-01-15T10:30:00Z",
-      "duration": 120,
-      "language_code": "en-US",
-      "scenario_name": "Sales Training",
-      "call_direction": "outbound",
-      "phone_number": "+1234567890",
-      "conversation_summary": {
-        "total_words": 450,
-        "speaker_turns": 12,
-        "sentiment": "positive"
+  "detail": {
+    "error": "trial_exhausted",
+    "message": "Your 4 free trial calls have been used. Upgrade to Basic ($49.99/month) for 20 calls per week!",
+    "upgrade_url": "/pricing",
+    "pricing": {
+      "basic_plan": {
+        "price": "$49.99",
+        "billing": "monthly",
+        "features": ["20 calls/week", "Custom scenarios", "Dedicated phone number"]
       }
     }
-  ],
-  "total_count": 1,
-  "has_more": false
+  }
 }
-```
 
-### **2. Get Detailed Transcript**
-
-```javascript
-const getTranscriptDetails = async (transcriptSid) => {
-  const response = await fetch(`${API_BASE}/stored-transcripts/${transcriptSid}`, {
-    headers: authManager.getAuthHeaders()
-  });
-
-  return await response.json();
-};
-
-// Response includes full conversation flow:
+// 402 - Weekly Limit Reached
 {
-  "transcript_sid": "TR1234567890abcdef",
-  "conversation_flow": [
-    {
-      "speaker": "AI",
-      "text": "Hello! This is your AI sales trainer. Ready to practice?",
-      "timestamp": "2024-01-15T10:30:05Z",
-      "confidence": 0.98
-    },
-    {
-      "speaker": "User",
-      "text": "Yes, I'd like to practice my opening pitch.",
-      "timestamp": "2024-01-15T10:30:08Z",
-      "confidence": 0.95
-    }
-  ],
-  "summary_data": {
-    "key_topics": ["sales", "practice", "pitch"],
-    "sentiment_analysis": "positive",
-    "speaker_stats": {
-      "AI": {"word_count": 200, "speaking_time": 60},
-      "User": {"word_count": 250, "speaking_time": 60}
-    }
+  "detail": {
+    "error": "weekly_limit_reached",
+    "message": "Weekly limit of 20 calls reached. Upgrade to Professional for 50 calls per week.",
+    "resets_on": "2024-01-22T00:00:00Z",
+    "upgrade_url": "/pricing"
   }
+}
+
+// 404 - Phone Number Not Found
+{
+  "detail": "No phone number available. Please provision a phone number first."
 }
 ```
 
-### **3. Transcript Viewer Component**
-
-```jsx
-const TranscriptViewer = ({ transcriptSid }) => {
-  const [transcript, setTranscript] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadTranscript();
-  }, [transcriptSid]);
-
-  const loadTranscript = async () => {
-    try {
-      const data = await getTranscriptDetails(transcriptSid);
-      setTranscript(data);
-    } catch (error) {
-      console.error("Failed to load transcript:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) return <div>Loading transcript...</div>;
-  if (!transcript) return <div>Transcript not found</div>;
-
-  return (
-    <div className="transcript-viewer">
-      <div className="transcript-header">
-        <h3>Call Transcript</h3>
-        <div className="metadata">
-          <span>
-            Duration: {Math.floor(transcript.duration / 60)}m{" "}
-            {transcript.duration % 60}s
-          </span>
-          <span>
-            Date: {new Date(transcript.date_created).toLocaleDateString()}
-          </span>
-          <span>Scenario: {transcript.scenario_name}</span>
-        </div>
-      </div>
-
-      <div className="conversation">
-        {transcript.conversation_flow?.map((turn, index) => (
-          <div key={index} className={`message ${turn.speaker.toLowerCase()}`}>
-            <div className="speaker">{turn.speaker}</div>
-            <div className="text">{turn.text}</div>
-            <div className="timestamp">
-              {new Date(turn.timestamp).toLocaleTimeString()}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {transcript.summary_data && (
-        <div className="summary">
-          <h4>Summary</h4>
-          <div className="stats">
-            <div>
-              Key Topics: {transcript.summary_data.key_topics?.join(", ")}
-            </div>
-            <div>Sentiment: {transcript.summary_data.sentiment_analysis}</div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-```
-
----
-
-## 🎯 Error Handling & Best Practices
-
-### **1. API Error Handler**
+### **2. Error Handling Utility**
 
 ```javascript
-class APIError extends Error {
-  constructor(message, status, code) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
+class APIErrorHandler {
+  static async handleResponse(response) {
+    if (response.ok) {
+      return await response.json();
+    }
 
-const handleAPIResponse = async (response) => {
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
+    const errorData = await response.json();
 
     switch (response.status) {
-      case 401:
-        // Try to refresh token
-        const refreshed = await authManager.refreshToken();
-        if (!refreshed) {
-          // Redirect to login
-          window.location.href = "/login";
-        }
-        throw new APIError("Authentication failed", 401, "AUTH_FAILED");
-
       case 402:
-        // Payment required - trial exhausted or limit reached
-        throw new APIError(
-          errorData.detail?.message || "Payment required",
-          402,
-          "PAYMENT_REQUIRED"
-        );
-
-      case 429:
-        // Rate limited
-        throw new APIError("Too many requests", 429, "RATE_LIMITED");
-
+        // Payment required - show upgrade prompt
+        this.showUpgradePrompt(errorData.detail);
+        break;
+      case 404:
+        // Resource not found
+        this.showNotFoundError(errorData.detail);
+        break;
+      case 500:
+        // Server error
+        this.showServerError();
+        break;
       default:
-        throw new APIError(
-          errorData.detail || "An error occurred",
-          response.status,
-          "UNKNOWN_ERROR"
-        );
+        // Generic error
+        this.showGenericError(errorData.detail);
     }
+
+    throw new Error(errorData.detail?.message || "API request failed");
   }
 
-  return await response.json();
-};
-```
+  static showUpgradePrompt(detail) {
+    // Show upgrade modal with pricing info
+    console.log("Show upgrade prompt:", detail);
+  }
 
-### **2. Usage-Aware Components**
+  static showNotFoundError(message) {
+    // Show not found error
+    console.log("Not found:", message);
+  }
 
-```jsx
-const withUsageCheck = (WrappedComponent) => {
-  return (props) => {
-    const [usageStatus, setUsageStatus] = useState(null);
+  static showServerError() {
+    // Show server error message
+    console.log("Server error occurred");
+  }
 
-    useEffect(() => {
-      checkUsageStatus();
-    }, []);
-
-    const checkUsageStatus = async () => {
-      try {
-        const permission = await checkCallPermission();
-        setUsageStatus(permission);
-      } catch (error) {
-        console.error("Usage check failed:", error);
-      }
-    };
-
-    if (!usageStatus) {
-      return <div>Checking usage status...</div>;
-    }
-
-    if (!usageStatus.can_make_call) {
-      return (
-        <div className="usage-blocked">
-          <h3>Unable to Make Calls</h3>
-          <p>{usageStatus.details.message}</p>
-          {usageStatus.status === "trial_calls_exhausted" && (
-            <button onClick={() => showUpgradeModal()}>
-              Upgrade to Continue
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <WrappedComponent
-        {...props}
-        usageStatus={usageStatus}
-        onUsageChange={checkUsageStatus}
-      />
-    );
-  };
-};
-
-// Usage:
-const CallInterface = withUsageCheck(BaseCallInterface);
-```
-
-### **3. Development Environment Configuration**
-
-```javascript
-// config.js
-const config = {
-  API_BASE:
-    process.env.NODE_ENV === "development"
-      ? "http://localhost:5050"
-      : "https://api.yourdomain.com",
-
-  WS_BASE:
-    process.env.NODE_ENV === "development"
-      ? "ws://localhost:5050"
-      : "wss://api.yourdomain.com",
-
-  FEATURES: {
-    // Enable/disable features based on environment
-    USAGE_TRACKING: process.env.NODE_ENV === "production",
-    DEVELOPMENT_MODE: process.env.NODE_ENV === "development",
-  },
-};
-
-export default config;
+  static showGenericError(message) {
+    // Show generic error message
+    console.log("Error:", message);
+  }
+}
 ```
 
 ---
 
-## 🚀 Complete Integration Example
-
-Here's a complete React component that demonstrates the full business app integration:
+## 🎨 Complete React App Example
 
 ```jsx
 import React, { useState, useEffect } from "react";
-import { AuthManager } from "./auth";
+import { AuthManager } from "./utils/AuthManager";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { CallInterface } from "./components/CallInterface";
 import { UsageDisplay } from "./components/UsageDisplay";
@@ -1338,4 +862,34 @@ export default BusinessApp;
 
 ---
 
+## 🚀 Deployment Configuration
+
+### **Environment Variables**
+
+```bash
+# Frontend (.env)
+REACT_APP_API_BASE_URL=https://api.speechassistant.com
+REACT_APP_GOOGLE_CLIENT_ID=your_google_client_id
+REACT_APP_GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# Backend (.env)
+FRONTEND_URL=https://business.speechassistant.com
+PUBLIC_URL=https://api.speechassistant.com
+DEVELOPMENT_MODE=false
+```
+
+### **Production Build**
+
+```bash
+# Build React app
+npm run build
+
+# Deploy to hosting service (Netlify, Vercel, etc.)
+# Configure environment variables in hosting platform
+```
+
+---
+
 This comprehensive integration guide provides everything needed to build a professional business web application that leverages all the advanced features of the Speech Assistant backend! 🚀
+
+**Note**: This backend serves both mobile and business applications. The mobile app uses `/mobile/*` endpoints with `X-App-Type: mobile` headers, while the business web app uses standard endpoints without special headers.
