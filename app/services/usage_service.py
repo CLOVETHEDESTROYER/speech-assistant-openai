@@ -210,6 +210,93 @@ class UsageService:
             return False
 
     @staticmethod
+    def upgrade_subscription_with_receipt(user_id: int, subscription_tier: SubscriptionTier,
+                                          subscription_info: Dict, db: Session) -> bool:
+        """Upgrade user to paid subscription using validated App Store receipt data"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+            if not usage:
+                return False
+
+            # Extract data from validated receipt
+            transaction_id = subscription_info.get("transaction_id")
+            original_transaction_id = subscription_info.get(
+                "original_transaction_id")
+            product_id = subscription_info.get("product_id")
+            purchase_date_str = subscription_info.get("purchase_date")
+            expires_date_str = subscription_info.get("expires_date")
+            is_trial_period = subscription_info.get("is_trial_period", False)
+
+            # Convert Apple's date format to datetime
+            if purchase_date_str:
+                purchase_date = datetime.fromisoformat(
+                    purchase_date_str.replace('Z', '+00:00'))
+            else:
+                purchase_date = datetime.utcnow()
+
+            if expires_date_str:
+                expires_date = datetime.fromisoformat(
+                    expires_date_str.replace('Z', '+00:00'))
+            else:
+                # Fallback: set expiration based on subscription tier
+                if subscription_tier == SubscriptionTier.MOBILE_WEEKLY:
+                    expires_date = purchase_date + timedelta(days=7)
+                else:
+                    expires_date = purchase_date + timedelta(days=30)
+
+            # Update usage limits with validated receipt data
+            usage.subscription_tier = subscription_tier
+            usage.is_subscribed = True
+            usage.subscription_status = SubscriptionStatus.ACTIVE
+            usage.subscription_start_date = purchase_date
+            usage.subscription_end_date = expires_date
+            usage.app_store_transaction_id = original_transaction_id or transaction_id
+            usage.app_store_product_id = product_id
+            usage.last_payment_date = purchase_date
+            usage.next_payment_date = expires_date
+
+            # Set limits based on subscription tier
+            if subscription_tier == SubscriptionTier.MOBILE_WEEKLY:
+                usage.billing_cycle = "weekly"
+                # For mobile weekly, no call limits (unlimited)
+                usage.weekly_call_limit = None
+                usage.monthly_call_limit = None
+
+            elif subscription_tier == SubscriptionTier.BUSINESS_BASIC:
+                usage.billing_cycle = "monthly"
+                usage.weekly_call_limit = 20
+                usage.monthly_call_limit = 80
+
+            elif subscription_tier == SubscriptionTier.BUSINESS_PROFESSIONAL:
+                usage.billing_cycle = "monthly"
+                usage.weekly_call_limit = 50
+                usage.monthly_call_limit = 200
+
+            elif subscription_tier == SubscriptionTier.BUSINESS_ENTERPRISE:
+                usage.billing_cycle = "monthly"
+                usage.weekly_call_limit = None  # Unlimited
+                usage.monthly_call_limit = None  # Unlimited
+
+            # End trial if user was in trial
+            if usage.is_trial_active:
+                usage.is_trial_active = False
+                usage.trial_calls_remaining = 0
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            logger.info(
+                f"Upgraded user {user_id} to {subscription_tier.value} with validated receipt")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error upgrading subscription with receipt: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
     def get_usage_stats(user_id: int, db: Session) -> Dict:
         """Get comprehensive usage statistics for a user"""
         try:

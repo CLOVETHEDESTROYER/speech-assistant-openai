@@ -3,8 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.auth import get_current_user
-from app.models import User, AppType, SubscriptionTier
+from app.models import User, AppType, SubscriptionTier, SubscriptionStatus
 from app.services.usage_service import UsageService
+from app.services.app_store_service import AppStoreService
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import logging
@@ -22,8 +23,15 @@ class MobileCallRequest(BaseModel):
 
 
 class SubscriptionUpgradeRequest(BaseModel):
-    app_store_transaction_id: str
+    receipt_data: str  # Base64 encoded receipt data from App Store
+    is_sandbox: bool = False  # Whether this is a sandbox receipt
     subscription_tier: str = "mobile_weekly"
+
+
+class AppStoreWebhookRequest(BaseModel):
+    signedPayload: str
+    notificationType: str
+    data: Dict
 
 
 class UsageStatsResponse(BaseModel):
@@ -192,7 +200,7 @@ async def upgrade_mobile_subscription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Upgrade mobile user to paid subscription"""
+    """Upgrade mobile user to paid subscription with App Store receipt validation"""
     try:
         # Validate subscription tier
         if upgrade_request.subscription_tier not in ["mobile_weekly"]:
@@ -201,13 +209,50 @@ async def upgrade_mobile_subscription(
 
         tier = SubscriptionTier.MOBILE_WEEKLY
 
-        # In a real app, you would validate the App Store transaction here
-        # For now, we'll just record the upgrade
+        # Validate the App Store receipt
+        try:
+            receipt_validation = AppStoreService.validate_receipt(
+                upgrade_request.receipt_data,
+                is_sandbox=upgrade_request.is_sandbox
+            )
 
-        success = UsageService.upgrade_subscription(
+            # Extract subscription information from validated receipt
+            subscription_info = AppStoreService.extract_subscription_info(
+                receipt_validation)
+
+            # Validate product ID matches expected subscription
+            if subscription_info.get("product_id") != "speech_assistant_weekly":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid product ID in receipt"
+                )
+
+            # Check if this transaction has already been processed
+            existing_usage = db.query(UsageLimits).filter(
+                UsageLimits.app_store_transaction_id == subscription_info.get(
+                    "transaction_id")
+            ).first()
+
+            if existing_usage:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This transaction has already been processed"
+                )
+
+        except ValueError as e:
+            logger.error(f"Receipt validation failed: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Receipt validation failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error validating receipt: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail="Error validating App Store receipt")
+
+        # Update user subscription with validated receipt data
+        success = UsageService.upgrade_subscription_with_receipt(
             current_user.id,
             tier,
-            upgrade_request.app_store_transaction_id,
+            subscription_info,
             db
         )
 
@@ -225,6 +270,8 @@ async def upgrade_mobile_subscription(
             "usage_stats": stats
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error upgrading subscription: {str(e)}")
         raise HTTPException(
@@ -368,8 +415,85 @@ async def get_mobile_call_history(
         }
 
     except Exception as e:
-        logger.error(f"Error getting call history: {str(e)}")
+        logger.error(f"Error getting mobile call history: {str(e)}")
         raise HTTPException(
             status_code=500, detail="Unable to fetch call history")
+
+
+@router.post("/app-store/webhook")
+async def handle_app_store_webhook(
+    request: Request,
+    webhook_data: AppStoreWebhookRequest,
+    db: Session = Depends(get_db)
+):
+    """Handle App Store server notifications for subscription events"""
+    try:
+        # Get the raw body for signature verification
+        body = await request.body()
+        signature = request.headers.get("x-apple-signature")
+
+        # Verify webhook signature
+        if signature:
+            if not AppStoreService.verify_webhook_signature(body.decode(), signature):
+                logger.error("Invalid webhook signature")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+
+        # Process the subscription notification
+        notification_data = {
+            "notification_type": webhook_data.notificationType,
+            "signedPayload": webhook_data.signedPayload,
+            "data": webhook_data.data
+        }
+
+        success = AppStoreService.process_subscription_notification(
+            notification_data, db)
+
+        if success:
+            return {"status": "success", "message": "Notification processed successfully"}
+        else:
+            logger.error("Failed to process App Store notification")
+            raise HTTPException(
+                status_code=500, detail="Failed to process notification")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing App Store webhook: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing webhook")
+
+
+@router.get("/subscription-status")
+async def get_subscription_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get detailed subscription status for mobile user"""
+    try:
+        usage_limits = db.query(UsageLimits).filter(
+            UsageLimits.user_id == current_user.id).first()
+
+        if not usage_limits:
+            raise HTTPException(
+                status_code=404, detail="Usage limits not found")
+
+        return {
+            "subscription_tier": usage_limits.subscription_tier.value if usage_limits.subscription_tier else None,
+            "subscription_status": usage_limits.subscription_status.value if usage_limits.subscription_status else None,
+            "is_subscribed": usage_limits.is_subscribed,
+            "subscription_start_date": usage_limits.subscription_start_date.isoformat() if usage_limits.subscription_start_date else None,
+            "subscription_end_date": usage_limits.subscription_end_date.isoformat() if usage_limits.subscription_end_date else None,
+            "next_payment_date": usage_limits.next_payment_date.isoformat() if usage_limits.next_payment_date else None,
+            "billing_cycle": usage_limits.billing_cycle,
+            "app_store_transaction_id": usage_limits.app_store_transaction_id,
+            "app_store_product_id": usage_limits.app_store_product_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting subscription status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Unable to fetch subscription status")
 
 # Import the required models at the top of the file

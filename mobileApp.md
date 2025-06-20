@@ -359,7 +359,7 @@ username=user@example.com&password=securepassword123
 
 #### **POST /mobile/upgrade-subscription**
 
-**Purpose**: Handle App Store subscription purchases
+**Purpose**: Handle App Store subscription purchases with receipt validation
 **Headers Required**:
 
 - `Authorization: Bearer <token>`
@@ -370,7 +370,8 @@ username=user@example.com&password=securepassword123
 
 ```json
 {
-  "app_store_transaction_id": "1000000123456789",
+  "receipt_data": "base64_encoded_receipt_from_app_store",
+  "is_sandbox": false,
   "subscription_tier": "mobile_weekly"
 }
 ```
@@ -392,10 +393,80 @@ username=user@example.com&password=securepassword123
 
 **What it does**:
 
-1. Validates App Store transaction ID
-2. Upgrades user to paid subscription
-3. Removes trial limitations
-4. Returns updated usage statistics
+1. **Validates App Store receipt** with Apple's servers
+2. **Extracts subscription information** from validated receipt
+3. **Prevents duplicate processing** of the same transaction
+4. **Upgrades user to paid subscription** with proper expiration dates
+5. **Removes trial limitations** and updates usage statistics
+
+---
+
+#### **POST /mobile/app-store/webhook**
+
+**Purpose**: Handle App Store server notifications for subscription events
+**Headers Required**:
+
+- `Content-Type: application/json`
+- `x-apple-signature` (optional): For webhook signature verification
+
+**Request Body**:
+
+```json
+{
+  "signedPayload": "jwt_signed_payload_from_apple",
+  "notificationType": "RENEWAL",
+  "data": {
+    "productId": "speech_assistant_weekly",
+    "transactionId": "1000000123456789",
+    "originalTransactionId": "1000000123456789",
+    "expiresDate": "2024-01-22T10:30:00Z"
+  }
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": "success",
+  "message": "Notification processed successfully"
+}
+```
+
+**What it does**:
+
+1. **Verifies webhook signature** (if configured)
+2. **Processes subscription events** (renewals, cancellations, billing issues)
+3. **Updates subscription status** in the database
+4. **Handles automatic renewals** and subscription state changes
+
+---
+
+#### **GET /mobile/subscription-status**
+
+**Purpose**: Get detailed subscription status for mobile user
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+
+**Response**:
+
+```json
+{
+  "subscription_tier": "mobile_weekly",
+  "subscription_status": "active",
+  "is_subscribed": true,
+  "subscription_start_date": "2024-01-15T10:30:00Z",
+  "subscription_end_date": "2024-01-22T10:30:00Z",
+  "next_payment_date": "2024-01-22T10:30:00Z",
+  "billing_cycle": "weekly",
+  "app_store_transaction_id": "1000000123456789",
+  "app_store_product_id": "speech_assistant_weekly"
+}
+```
+
+**What it does**: Returns comprehensive subscription information including App Store transaction details and billing cycle information.
 
 ---
 
@@ -719,7 +790,7 @@ class SubscriptionManager: NSObject, ObservableObject {
             let transaction = try checkVerified(verification)
 
             // Send to backend
-            try await upgradeSubscription(transactionID: String(transaction.id))
+            try await upgradeSubscription(transaction: transaction)
 
             await transaction.finish()
             self.isSubscribed = true
@@ -751,7 +822,8 @@ class SubscriptionManager: NSObject, ObservableObject {
 
 ```swift
 struct UpgradeRequest: Codable {
-    let app_store_transaction_id: String
+    let receipt_data: String  // Base64 encoded receipt data
+    let is_sandbox: Bool      // Whether this is a sandbox receipt
     let subscription_tier: String
 }
 
@@ -762,7 +834,7 @@ struct UpgradeResponse: Codable {
     let usage_stats: UsageStats
 }
 
-func upgradeSubscription(transactionID: String) async throws -> UpgradeResponse {
+func upgradeSubscription(transaction: Transaction) async throws -> UpgradeResponse {
     let url = URL(string: "\(baseURL)/mobile/upgrade-subscription")!
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -772,14 +844,64 @@ func upgradeSubscription(transactionID: String) async throws -> UpgradeResponse 
         request.setValue(value, forHTTPHeaderField: key)
     }
 
+    // Get the receipt data from the app
+    let receiptData = try await AppStore.receiptData()
+    let receiptString = receiptData.base64EncodedString()
+
+    // Determine if this is a sandbox receipt
+    let isSandbox = transaction.environment == .sandbox
+
     let upgradeData = UpgradeRequest(
-        app_store_transaction_id: transactionID,
+        receipt_data: receiptString,
+        is_sandbox: isSandbox,
         subscription_tier: "mobile_weekly"
     )
     request.httpBody = try JSONEncoder().encode(upgradeData)
 
-    let (data, _) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await URLSession.shared.data(for: request)
+
+    // Handle potential errors
+    if let httpResponse = response as? HTTPURLResponse {
+        switch httpResponse.statusCode {
+        case 400:
+            let errorData = try JSONDecoder().decode(UpgradeError.self, from: data)
+            throw SubscriptionError.backendError(errorData.detail)
+        case 500:
+            throw SubscriptionError.serverError
+        default:
+            break
+        }
+    }
+
     return try JSONDecoder().decode(UpgradeResponse.self, from: data)
+}
+
+// Error handling for subscription upgrades
+enum SubscriptionError: Error, LocalizedError {
+    case productNotFound
+    case userCancelled
+    case unverifiedTransaction
+    case backendError(String)
+    case serverError
+
+    var errorDescription: String? {
+        switch self {
+        case .productNotFound:
+            return "Subscription product not found"
+        case .userCancelled:
+            return "Purchase was cancelled"
+        case .unverifiedTransaction:
+            return "Transaction could not be verified"
+        case .backendError(let message):
+            return message
+        case .serverError:
+            return "Server error occurred"
+        }
+    }
+}
+
+struct UpgradeError: Codable {
+    let detail: String
 }
 ```
 

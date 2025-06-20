@@ -26,6 +26,16 @@ class SubscriptionTier(enum.Enum):
     BUSINESS_ENTERPRISE = "business_enterprise"      # $299/month
 
 
+class SubscriptionStatus(enum.Enum):
+    """Subscription status for App Store compliance"""
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+    BILLING_RETRY = "billing_retry"
+    EXPIRED = "expired"
+    GRACE_PERIOD = "grace_period"
+    PENDING = "pending"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -262,6 +272,8 @@ class UsageLimits(Base):
     is_subscribed = Column(Boolean, default=False)
     subscription_start_date = Column(DateTime, nullable=True)
     subscription_end_date = Column(DateTime, nullable=True)
+    subscription_status = Column(
+        Enum(SubscriptionStatus), default=SubscriptionStatus.PENDING)
 
     # Weekly/Monthly limits based on subscription
     # For business basic: 20
@@ -289,4 +301,4 @@ class UsageLimits(Base):
 __all__ = ["User", "Token", "Base", "CallSchedule",
            "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials",
            "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus",
-           "UsageLimits", "AppType", "SubscriptionTier"]
+           "UsageLimits", "AppType", "SubscriptionTier", "SubscriptionStatus"]
