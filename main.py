@@ -24,11 +24,14 @@ import sqlalchemy  # Ensure this is imported
 import threading
 import time
 from app.auth import router as auth_router, get_current_user
-from app.models import User, Token, CallSchedule
+from app.routes.mobile import router as mobile_router
+from app.routes.user import router as user_router
+from app.models import User, Token, CallSchedule, UsageLimits, AppType
 from app.utils import verify_password, create_access_token
-from app.schemas import TokenResponse
+from app.schemas import TokenResponse, UserRead
 from app.db import engine, get_db, SessionLocal, Base
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from app.services.usage_service import UsageService
 from starlette.websockets import WebSocketState  # Add this at the top
 
 # Configure logging
@@ -36,6 +39,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# Check if in development mode
+DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'False').lower() == 'true'
 
 # requires OpenAI Realtime API Access
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -71,7 +77,7 @@ LOG_EVENT_TYPES = [
 ]
 
 # Initialize FastAPI app
-app = FastAPI()
+app = FastAPI(title="AiFriendChat API", version="1.0.0")
 
 # Add CORS middleware
 app.add_middleware(
@@ -87,42 +93,12 @@ Base.metadata.create_all(bind=engine)
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(mobile_router)
+app.include_router(user_router)
 
 if not OPENAI_API_KEY:
     raise ValueError(
         'Missing the OpenAI API key. Please set it in the .env file.')
-
-
-# Pydantic Schemas
-
-
-class UserRead(BaseModel):
-    id: int
-    email: EmailStr
-    is_active: bool
-
-    class Config:
-        orm_mode = True
-
-
-# Password Hashing and JWT Utilities
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# JWT Configuration
-
-# Dependency
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# FastAPI App Initialization
-
 
 # Twilio Client Initialization
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
@@ -135,9 +111,7 @@ if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
 
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# User Login Endpoint
-
-
+# User Login Endpoint (legacy - keep for compatibility)
 @app.post("/token", response_model=TokenResponse)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -164,20 +138,44 @@ async def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 # Protected Route Example
-
-
 @app.get("/protected")
 def protected_route(current_user: User = Depends(get_current_user)):
     return {"message": f"Hello, {current_user.email}"}
-
 
 @app.get("/users/me", response_model=UserRead)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
+# Update user name endpoint (legacy - for backwards compatibility)
+@app.post("/update-user-name")
+async def update_user_name_legacy(
+    name: str = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Legacy endpoint for updating user name"""
+    try:
+        current_user.name = name.strip() if isinstance(name, str) else str(name).strip()
+        db.commit()
+        db.refresh(current_user)
+        
+        logger.info(f"Updated name for user {current_user.email} to: {current_user.name}")
+        
+        return {
+            "message": "Name updated successfully",
+            "name": current_user.name,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating name for user {current_user.id}: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update name"
+        )
+
 # Schedule Call Schemas
-
-
 class CallScheduleCreate(BaseModel):
     phone_number: str
     scheduled_time: datetime.datetime
@@ -191,7 +189,6 @@ class CallScheduleCreate(BaseModel):
                 f"Invalid scenario. Must be one of: {', '.join(SCENARIOS.keys())}")
         return v
 
-
 class CallScheduleRead(CallScheduleCreate):
     id: int
     created_at: datetime.datetime
@@ -200,8 +197,6 @@ class CallScheduleRead(CallScheduleCreate):
         orm_mode = True
 
 # Schedule Call Endpoint
-
-
 @app.post("/schedule-call", response_model=CallScheduleRead)
 async def schedule_call(
     call: CallScheduleCreate,
@@ -215,24 +210,55 @@ async def schedule_call(
         phone_number=call.phone_number,
         scheduled_time=call.scheduled_time,
         scenario=call.scenario
-
     )
     db.add(new_call)
     db.commit()
     db.refresh(new_call)
     return new_call
 
-# Make Call Endpoint
-
-
+# Make Call Endpoint (updated with usage limits)
 @app.get("/make-call/{phone_number}/{scenario}")
 async def make_call(
+    request: Request,
     phone_number: str,
     scenario: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     try:
+        # Check usage limits for business web app users (not in development mode)
+        if not DEVELOPMENT_MODE:
+            # Initialize or get usage limits
+            usage_limits = db.query(UsageLimits).filter(
+                UsageLimits.user_id == current_user.id).first()
+            
+            if not usage_limits:
+                # Auto-detect as web business if not found
+                app_type = UsageService.detect_app_type_from_request(request)
+                usage_limits = UsageService.initialize_user_usage(
+                    current_user.id, app_type, db)
+
+            # Check if user can make call
+            can_call, status_code, details = UsageService.can_make_call(
+                current_user.id, db)
+
+            if not can_call:
+                if status_code == "trial_calls_exhausted":
+                    raise HTTPException(
+                        status_code=402,  # Payment Required
+                        detail="Please upgrade to continue making calls"
+                    )
+                elif status_code == "weekly_limit_reached":
+                    raise HTTPException(
+                        status_code=402,
+                        detail=details.get("message", "Weekly limit reached")
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=402,
+                        detail="Please upgrade to continue making calls"
+                    )
+        
         # Get the public URL from environment and ensure it's clean
         public_url = os.getenv('PUBLIC_URL', '').strip()
         logger.info(f"Using PUBLIC_URL from environment: {public_url}")
@@ -240,9 +266,6 @@ async def make_call(
         # Construct the complete webhook URL with https://
         webhook_url = f"https://{public_url}/incoming-call/{scenario}"
         logger.info(f"Constructed webhook URL: {webhook_url}")
-
-        # Initialize Twilio client
-        # twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
         # Make the call using Twilio
         call = twilio_client.calls.create(
@@ -252,14 +275,22 @@ async def make_call(
             record=True
         )
 
+        # Record the call if not in development mode
+        if not DEVELOPMENT_MODE:
+            UsageService.record_call_made(current_user.id, db)
+
+        logger.info(f"Call initiated for user {current_user.id}, call SID: {call.sid}")
+        
         return {"message": "Call initiated", "call_sid": call.sid}
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error initiating call: {str(e)}")
+        logger.error(f"Error making call to {phone_number} with scenario {scenario}")
+        logger.error(f"Error details: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Webhook Endpoint for Incoming Calls
-
-
 @app.api_route("/incoming-call/{scenario}", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request, scenario: str):
     logger.info(f"Incoming call webhook received for scenario: {scenario}")
@@ -297,9 +328,7 @@ async def handle_incoming_call(request: Request, scenario: str):
         logger.error(f"Error in handle_incoming_call: {e}", exc_info=True)
         raise
 
-# Placeholder for WebSocket Endpoint (Implement as Needed)
-
-
+# WebSocket handlers remain the same...
 async def receive_from_twilio(websocket: WebSocket, openai_ws):
     """Handle incoming audio from Twilio."""
     try:
@@ -332,7 +361,6 @@ async def receive_from_twilio(websocket: WebSocket, openai_ws):
         logger.error(f"Error in receive_from_twilio: {e}")
         raise
 
-
 async def send_to_twilio(websocket: WebSocket, openai_ws):
     """Handle outgoing audio to Twilio."""
     try:
@@ -362,7 +390,6 @@ async def send_to_twilio(websocket: WebSocket, openai_ws):
     except Exception as e:
         logger.error(f"Error in send_to_twilio: {e}")
         raise
-
 
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
@@ -432,15 +459,11 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
         raise
 
 # Start Background Thread on Server Startup
-
-
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=initiate_scheduled_calls, daemon=True).start()
 
-
 # Background Task to Initiate Scheduled Calls
-
 def initiate_scheduled_calls():
     while True:
         db_local = SessionLocal()
@@ -475,132 +498,14 @@ def initiate_scheduled_calls():
             db_local.close()
         time.sleep(60)
 
-
-async def update_scenario(openai_ws, new_scenario):
-    if new_scenario not in SCENARIOS:
-        raise ValueError(f"Invalid scenario: {new_scenario}")
-
-    selected_scenario = SCENARIOS[new_scenario]
-    await send_session_update(openai_ws, selected_scenario)
-
-# You can call this function when you want to change the scenario
-# For example, you could add a new WebSocket route for scenario updates:
-
-
-@app.websocket("/update-scenario/{scenario}")
-async def handle_scenario_update(websocket: WebSocket, scenario: str):
-    await websocket.accept()
-    try:
-        async with websockets.connect(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
-            extra_headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "OpenAI-Beta": "realtime=v1"
-            }
-        ) as openai_ws:
-            await update_scenario(openai_ws, scenario)
-            await websocket.send_text(f"Scenario updated to: {scenario}")
-    except ValueError as e:
-        await websocket.send_text(str(e))
-    finally:
-        await websocket.close()
-
-
-# Handle Server Shutdown
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    pass  # Add any cleanup logic if necessary
-
-
-@app.get("/test")
-async def test_endpoint():
-    logger.info("Test endpoint hit")
-    return {"message": "Test endpoint working"}
-
-
-@app.on_event("startup")
-async def print_routes():
-    for route in app.routes:
-        logger.info(f"Route: {route.path} -> {route.name}")
-
-
-def clean_url(url: str) -> str:
-    """Clean URL by removing protocol prefixes and trailing slashes."""
-    logger.info(f"clean_url input: {url}")  # Debug log
-    url = url.strip()
-    url = url.replace('https://', '').replace('http://', '')
-    url = url.rstrip('/')
-    logger.info(f"clean_url output: {url}")  # Debug log
-    return url
-
-
-def clean_and_validate_url(url: str, add_protocol: bool = True) -> str:
-    """Clean and validate URL, optionally adding protocol."""
-    # Remove any existing protocols and whitespace
-    cleaned_url = url.strip().replace('https://', '').replace('http://', '')
-
-    # Add protocol if requested
-    if add_protocol:
-        return f"https://{cleaned_url}"
-    return cleaned_url
-
-
-@app.post("/incoming-call", response_class=Response)
-async def incoming_call(request: Request, scenario: str):
-    response = VoiceResponse()
-    response.say("Hello! This is your speech assistant powered by OpenAI.")
-    return Response(content=str(response), media_type="application/xml")
-
-
-async def send_mark(connection, stream_sid):
-    """Send mark event to Twilio."""
-    if stream_sid:
-        mark_event = {
-            "event": "mark",
-            "streamSid": stream_sid,
-            "mark": {"name": "responsePart"}
-        }
-        await connection.send_json(mark_event)
-        return 'responsePart'
-
-
-async def handle_speech_started_event(websocket, openai_ws, stream_sid,
-                                      last_assistant_item, response_start_timestamp_twilio,
-                                      latest_media_timestamp, mark_queue):
-    """Handle interruption when caller starts speaking."""
-    if mark_queue and response_start_timestamp_twilio is not None:
-        elapsed_time = latest_media_timestamp - response_start_timestamp_twilio
-
-        if last_assistant_item:
-            truncate_event = {
-                "type": "conversation.item.truncate",
-                "item_id": last_assistant_item,
-                "content_index": 0,
-                "audio_end_ms": elapsed_time
-            }
-            await openai_ws.send(json.dumps(truncate_event))
-
-        await websocket.send_json({
-            "event": "clear",
-            "streamSid": stream_sid
-        })
-
-        mark_queue.clear()
-        return None, None  # Reset last_assistant_item and response_start_timestamp
-
-
-@app.websocket("/ws-test")
-async def websocket_test(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("Test WebSocket connection accepted")
-    try:
-        await websocket.send_text("WebSocket connection test successful")
-    except Exception as e:
-        logger.error(f"WebSocket test error: {e}")
-    finally:
-        await websocket.close()
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "development_mode": DEVELOPMENT_MODE
+    }
 
 if __name__ == "__main__":
     import uvicorn

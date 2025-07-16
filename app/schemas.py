@@ -1,6 +1,7 @@
 # schemas.py
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime
 
 
 class UserCreate(BaseModel):
@@ -13,10 +14,12 @@ class UserLogin(BaseModel):
     password: str
 
 
-class TokenSchema(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str
+class UserRead(BaseModel):
+    id: int
+    email: EmailStr
+    name: Optional[str] = None
+    is_active: bool
+    created_at: Optional[datetime] = None
 
     class Config:
         orm_mode = True
@@ -28,6 +31,16 @@ class TokenData(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
+    token_type: str
+
+    class Config:
+        orm_mode = True
+
+
+class TokenSchema(BaseModel):
+    access_token: str
+    refresh_token: str
     token_type: str
 
     class Config:
