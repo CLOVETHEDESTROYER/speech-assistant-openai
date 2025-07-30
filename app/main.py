@@ -291,11 +291,15 @@ SYSTEM_MESSAGE = (
     "You are an AI assistant engaging in real-time voice conversation. "
     "You must strictly follow these rules:\n"
     "1. Stay completely in character based on the provided persona\n"
-    "2. Keep responses brief and natural - speak like a real person on the phone\n"
+    "2. Keep responses brief and conversational - speak like a real person on the phone\n"
     "3. Never break character or mention being an AI\n"
     "4. Focus solely on the scenario's objective\n"
     "5. Use natural speech patterns with occasional pauses and filler words\n"
-    "6. If interrupted, acknowledge and adapt your response"
+    "6. If interrupted, gracefully acknowledge and adapt your response immediately\n"
+    "7. Pay attention to conversation flow and respond appropriately to user cues\n"
+    "8. If user says 'wait', 'hold on', or similar, pause and ask how you can help\n"
+    "9. Use brief responses to allow natural back-and-forth conversation\n"
+    "10. Don't rush through long explanations - break them into smaller parts"
 )
 # VOICE = 'ash'
 LOG_EVENT_TYPES = [
@@ -859,15 +863,15 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                 shared_state["stream_sid"] = data.get("streamSid")
                 logger.info(f"Stream started: {shared_state['stream_sid']}")
 
-                # Initialize session with turn detection for "hello"
+                # Initialize session with optimized turn detection
                 await openai_ws.send(json.dumps({
                     "type": "session.update",
                     "session": {
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.2,
-                            "prefix_padding_ms": 50,
-                            "silence_duration_ms": 100
+                            "threshold": 0.5,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 700
                         }
                     }
                 }))
@@ -893,9 +897,14 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
         shared_state["should_stop"] = True
 
 
-async def send_to_twilio(ws_manager, openai_ws, shared_state):
-    """Send audio deltas from OpenAI to Twilio."""
+async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state: ConversationState = None):
+    """Enhanced audio sending with conversation state management."""
     try:
+        # Initialize conversation state if not provided
+        if conversation_state is None:
+            conversation_state = ConversationState()
+            shared_state["conversation_state"] = conversation_state
+
         while not shared_state["should_stop"]:
             message = await openai_ws.recv()
             if not message:
@@ -907,7 +916,24 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state):
                     logger.error(f"Error from OpenAI: {data['error']}")
                     continue
 
-                if data.get("type") == "response.audio.delta":
+                # Handle response start
+                if data.get("type") == "response.output_item.added":
+                    item = data.get("item", {})
+                    if item.get("type") == "message" and item.get("role") == "assistant":
+                        assistant_item_id = item.get("id")
+                        conversation_state.start_ai_response(assistant_item_id)
+                        shared_state["ai_speaking"] = True
+                        shared_state["last_assistant_item"] = assistant_item_id
+                        logger.info(
+                            f"AI response started with item ID: {assistant_item_id}")
+
+                # Handle audio deltas
+                elif data.get("type") == "response.audio.delta":
+                    # Check if user is speaking before sending audio
+                    if shared_state.get("user_speaking", False):
+                        logger.debug("Skipping audio delta - user is speaking")
+                        continue
+
                     await ws_manager.send_json({
                         "event": "media",
                         "streamSid": shared_state["stream_sid"],
@@ -916,10 +942,28 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state):
                         }
                     })
                     logger.debug("Sent audio delta to Twilio")
+
+                # Handle response completion
+                elif data.get("type") == "response.audio.done":
+                    conversation_state.end_ai_response()
+                    shared_state["ai_speaking"] = False
+                    shared_state["last_assistant_item"] = None
+                    logger.info("AI response completed")
+
                 elif data.get("type") == "response.content.done":
                     if shared_state.get("stream_sid"):
                         await send_mark(ws_manager, shared_state)
                         logger.info("Mark event sent to Twilio")
+
+                # Handle speech detection
+                elif data.get("type") == "input_audio_buffer.speech_started":
+                    logger.info("User speech detected by OpenAI")
+                    await enhanced_handle_speech_started_event(ws_manager, openai_ws, shared_state, conversation_state)
+
+                elif data.get("type") == "input_audio_buffer.speech_stopped":
+                    logger.info("User speech stopped")
+                    conversation_state.end_user_speech()
+                    shared_state["user_speaking"] = False
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse OpenAI message: {str(e)}")
@@ -988,7 +1032,7 @@ async def send_session_update(openai_ws, scenario):
         session_data = {
             "type": "session.update",
             "session": {
-                "turn_detection": {"type": "server_vad", "threshold": 0.2, "prefix_padding_ms": 50, "silence_duration_ms": 100},
+                "turn_detection": {"type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300, "silence_duration_ms": 700},
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
@@ -1015,7 +1059,7 @@ async def send_session_update(openai_ws, scenario):
 
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
-    """Handle media stream for Twilio calls."""
+    """Handle media stream for Twilio calls with enhanced interruption handling."""
     MAX_RECONNECT_ATTEMPTS = 3
     RECONNECT_DELAY = 2  # seconds
 
@@ -1062,8 +1106,14 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                             "stream_sid": None,
                             "latest_media_timestamp": 0,
                             "greeting_sent": False,
-                            "reconnecting": False
+                            "reconnecting": False,
+                            "ai_speaking": False,
+                            "user_speaking": False
                         }
+
+                        # Initialize conversation state for enhanced interruption handling
+                        conversation_state = ConversationState()
+                        shared_state["conversation_state"] = conversation_state
 
                         # Initialize session with the selected scenario
                         await initialize_session(openai_ws, selected_scenario, is_incoming=direction == "outbound")
@@ -1085,11 +1135,11 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                         greeting_task = asyncio.create_task(
                             send_initial_greeting(openai_ws, selected_scenario))
 
-                        # Create tasks for receiving and sending
+                        # Create tasks for receiving and sending with enhanced state management
                         receive_task = asyncio.create_task(
                             receive_from_twilio(ws, openai_ws, shared_state))
                         send_task = asyncio.create_task(
-                            send_to_twilio(ws, openai_ws, shared_state))
+                            send_to_twilio(ws, openai_ws, shared_state, conversation_state))
 
                         # Define a constant for greeting timeout
                         GREETING_TIMEOUT = 10  # seconds
@@ -1404,9 +1454,9 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
             "session": {
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.2,
-                    "prefix_padding_ms": 50,
-                    "silence_duration_ms": 100
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 700
                 },
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
@@ -1522,67 +1572,191 @@ async def send_mark(connection, stream_sid):
         return 'responsePart'
 
 
-async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_assistant_item=None, *args, **kwargs):
-    """
-    Handle user interruption more gracefully by truncating the current AI response
-    and clearing the audio buffer.
+# Enhanced Conversation State Management
+class ConversationState:
+    def __init__(self):
+        self.ai_speaking = False
+        self.user_speaking = False
+        self.last_response_start_time = 0
+        self.last_response_end_time = 0
+        self.interruption_count = 0
+        self.conversation_context = []
+        self.pause_keywords = [
+            "wait", "hold on", "give me a second", "let me think", "one moment", "hang on"]
+        self.last_assistant_item = None
+        self.response_start_timestamp = 0
 
-    Args:
-        websocket: Twilio WebSocket connection.
-        openai_ws: OpenAI WebSocket connection.
-        stream_sid: Twilio stream session identifier or shared_state dictionary.
-        last_assistant_item: ID of the last active response from OpenAI.
-        *args: Additional positional arguments (to handle potential mismatches).
-        **kwargs: Additional keyword arguments (for future extensibility).
+    def start_ai_response(self, assistant_item_id: str = None):
+        """Mark that AI started speaking"""
+        self.ai_speaking = True
+        self.user_speaking = False
+        self.last_response_start_time = time.time() * 1000
+        self.response_start_timestamp = self.last_response_start_time
+        if assistant_item_id:
+            self.last_assistant_item = assistant_item_id
+        logger.info(f"AI started speaking at {self.last_response_start_time}")
+
+    def end_ai_response(self):
+        """Mark that AI finished speaking"""
+        self.ai_speaking = False
+        self.last_response_end_time = time.time() * 1000
+        self.last_assistant_item = None
+        logger.info(f"AI finished speaking at {self.last_response_end_time}")
+
+    def start_user_speech(self):
+        """Mark that user started speaking"""
+        self.user_speaking = True
+        if self.ai_speaking:
+            self.interruption_count += 1
+            logger.info(f"User interruption #{self.interruption_count}")
+
+    def end_user_speech(self):
+        """Mark that user finished speaking"""
+        self.user_speaking = False
+
+    def should_allow_interruption(self, current_time_ms: float = None) -> bool:
+        """Determine if interruption should be allowed based on context and timing"""
+        if not self.ai_speaking:
+            return False
+
+        if current_time_ms is None:
+            current_time_ms = time.time() * 1000
+
+        # Calculate how long AI has been speaking
+        response_duration = current_time_ms - self.last_response_start_time
+
+        # Don't allow interruption in first 300ms of response (likely false positive)
+        if response_duration < 300:
+            logger.info(
+                f"Blocking interruption - too early ({response_duration}ms)")
+            return False
+
+        # Allow interruption if AI has been speaking for more than 2 seconds
+        if response_duration > 2000:
+            logger.info(
+                f"Allowing interruption - long response ({response_duration}ms)")
+            return True
+
+        # Check for pause keywords in recent conversation context
+        recent_context = " ".join(self.conversation_context[-3:]).lower()
+        for keyword in self.pause_keywords:
+            if keyword in recent_context:
+                logger.info(
+                    f"Allowing interruption - pause keyword detected: {keyword}")
+                return True
+
+        # Default: allow interruption after 500ms
+        if response_duration > 500:
+            logger.info(
+                f"Allowing interruption - normal timing ({response_duration}ms)")
+            return True
+
+        logger.info(
+            f"Blocking interruption - too early ({response_duration}ms)")
+        return False
+
+    def add_context(self, text: str, role: str = "user"):
+        """Add conversation context for better decision making"""
+        self.conversation_context.append(f"{role}: {text}")
+        # Keep only last 10 messages for context
+        if len(self.conversation_context) > 10:
+            self.conversation_context.pop(0)
+
+
+async def enhanced_handle_speech_started_event(websocket, openai_ws, shared_state, conversation_state: ConversationState = None):
+    """
+    Enhanced interruption handling with contextual awareness and timing checks.
     """
     try:
-        # Handle both direct stream_sid and shared_state dictionary
-        if isinstance(stream_sid, dict) and "stream_sid" in stream_sid:
-            actual_stream_sid = stream_sid["stream_sid"]
-        else:
-            actual_stream_sid = stream_sid
+        current_time_ms = time.time() * 1000
 
-        if last_assistant_item:
-            # Send a truncate event to OpenAI to stop the current response
+        # Get the stream_sid
+        if isinstance(shared_state, dict) and "stream_sid" in shared_state:
+            actual_stream_sid = shared_state["stream_sid"]
+        else:
+            actual_stream_sid = shared_state
+
+        # Initialize conversation state if not provided
+        if conversation_state is None:
+            conversation_state = ConversationState()
+
+        # Mark user as speaking
+        conversation_state.start_user_speech()
+
+        # Check if interruption should be allowed
+        if not conversation_state.should_allow_interruption(current_time_ms):
+            logger.info("Interruption blocked by contextual logic")
+            return False
+
+        # AI was speaking and interruption is allowed
+        if conversation_state.ai_speaking and conversation_state.last_assistant_item:
+            logger.info(
+                f"Processing interruption for assistant item: {conversation_state.last_assistant_item}")
+
+            # Calculate precise audio timing for truncation
+            response_duration = current_time_ms - conversation_state.response_start_timestamp
+
+            # Send truncate event to OpenAI
             truncate_event = {
                 "type": "conversation.item.truncate",
-                "item_id": last_assistant_item,
+                "item_id": conversation_state.last_assistant_item,
                 "content_index": 0,
-                "audio_end_ms": int(time.time() * 1000),
+                "audio_end_ms": int(current_time_ms),
                 "reason": "user_interrupt"
             }
+
             try:
                 await openai_ws.send(json.dumps(truncate_event))
                 logger.info(
-                    f"Sent truncate event for item ID: {last_assistant_item}")
+                    f"Sent truncate event for item ID: {conversation_state.last_assistant_item} after {response_duration}ms")
             except Exception as e:
                 logger.error(f"Error sending truncate event: {e}")
 
-        # Clear Twilio's audio buffer
-        clear_event = {
-            "event": "clear",
-            "streamSid": actual_stream_sid
-        }
-        await websocket.send_json(clear_event)
-        logger.info(
-            f"Cleared Twilio audio buffer for streamSid: {actual_stream_sid}")
+        # Enhanced audio buffer management
+        await enhanced_clear_audio_buffers(websocket, actual_stream_sid)
 
-        # Send a small pause event to create natural transition
-        pause_event = {
-            "event": "mark",
-            "streamSid": actual_stream_sid,
-            "mark": {"name": "user_interrupt_pause"}
-        }
-        await websocket.send_json(pause_event)
+        # Update conversation state
+        conversation_state.end_ai_response()
 
-        # Optional: Small pause before accepting new input
-        # Reduced from 0.5 for faster response
-        await asyncio.sleep(0.1)
+        # Update shared state for compatibility
+        if isinstance(shared_state, dict):
+            shared_state["ai_speaking"] = False
+            shared_state["user_speaking"] = True
+            shared_state["last_interrupt_time"] = current_time_ms
+
+        return True
 
     except Exception as e:
         logger.error(
-            f"Error in handle_speech_started_event: {e}", exc_info=True)
-        # Don't raise the exception - try to continue the conversation
+            f"Error in enhanced_handle_speech_started_event: {e}", exc_info=True)
+        return False
+
+
+async def enhanced_clear_audio_buffers(websocket, stream_sid):
+    """Enhanced audio buffer clearing with better timing"""
+    try:
+        # Clear Twilio's audio buffer
+        clear_event = {
+            "event": "clear",
+            "streamSid": stream_sid
+        }
+        await websocket.send_json(clear_event)
+        logger.info(f"Cleared Twilio audio buffer for streamSid: {stream_sid}")
+
+        # Send mark event for clean transition
+        mark_event = {
+            "event": "mark",
+            "streamSid": stream_sid,
+            "mark": {"name": "user_interrupt_handled"}
+        }
+        await websocket.send_json(mark_event)
+
+        # Brief pause for clean audio transition
+        await asyncio.sleep(0.05)  # Reduced for faster response
+
+    except Exception as e:
+        logger.error(f"Error clearing audio buffers: {e}", exc_info=True)
+
 
 # Initialize the OpenAIRealtimeManager at global scope
 realtime_manager = OpenAIRealtimeManager(config.OPENAI_API_KEY)
@@ -2100,15 +2274,21 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
                     ) as openai_ws:
                         logger.info("Connected to OpenAI WebSocket")
 
-                        # Connection specific state
+                        # Connection specific state with enhanced interruption support
                         shared_state = {
                             "should_stop": False,
                             "stream_sid": None,
                             "latest_media_timestamp": 0,
                             "last_assistant_item": None,
                             "current_transcript": "",
-                            "greeting_sent": False
+                            "greeting_sent": False,
+                            "ai_speaking": False,
+                            "user_speaking": False
                         }
+
+                        # Initialize conversation state for enhanced interruption handling
+                        conversation_state = ConversationState()
+                        shared_state["conversation_state"] = conversation_state
 
                         # Initialize session
                         await initialize_session(openai_ws, selected_scenario, is_incoming=True)
@@ -2130,11 +2310,11 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
                         greeting_task = asyncio.create_task(
                             send_initial_greeting(openai_ws, selected_scenario))
 
-                        # Create tasks for receiving and sending
+                        # Create tasks for receiving and sending with enhanced state management
                         receive_task = asyncio.create_task(
                             receive_from_twilio(ws, openai_ws, shared_state))
                         send_task = asyncio.create_task(
-                            send_to_twilio(ws, openai_ws, shared_state))
+                            send_to_twilio(ws, openai_ws, shared_state, conversation_state))
 
                         # Define a constant for greeting timeout
                         GREETING_TIMEOUT = 10  # seconds
@@ -5007,15 +5187,15 @@ async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user
                 logger.info(
                     f"Calendar stream started: {shared_state['stream_sid']}")
 
-                # Initialize session with turn detection
+                # Initialize session with optimized turn detection
                 await openai_ws.send(json.dumps({
                     "type": "session.update",
                     "session": {
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.2,
-                            "prefix_padding_ms": 50,
-                            "silence_duration_ms": 100
+                            "threshold": 0.5,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 700
                         }
                     }
                 }))
@@ -5285,3 +5465,27 @@ async def store_transcript_from_twilio(
         logger.error(f"Failed to store transcript {transcript_sid}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to store transcript: {str(e)}")
+
+
+async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_assistant_item=None, *args, **kwargs):
+    """
+    Original interruption handler for backward compatibility.
+    This function now calls the enhanced version.
+    """
+    try:
+        # Convert to shared_state format for enhanced handler
+        if isinstance(stream_sid, dict):
+            shared_state = stream_sid
+        else:
+            shared_state = {"stream_sid": stream_sid}
+
+        if last_assistant_item:
+            shared_state["last_assistant_item"] = last_assistant_item
+
+        # Use enhanced handler
+        return await enhanced_handle_speech_started_event(websocket, openai_ws, shared_state)
+
+    except Exception as e:
+        logger.error(
+            f"Error in backward compatibility handler: {e}", exc_info=True)
+        return False
