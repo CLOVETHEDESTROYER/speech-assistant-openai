@@ -1,0 +1,12 @@
+[0;1;32m●[0m aifriendchatbeta.service - AI Friend Chat Beta
+     Loaded: loaded (]8;;file://AiFriendChat/etc/systemd/system/aifriendchatbeta.service/etc/systemd/system/aifriendchatbeta.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+     Active: [0;1;32mactive (running)[0m since Thu 2025-03-27 04:32:23 UTC; 113ms ago
+ Invocation: b067b741a6d44217b9b289e2e62cd6fd
+   Main PID: 1653457 (uvicorn)
+      Tasks: 1 (limit: 1109)
+     Memory: 3.9M (peak: 4.2M)
+        CPU: 44ms
+     CGroup: /system.slice/aifriendchatbeta.service
+             └─[0;38;5;245m1653457 /var/www/AiFriendChatBeta/venv/bin/python3 /var/www/AiFriendChatBeta/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5050[0m
+
+Mar 27 04:32:23 AiFriendChat systemd[1]: Started aifriendchatbeta.service - AI Friend Chat Beta.
