@@ -78,7 +78,10 @@ class Token(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    token = Column(String, unique=True, nullable=False)
+    access_token = Column(String, unique=True, nullable=False)
+    token_type = Column(String, default="bearer")
+    refresh_token = Column(String, nullable=True)
+    is_valid = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

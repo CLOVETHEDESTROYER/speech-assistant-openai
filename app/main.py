@@ -1,60 +1,18 @@
-from app.routes.mobile_app import router as mobile_router
-import os
-import json
-import base64
-import asyncio
-import websockets
-import logging
-import sys
-import tempfile
-import io
-import requests
-import re
-from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query, BackgroundTasks, File, Form, Path, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.websockets import WebSocketDisconnect
-from fastapi.exceptions import RequestValidationError
-from twilio.twiml.voice_response import VoiceResponse, Gather, Connect, Say, Stream
-from dotenv import load_dotenv
-from twilio.rest import Client
-import datetime
-from pydantic import BaseModel, EmailStr, field_validator, ValidationError
-from typing import Optional, Dict, List, Any, Union, Tuple
-from jose import JWTError, jwt
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from pathlib import Path
-import sqlalchemy
-import threading
-import time
-from app.auth import router as auth_router, get_current_user
-from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript, UserPhoneNumber
-from app.utils import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token
-)
-from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
-from app.db import engine, get_db, SessionLocal, Base
-from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
-from app.realtime_manager import OpenAIRealtimeManager
-from os import getenv
-from app.services.conversation_service import ConversationService
-from app.services.transcription import TranscriptionService
-from app.services.twilio_intelligence import TwilioIntelligenceService
-from twilio.request_validator import RequestValidator
-import traceback
-import openai
-from openai import OpenAI
-from twilio.base.exceptions import TwilioRestException
-import uuid
-from sqlalchemy.exc import SQLAlchemyError
-from app import config  # Import the config module
-from contextlib import contextmanager
-from app.services.twilio_client import get_twilio_client
+from app.services.twilio_service import TwilioPhoneService
+from app.routes.onboarding import router as onboarding_router
+from app.routes.twilio_management import router as twilio_router
+from dateutil import parser
+from datetime import timedelta
+from app.services.google_calendar import GoogleCalendarService
+from app.routes import google_calendar
+from app.middleware.security_headers import add_security_headers
+from app.utils.log_helpers import safe_log_request_data, sanitize_text
+import logging.handlers
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.middleware import SlowAPIMiddleware
+from app.limiter import limiter, rate_limit
+from app.utils.websocket import websocket_manager
 from app.utils.twilio_helpers import (
     with_twilio_retry,
     safe_twilio_response,
@@ -63,22 +21,63 @@ from app.utils.twilio_helpers import (
     TwilioResourceError,
     TwilioRateLimitError
 )
-from app.utils.websocket import websocket_manager
+from app.services.twilio_client import get_twilio_client
+from contextlib import contextmanager
+from app import config  # Import the config module
+from sqlalchemy.exc import SQLAlchemyError
+import uuid
+from twilio.base.exceptions import TwilioRestException
+from openai import OpenAI
+import openai
+import traceback
+from twilio.request_validator import RequestValidator
+from app.services.twilio_intelligence import TwilioIntelligenceService
+from app.services.transcription import TranscriptionService
+from app.services.conversation_service import ConversationService
+from os import getenv
+from app.realtime_manager import OpenAIRealtimeManager
+from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from app.db import engine, get_db, SessionLocal, Base
+from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
+from app.utils import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token
+)
+from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript, UserPhoneNumber
+from app.auth import router as auth_router, get_current_user
+import time
+import threading
+import sqlalchemy
+from pathlib import Path
+from sqlalchemy.orm import Session
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from typing import Optional, Dict, List, Any, Union, Tuple
+from pydantic import BaseModel, EmailStr, field_validator, ValidationError
+import datetime
+from twilio.rest import Client
+from dotenv import load_dotenv
+from twilio.twiml.voice_response import VoiceResponse, Gather, Connect, Say, Stream
+from fastapi.exceptions import RequestValidationError
+from fastapi.websockets import WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from app.limiter import limiter, rate_limit
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-import logging.handlers
-from app.utils.log_helpers import safe_log_request_data, sanitize_text
-from app.middleware.security_headers import add_security_headers
-from app.routes import google_calendar
-from app.services.google_calendar import GoogleCalendarService
-from datetime import timedelta
-from dateutil import parser
-from app.routes.twilio_management import router as twilio_router
-from app.routes.onboarding import router as onboarding_router
-from app.services.twilio_service import TwilioPhoneService
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query, BackgroundTasks, File, Form, Path, UploadFile
+import re
+import requests
+import io
+import tempfile
+import sys
+import logging
+import websockets
+import asyncio
+import base64
+import json
+import os
+from app.routes.mobile_app import router as mobile_router
 
 # Load environment variables
 load_dotenv('dev.env')  # Load from dev.env explicitly
@@ -130,6 +129,99 @@ class SensitiveDataFilter(logging.Filter):
 
 # Add the filter to the logger
 logger.addFilter(SensitiveDataFilter())
+
+# Enhanced Conversation State Management
+
+
+class ConversationState:
+    def __init__(self):
+        self.ai_speaking = False
+        self.user_speaking = False
+        self.last_response_start_time = 0
+        self.last_response_end_time = 0
+        self.interruption_count = 0
+        self.conversation_context = []
+        self.pause_keywords = [
+            "wait", "hold on", "give me a second", "let me think", "one moment", "hang on"]
+        self.last_assistant_item = None
+        self.response_start_timestamp = 0
+
+    def start_ai_response(self, assistant_item_id: str = None):
+        """Mark that AI started speaking"""
+        self.ai_speaking = True
+        self.user_speaking = False
+        self.last_response_start_time = time.time() * 1000
+        self.response_start_timestamp = self.last_response_start_time
+        if assistant_item_id:
+            self.last_assistant_item = assistant_item_id
+        logger.info(f"AI started speaking at {self.last_response_start_time}")
+
+    def end_ai_response(self):
+        """Mark that AI finished speaking"""
+        self.ai_speaking = False
+        self.last_response_end_time = time.time() * 1000
+        self.last_assistant_item = None
+        logger.info(f"AI finished speaking at {self.last_response_end_time}")
+
+    def start_user_speech(self):
+        """Mark that user started speaking"""
+        self.user_speaking = True
+        if self.ai_speaking:
+            self.interruption_count += 1
+            logger.info(f"User interruption #{self.interruption_count}")
+
+    def end_user_speech(self):
+        """Mark that user finished speaking"""
+        self.user_speaking = False
+
+    def should_allow_interruption(self, current_time_ms: float = None) -> bool:
+        """Determine if interruption should be allowed based on context and timing"""
+        if not self.ai_speaking:
+            return False
+
+        if current_time_ms is None:
+            current_time_ms = time.time() * 1000
+
+        # Calculate how long AI has been speaking
+        response_duration = current_time_ms - self.last_response_start_time
+
+        # Don't allow interruption in first 300ms of response (likely false positive)
+        if response_duration < 300:
+            logger.info(
+                f"Blocking interruption - too early ({response_duration}ms)")
+            return False
+
+        # Allow interruption if AI has been speaking for more than 2 seconds
+        if response_duration > 2000:
+            logger.info(
+                f"Allowing interruption - long response ({response_duration}ms)")
+            return True
+
+        # Check for pause keywords in recent conversation context
+        recent_context = " ".join(self.conversation_context[-3:]).lower()
+        for keyword in self.pause_keywords:
+            if keyword in recent_context:
+                logger.info(
+                    f"Allowing interruption - pause keyword detected: {keyword}")
+                return True
+
+        # Default: allow interruption after 500ms
+        if response_duration > 500:
+            logger.info(
+                f"Allowing interruption - normal timing ({response_duration}ms)")
+            return True
+
+        logger.info(
+            f"Blocking interruption - too early ({response_duration}ms)")
+        return False
+
+    def add_context(self, text: str, role: str = "user"):
+        """Add conversation context for better decision making"""
+        self.conversation_context.append(f"{role}: {text}")
+        # Keep only last 10 messages for context
+        if len(self.conversation_context) > 10:
+            self.conversation_context.pop(0)
+
 
 # After load_dotenv(), add these debug lines:
 logger.info("Environment variables loaded:")
@@ -1570,97 +1662,6 @@ async def send_mark(connection, stream_sid):
         }
         await connection.send_json(mark_event)
         return 'responsePart'
-
-
-# Enhanced Conversation State Management
-class ConversationState:
-    def __init__(self):
-        self.ai_speaking = False
-        self.user_speaking = False
-        self.last_response_start_time = 0
-        self.last_response_end_time = 0
-        self.interruption_count = 0
-        self.conversation_context = []
-        self.pause_keywords = [
-            "wait", "hold on", "give me a second", "let me think", "one moment", "hang on"]
-        self.last_assistant_item = None
-        self.response_start_timestamp = 0
-
-    def start_ai_response(self, assistant_item_id: str = None):
-        """Mark that AI started speaking"""
-        self.ai_speaking = True
-        self.user_speaking = False
-        self.last_response_start_time = time.time() * 1000
-        self.response_start_timestamp = self.last_response_start_time
-        if assistant_item_id:
-            self.last_assistant_item = assistant_item_id
-        logger.info(f"AI started speaking at {self.last_response_start_time}")
-
-    def end_ai_response(self):
-        """Mark that AI finished speaking"""
-        self.ai_speaking = False
-        self.last_response_end_time = time.time() * 1000
-        self.last_assistant_item = None
-        logger.info(f"AI finished speaking at {self.last_response_end_time}")
-
-    def start_user_speech(self):
-        """Mark that user started speaking"""
-        self.user_speaking = True
-        if self.ai_speaking:
-            self.interruption_count += 1
-            logger.info(f"User interruption #{self.interruption_count}")
-
-    def end_user_speech(self):
-        """Mark that user finished speaking"""
-        self.user_speaking = False
-
-    def should_allow_interruption(self, current_time_ms: float = None) -> bool:
-        """Determine if interruption should be allowed based on context and timing"""
-        if not self.ai_speaking:
-            return False
-
-        if current_time_ms is None:
-            current_time_ms = time.time() * 1000
-
-        # Calculate how long AI has been speaking
-        response_duration = current_time_ms - self.last_response_start_time
-
-        # Don't allow interruption in first 300ms of response (likely false positive)
-        if response_duration < 300:
-            logger.info(
-                f"Blocking interruption - too early ({response_duration}ms)")
-            return False
-
-        # Allow interruption if AI has been speaking for more than 2 seconds
-        if response_duration > 2000:
-            logger.info(
-                f"Allowing interruption - long response ({response_duration}ms)")
-            return True
-
-        # Check for pause keywords in recent conversation context
-        recent_context = " ".join(self.conversation_context[-3:]).lower()
-        for keyword in self.pause_keywords:
-            if keyword in recent_context:
-                logger.info(
-                    f"Allowing interruption - pause keyword detected: {keyword}")
-                return True
-
-        # Default: allow interruption after 500ms
-        if response_duration > 500:
-            logger.info(
-                f"Allowing interruption - normal timing ({response_duration}ms)")
-            return True
-
-        logger.info(
-            f"Blocking interruption - too early ({response_duration}ms)")
-        return False
-
-    def add_context(self, text: str, role: str = "user"):
-        """Add conversation context for better decision making"""
-        self.conversation_context.append(f"{role}: {text}")
-        # Keep only last 10 messages for context
-        if len(self.conversation_context) > 10:
-            self.conversation_context.pop(0)
 
 
 async def enhanced_handle_speech_started_event(websocket, openai_ws, shared_state, conversation_state: ConversationState = None):
