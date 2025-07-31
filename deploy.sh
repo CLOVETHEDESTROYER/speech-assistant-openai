@@ -18,6 +18,9 @@ rsync -avz --exclude 'venv' \
     --exclude '*.pyc' \
     --exclude '.env.development' \
     --exclude 'local.db' \
+    --exclude 'dev.env' \
+    --exclude '*.db' \
+    --exclude 'logs/*' \
     ./ root@$DROPLET_IP:$APP_DIR/
 
 # SSH into the server and run setup commands
@@ -33,6 +36,9 @@ ssh root@$DROPLET_IP << 'EOF'
     source venv/bin/activate
     pip install -r requirements.txt
     pip install gunicorn
+
+    # Run database migrations
+    python3 -m alembic upgrade head
 
     # Ensure the service is properly configured
     sudo systemctl daemon-reload

@@ -36,6 +36,7 @@ from app.services.transcription import TranscriptionService
 from app.services.conversation_service import ConversationService
 from os import getenv
 from app.realtime_manager import OpenAIRealtimeManager
+from app.vad_config import VADConfig
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
 from app.db import engine, get_db, SessionLocal, Base
 from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
@@ -955,18 +956,19 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                 shared_state["stream_sid"] = data.get("streamSid")
                 logger.info(f"Stream started: {shared_state['stream_sid']}")
 
-                # Initialize session with optimized turn detection
+                # Get scenario name for VAD optimization
+                scenario_name = shared_state.get("scenario_name", "default")
+                vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+
+                # Initialize session with enhanced VAD configuration
                 await openai_ws.send(json.dumps({
                     "type": "session.update",
                     "session": {
-                        "turn_detection": {
-                            "type": "server_vad",
-                            "threshold": 0.5,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 700
-                        }
+                        "turn_detection": vad_config
                     }
                 }))
+                logger.info(
+                    f"Enhanced VAD configuration applied: {vad_config}")
             elif data.get("event") == "stop":
                 logger.info("Stream stopped")
                 shared_state["should_stop"] = True
@@ -1119,12 +1121,16 @@ async def process_outgoing_audio(audio_data, call_sid,  speaker="AI", scenario_n
 
 
 async def send_session_update(openai_ws, scenario):
-    """Send scenario information to OpenAI."""
+    """Send scenario information to OpenAI with enhanced VAD configuration."""
     try:
+        # Get optimized VAD configuration for this scenario
+        scenario_name = scenario.get("name", "default")
+        vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+
         session_data = {
             "type": "session.update",
             "session": {
-                "turn_detection": {"type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300, "silence_duration_ms": 700},
+                "turn_detection": vad_config,
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
@@ -1139,7 +1145,7 @@ async def send_session_update(openai_ws, scenario):
         }
 
         logger.info(
-            f"Sending session update: {json.dumps(session_data, indent=2)}")
+            f"Sending enhanced session update with VAD config: {vad_config}")
         await openai_ws.send(json.dumps(session_data))
         logger.info(f"Session update sent for persona: {scenario['persona']}")
     except Exception as e:
@@ -1540,16 +1546,15 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
         elif direction == "inbound":
             additional_instructions = "Ask for the caller's name if appropriate for the conversation."
 
-        # Generate session update payload
+        # Get optimized VAD configuration for this scenario
+        scenario_name = scenario.get("name", "default")
+        vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+
+        # Generate session update payload with enhanced VAD
         session_data = {
             "type": "session.update",
             "session": {
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 700
-                },
+                "turn_detection": vad_config,
                 "input_audio_format": "g711_ulaw",
                 "output_audio_format": "g711_ulaw",
                 "instructions": (
@@ -1569,7 +1574,7 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
         }
 
         logger.info(
-            f"Sending session update: {json.dumps(session_data, indent=2)}")
+            f"Sending enhanced session update with VAD config: {vad_config}")
         await openai_ws.send(json.dumps(session_data))
         logger.info(f"Session update sent for persona: {scenario['persona']}")
     except Exception as e:
@@ -5196,7 +5201,7 @@ async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user
                             "type": "server_vad",
                             "threshold": 0.5,
                             "prefix_padding_ms": 300,
-                            "silence_duration_ms": 700
+                            "silence_duration_ms": 500
                         }
                     }
                 }))
@@ -5490,3 +5495,58 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
         logger.error(
             f"Error in backward compatibility handler: {e}", exc_info=True)
         return False
+
+
+# Add new API endpoints for VAD configuration management
+@app.post("/api/vad-config/update")
+async def update_vad_config(
+    request: Request,
+    vad_type: str = Body(..., regex="^(server_vad|semantic_vad)$"),
+    eagerness: str = Body("auto", regex="^(low|medium|high|auto)$"),
+    threshold: float = Body(0.5, ge=0.0, le=1.0),
+    prefix_padding_ms: int = Body(300, ge=0, le=2000),
+    silence_duration_ms: int = Body(700, ge=100, le=5000),
+    current_user: User = Depends(get_current_user)
+):
+    """Update VAD configuration for the current session."""
+    try:
+        vad_config = VADConfig.get_vad_config(
+            vad_type=vad_type,
+            eagerness=eagerness,
+            threshold=threshold,
+            prefix_padding_ms=prefix_padding_ms,
+            silence_duration_ms=silence_duration_ms
+        )
+
+        # Store user's VAD preference in database or session
+        # This could be extended to save user preferences
+
+        return {
+            "success": True,
+            "vad_config": vad_config,
+            "message": f"VAD configuration updated to {vad_type} mode"
+        }
+    except Exception as e:
+        logger.error(f"Error updating VAD config: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/vad-config/presets")
+async def get_vad_presets(current_user: User = Depends(get_current_user)):
+    """Get available VAD configuration presets."""
+    return {
+        "presets": {
+            "conversational": VADConfig.CONVERSATIONAL_VAD,
+            "responsive": VADConfig.RESPONSIVE_VAD,
+            "noisy_environment": VADConfig.NOISY_ENVIRONMENT_VAD,
+            "default_server": VADConfig.DEFAULT_SERVER_VAD,
+            "default_semantic": VADConfig.DEFAULT_SEMANTIC_VAD
+        },
+        "description": {
+            "conversational": "Optimized for natural conversations, allows users to speak uninterrupted",
+            "responsive": "Quick responses, more likely to interrupt for faster interaction",
+            "noisy_environment": "Higher threshold for noisy environments, longer silence detection",
+            "default_server": "Standard server VAD with balanced settings",
+            "default_semantic": "Standard semantic VAD with auto eagerness"
+        }
+    }

@@ -1,11 +1,11 @@
-import logging
+import os
 import json
-import asyncio
+import uuid
+import logging
 import websockets
-from typing import Dict, Optional
 from datetime import datetime
-from fastapi import WebSocket, WebSocketDisconnect
-import aiohttp
+from typing import Optional, Dict, Any
+from app.vad_config import VADConfig  # Import the VAD configuration class
 
 logger = logging.getLogger(__name__)
 
@@ -21,30 +21,29 @@ class OpenAIRealtimeManager:
         self.logger.setLevel(logging.DEBUG)
 
     async def create_session(self, user_id: str, scenario: dict) -> dict:
-        """Create a new session with OpenAI's Realtime API."""
+        """Create a new realtime session with enhanced VAD configuration."""
         try:
-            session_id = f"session_{user_id}_{datetime.utcnow().timestamp()}"
+            session_id = str(uuid.uuid4())
 
-            # Connect to OpenAI's Realtime API
             async with websockets.connect(
                 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
-
                 extra_headers={
                     "Authorization": f"Bearer {self.openai_api_key}",
                     "OpenAI-Beta": "realtime=v1"
-                }
+                },
+                ping_interval=20,
+                ping_timeout=60,
+                close_timeout=60
             ) as openai_ws:
-                # Initialize session configuration
+                # Get optimized VAD configuration for this scenario
+                scenario_name = scenario.get("name", "default")
+                vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+
+                # Initialize session configuration with enhanced VAD
                 session_config = {
                     "type": "session.update",
                     "session": {
-                        "turn_detection": {
-                            "type": "server_vad",
-                            "threshold": 0.5,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 700,
-                            "create_response": True
-                        },
+                        "turn_detection": vad_config,
                         "input_audio_format": "g711_ulaw",
                         "output_audio_format": "g711_ulaw",
                         "sample_rate": 16000,
@@ -60,27 +59,32 @@ class OpenAIRealtimeManager:
                 session_response = json.loads(response)
 
                 if session_response.get("type") == "error":
-                    raise Exception(f"OpenAI session error: {
-                                    session_response}")
+                    raise Exception(
+                        f"OpenAI session error: {session_response}")
 
                 # Store session information
                 self.active_sessions[session_id] = {
                     "openai_ws": openai_ws,
                     "user_id": user_id,
                     "scenario": scenario,
+                    "vad_config": vad_config,  # Store VAD config for reference
                     "created_at": datetime.utcnow(),
                     "ice_servers": self.ice_servers
                 }
 
+                self.logger.info(
+                    f"Session created with VAD config: {vad_config}")
+
                 return {
                     "session_id": session_id,
                     "ice_servers": self.ice_servers,
+                    "vad_config": vad_config,
                     "created_at": datetime.utcnow().isoformat()
                 }
 
         except Exception as e:
-            self.logger.error(f"Error creating session: {
-                              str(e)}", exc_info=True)
+            self.logger.error(
+                f"Error creating session: {str(e)}", exc_info=True)
             raise
 
     async def handle_signaling(self, session_id: str, signal_data: dict) -> dict:
