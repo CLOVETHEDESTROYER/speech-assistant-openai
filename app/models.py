@@ -17,7 +17,8 @@ class AppType(enum.Enum):
 class SubscriptionTier(enum.Enum):
     # Mobile Consumer Tiers
     MOBILE_FREE_TRIAL = "mobile_free_trial"
-    MOBILE_WEEKLY = "mobile_weekly"
+    MOBILE_BASIC = "mobile_basic"        # $4.99/week, 5 calls/week
+    MOBILE_PREMIUM = "mobile_premium"    # $25/month, 30 calls/month
 
     # Business Tiers
     BUSINESS_FREE_TRIAL = "business_free_trial"
@@ -102,6 +103,7 @@ class Conversation(Base):
     transcript = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     transcript_sid = Column(String, nullable=True)
+    duration_limit = Column(Integer, nullable=True)  # seconds
 
 
 class TranscriptRecord(Base):
@@ -291,6 +293,12 @@ class UsageLimits(Base):
     # App Store integration
     app_store_transaction_id = Column(String, nullable=True)
     app_store_product_id = Column(String, nullable=True)
+
+    # Enhanced mobile usage tracking
+    total_call_duration_this_week = Column(Integer, default=0)  # seconds
+    total_call_duration_this_month = Column(Integer, default=0)  # seconds
+    addon_calls_remaining = Column(Integer, default=0)
+    addon_calls_expiry = Column(DateTime, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

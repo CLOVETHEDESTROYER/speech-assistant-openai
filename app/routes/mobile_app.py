@@ -10,6 +10,21 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List
 import logging
 import os
+from datetime import datetime
+from twilio.rest import Client
+from app import config
+from app.utils.url_helpers import clean_and_validate_url
+
+
+def create_error_response(error_type: str, message: str, upgrade_options: list = None):
+    """Create consistent error responses"""
+    return {
+        "error": error_type,
+        "message": message,
+        "upgrade_options": upgrade_options or [],
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mobile", tags=["mobile"])
@@ -26,6 +41,12 @@ class SubscriptionUpgradeRequest(BaseModel):
     receipt_data: str  # Base64 encoded receipt data from App Store
     is_sandbox: bool = False  # Whether this is a sandbox receipt
     subscription_tier: str = "mobile_weekly"
+
+
+class AppStorePurchaseRequest(BaseModel):
+    receipt_data: str  # Base64 encoded receipt data
+    is_sandbox: bool = False
+    product_id: str  # e.g., "speech_assistant_basic_weekly"
 
 
 class AppStoreWebhookRequest(BaseModel):
@@ -120,59 +141,73 @@ async def make_mobile_call(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Make a call specifically for mobile users with usage tracking"""
+    """Enhanced mobile call with duration tracking and limits"""
     try:
+        # Check and reset limits if needed (7-day/30-day cycles)
+        UsageService.check_and_reset_limits(current_user.id, db)
+
         # Check if user can make a call
         can_call, status_code, details = UsageService.can_make_call(
             current_user.id, db)
 
         if not can_call:
-            if status_code == "trial_calls_exhausted":
-                raise HTTPException(
-                    status_code=402,  # Payment Required
-                    detail={
-                        "error": "trial_exhausted",
-                        "message": "Your 3 free trial calls have been used. Upgrade to $4.99/week for unlimited calls!",
-                        "upgrade_url": "/mobile/upgrade"
-                    }
-                )
-            elif status_code == "upgrade_required":
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "error": "upgrade_required",
-                        "message": "Please upgrade to continue making calls",
-                        "pricing": details.get("pricing")
-                    }
-                )
-            else:
-                raise HTTPException(status_code=400, detail=details.get(
-                    "message", "Cannot make call"))
+            error_response = create_error_response(
+                status_code,
+                details.get("message", "Cannot make call"),
+                details.get("upgrade_options", [])
+            )
+            raise HTTPException(status_code=402, detail=error_response)
 
-        # Use system phone number for mobile users (they don't need individual numbers)
+        # Get duration limit from permission check
+        duration_limit = details.get("duration_limit", 60)
+
+        # Store call info in Conversation before making the call
+        from app.models import Conversation
+        conversation = Conversation(
+            user_id=current_user.id,
+            scenario=call_request.scenario,
+            phone_number=call_request.phone_number,
+            direction="outbound",
+            status="initiated",
+            call_sid=None,  # Will be set after call creation
+            duration_limit=duration_limit
+        )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+        # Use system phone number for mobile users
         from_number = os.getenv('TWILIO_PHONE_NUMBER')
         if not from_number:
             raise HTTPException(
                 status_code=500, detail="System phone number not configured")
 
-        # Import Twilio client
-        from twilio.rest import Client
-
+        # Create call with duration tracking
         client = Client(
             os.getenv('TWILIO_ACCOUNT_SID'),
             os.getenv('TWILIO_AUTH_TOKEN')
         )
 
-        # Create call using shared system number
+        # Use the same URL construction pattern as the regular endpoint
+        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        webhook_url = f"{base_url}/outgoing-call/{call_request.scenario}"
+        status_callback_url = f"{base_url}/call-end-webhook"
+
         call = client.calls.create(
             to=call_request.phone_number,
             from_=from_number,
-            url=f"{os.getenv('PUBLIC_URL', 'https://your-domain.com')}/outgoing-call/{call_request.scenario}",
-            method='POST'
+            url=webhook_url,
+            method='POST',
+            status_callback=status_callback_url,
+            status_callback_event=['completed']
         )
 
-        # Record the call in usage statistics
-        UsageService.record_call(current_user.id, db)
+        # Update conversation with call SID
+        conversation.call_sid = call.sid
+        db.commit()
+
+        # Record the call start (duration will be recorded when call ends)
+        UsageService.record_call_start(current_user.id, db)
 
         # Get updated stats
         updated_stats = UsageService.get_usage_stats(current_user.id, db)
@@ -180,9 +215,11 @@ async def make_mobile_call(
         return {
             "call_sid": call.sid,
             "status": "initiated",
+            "duration_limit": duration_limit,
             "usage_stats": {
-                "trial_calls_remaining": updated_stats.get("trial_calls_remaining", 0),
-                "calls_made_total": updated_stats.get("calls_made_total", 0),
+                "calls_remaining_this_week": updated_stats.get("calls_remaining_this_week", 0),
+                "calls_remaining_this_month": updated_stats.get("calls_remaining_this_month", 0),
+                "addon_calls_remaining": updated_stats.get("addon_calls_remaining", 0),
                 "upgrade_recommended": updated_stats.get("upgrade_recommended", False)
             }
         }
@@ -278,46 +315,234 @@ async def upgrade_mobile_subscription(
             status_code=500, detail="Unable to upgrade subscription")
 
 
+@router.post("/purchase-subscription")
+async def purchase_subscription(
+    purchase_request: AppStorePurchaseRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Purchase subscription or addon calls via App Store"""
+    try:
+        # Validate the App Store receipt
+        receipt_validation = AppStoreService.validate_receipt(
+            purchase_request.receipt_data,
+            is_sandbox=purchase_request.is_sandbox
+        )
+
+        # Extract subscription information
+        subscription_info = AppStoreService.extract_subscription_info(
+            receipt_validation)
+
+        # Validate product ID
+        if subscription_info.get("product_id") != purchase_request.product_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Product ID mismatch"
+            )
+
+        # Check if transaction already processed
+        existing_usage = db.query(UsageLimits).filter(
+            UsageLimits.app_store_transaction_id == subscription_info.get(
+                "transaction_id")
+        ).first()
+
+        if existing_usage:
+            raise HTTPException(
+                status_code=400,
+                detail="This transaction has already been processed"
+            )
+
+        # Process based on product type
+        if purchase_request.product_id == "speech_assistant_basic_weekly":
+            success = UsageService.upgrade_to_basic_subscription(
+                current_user.id, subscription_info, db
+            )
+        elif purchase_request.product_id == "speech_assistant_premium_monthly":
+            success = UsageService.upgrade_to_premium_subscription(
+                current_user.id, subscription_info, db
+            )
+        elif purchase_request.product_id == "speech_assistant_addon_calls":
+            success = UsageService.purchase_addon_calls(
+                current_user.id, subscription_info, db
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid product ID"
+            )
+
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to process purchase")
+
+        # Get updated stats
+        updated_stats = UsageService.get_usage_stats(current_user.id, db)
+
+        return {
+            "success": True,
+            "message": "Purchase processed successfully!",
+            "usage_stats": updated_stats
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing purchase: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Unable to process purchase")
+
+
 @router.get("/pricing")
 async def get_mobile_pricing():
-    """Get pricing information for mobile app"""
-    return UsageService.get_pricing_info(AppType.MOBILE_CONSUMER)
+    """Get enhanced pricing information for mobile app"""
+    return {
+        "plans": [
+            {
+                "id": "basic",
+                "name": "Basic Plan",
+                "price": "$4.99",
+                "billing": "weekly",
+                "calls": "5 calls per week",
+                "duration_limit": "1 minute per call",
+                "features": ["Unlimited scenarios", "Call history", "Basic support"]
+            },
+            {
+                "id": "premium",
+                "name": "Premium Plan",
+                "price": "$25.00",
+                "billing": "monthly",
+                "calls": "30 calls per month",
+                "duration_limit": "2 minutes per call",
+                "features": ["All Basic features", "Priority support", "Advanced analytics"]
+            }
+        ],
+        "addon": {
+            "id": "addon",
+            "name": "Additional Calls",
+            "price": "$4.99",
+            "calls": "5 additional calls",
+            "expires": "30 days",
+            "description": "Perfect when you need a few more calls"
+        }
+    }
 
 
 @router.get("/scenarios")
 async def get_mobile_scenarios():
-    """Get available scenarios for mobile app (simplified list)"""
+    """Get available scenarios for mobile app (enhanced entertainment list)"""
     return {
         "scenarios": [
             {
-                "id": "default",
-                "name": "Friendly Chat",
-                "description": "A casual, friendly conversation",
-                "icon": "💬"
+                "id": "fake_doctor",
+                "name": "Fake Doctor Call",
+                "description": "Emergency exit with medical urgency",
+                "icon": "🏥",
+                "category": "emergency_exit",
+                "difficulty": "easy"
             },
             {
-                "id": "celebrity",
-                "name": "Celebrity Interview",
-                "description": "Chat with a virtual celebrity",
-                "icon": "🌟"
+                "id": "fake_boss",
+                "name": "Fake Boss Call",
+                "description": "Work emergency for quick escape",
+                "icon": "💼",
+                "category": "work_exit",
+                "difficulty": "medium"
             },
             {
-                "id": "comedian",
-                "name": "Stand-up Comedian",
-                "description": "Funny jokes and comedy bits",
-                "icon": "😂"
+                "id": "fake_tech_support",
+                "name": "Fake Tech Support",
+                "description": "Security breach emergency",
+                "icon": "🔒",
+                "category": "emergency_exit",
+                "difficulty": "medium"
             },
             {
-                "id": "therapist",
-                "name": "Life Coach",
-                "description": "Supportive and motivational conversation",
-                "icon": "🧠"
+                "id": "fake_celebrity",
+                "name": "Celebrity Fan Call",
+                "description": "Chat with a famous person",
+                "icon": "🌟",
+                "category": "fun_interaction",
+                "difficulty": "hard"
             },
             {
-                "id": "storyteller",
-                "name": "Storyteller",
-                "description": "Engaging stories and tales",
-                "icon": "📚"
+                "id": "fake_lottery_winner",
+                "name": "Lottery Winner",
+                "description": "You've won big!",
+                "icon": "💰",
+                "category": "fun_interaction",
+                "difficulty": "hard"
+            },
+            {
+                "id": "fake_restaurant_manager",
+                "name": "Restaurant Manager",
+                "description": "Special reservation confirmation",
+                "icon": "🍴",
+                "category": "social_exit",
+                "difficulty": "easy"
+            },
+            {
+                "id": "fake_dating_app_match",
+                "name": "Dating App Match",
+                "description": "Meet your new match",
+                "icon": "💕",
+                "category": "social_interaction",
+                "difficulty": "hard"
+            },
+            {
+                "id": "fake_old_friend",
+                "name": "Old Friend",
+                "description": "Reconnect with someone from the past",
+                "icon": "👥",
+                "category": "social_interaction",
+                "difficulty": "medium"
+            },
+            {
+                "id": "fake_news_reporter",
+                "name": "News Reporter",
+                "description": "Interview opportunity",
+                "icon": "📰",
+                "category": "social_interaction",
+                "difficulty": "medium"
+            },
+            {
+                "id": "fake_car_accident",
+                "name": "Car Accident",
+                "description": "Minor accident drama",
+                "icon": "🚗",
+                "category": "emergency_exit",
+                "difficulty": "easy"
+            }
+        ],
+        "categories": [
+            {
+                "id": "emergency_exit",
+                "name": "Emergency Exit",
+                "description": "Get out of awkward situations quickly",
+                "icon": "🚨"
+            },
+            {
+                "id": "work_exit",
+                "name": "Work Emergency",
+                "description": "Professional excuses for work situations",
+                "icon": "💼"
+            },
+            {
+                "id": "social_exit",
+                "name": "Social Escape",
+                "description": "Polite ways to exit social situations",
+                "icon": "👥"
+            },
+            {
+                "id": "fun_interaction",
+                "name": "Fun Interactions",
+                "description": "Pure entertainment scenarios",
+                "icon": "🎉"
+            },
+            {
+                "id": "social_interaction",
+                "name": "Social Connection",
+                "description": "Meet new people or reconnect",
+                "icon": "🤝"
             }
         ]
     }

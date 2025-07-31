@@ -2,17 +2,23 @@
 
 ## Overview
 
-This document provides comprehensive integration guidelines for the **Speech Assistant Mobile App** (iOS). The backend provides a complete consumer-focused API with trial management, usage tracking, and subscription handling specifically designed for mobile users.
+This document provides comprehensive integration guidelines for the **Speech Assistant Mobile App** (iOS). The backend provides a complete consumer-focused API with enhanced trial management, usage tracking, duration limits, and subscription handling specifically designed for mobile entertainment users.
 
 ## App Architecture
 
 ### **Consumer Mobile App Features**
 
-- **7-Day Free Trial**: 3 free calls to test the service
-- **Simple Pricing**: $4.99/week for unlimited calls
-- **Fun Scenarios**: 5 pre-selected entertaining call scenarios
+- **7-Day Free Trial**: 3 free calls to test the service (1-minute duration limit)
+- **Enhanced Pricing Tiers**:
+  - **Basic Plan**: $4.99/week for 5 calls (1-minute limit per call)
+  - **Premium Plan**: $25/month for 30 calls (2-minute limit per call)
+  - **Addon Calls**: $4.99 for 5 additional calls (30-day expiry)
+- **Duration Tracking**: Real-time call duration monitoring and limits
+- **7-Day/30-Day Reset Cycles**: Based on user start date (not calendar weeks)
+- **Fun Scenarios**: Pre-selected entertaining call scenarios for pranks and entertainment
 - **Easy Setup**: No complex onboarding - just sign up and start calling
 - **Shared Infrastructure**: Uses system phone numbers (no individual provisioning needed)
+- **App Store Integration**: Complete payment processing through App Store
 
 ---
 
@@ -110,21 +116,22 @@ username=user@example.com&password=securepassword123
   "trial_calls_remaining": 2,
   "trial_calls_used": 1,
   "calls_made_today": 1,
+  "calls_made_this_week": 1,
+  "calls_made_this_month": 1,
   "calls_made_total": 1,
   "is_subscribed": false,
   "subscription_tier": null,
   "upgrade_recommended": false,
-  "pricing": {
-    "weekly_plan": {
-      "price": "$4.99",
-      "billing": "weekly",
-      "features": ["Unlimited calls", "Fun scenarios", "Call friends"]
-    }
-  }
+  "total_call_duration_this_week": 45,
+  "total_call_duration_this_month": 45,
+  "addon_calls_remaining": 0,
+  "addon_calls_expiry": null,
+  "week_start_date": "2024-01-15T10:30:00Z",
+  "month_start_date": "2024-01-15T10:30:00Z"
 }
 ```
 
-**What it does**: Returns comprehensive usage statistics including trial status, call counts, subscription info, and pricing details. Automatically initializes usage limits if not found.
+**What it does**: Returns comprehensive usage statistics including trial status, call counts, duration tracking, subscription info, and reset cycle dates. Automatically initializes usage limits if not found.
 
 ---
 
@@ -141,23 +148,34 @@ username=user@example.com&password=securepassword123
 ```json
 {
   "can_make_call": true,
-  "status": "trial_active",
+  "status": "basic_call_available",
   "details": {
-    "calls_remaining": 2,
-    "trial_ends": "2024-01-15T10:30:00Z",
+    "calls_remaining_this_week": 4,
+    "duration_limit": 60,
     "app_type": "mobile_consumer",
-    "message": "You have 2 trial calls remaining"
+    "message": "You have 4 calls remaining this week"
   }
 }
 ```
 
-**What it does**: Validates if user has available trial calls or active subscription before allowing call initiation. Prevents unnecessary API calls when user can't make calls.
+**Possible Status Values**:
+
+- `trial_call_available` - User has trial calls remaining
+- `basic_call_available` - User has basic subscription calls remaining
+- `premium_call_available` - User has premium subscription calls remaining
+- `addon_call_available` - User has addon calls remaining
+- `trial_exhausted` - Trial calls used up
+- `weekly_limit_reached` - Basic plan weekly limit reached
+- `monthly_limit_reached` - Premium plan monthly limit reached
+- `upgrade_required` - No active trial or subscription
+
+**What it does**: Validates if user has available calls (trial/subscription/addon) and returns duration limits before allowing call initiation. Prevents unnecessary API calls when user can't make calls.
 
 ---
 
 #### **GET /mobile/pricing**
 
-**Purpose**: Get mobile app pricing information
+**Purpose**: Get enhanced mobile app pricing information
 **Headers Required**:
 
 - `Authorization: Bearer <token>`
@@ -167,15 +185,42 @@ username=user@example.com&password=securepassword123
 
 ```json
 {
-  "weekly_plan": {
+  "plans": [
+    {
+      "id": "basic",
+      "name": "Basic Plan",
+      "price": "$4.99",
+      "billing": "weekly",
+      "calls": "5 calls per week",
+      "duration_limit": "1 minute per call",
+      "features": ["Unlimited scenarios", "Call history", "Basic support"]
+    },
+    {
+      "id": "premium",
+      "name": "Premium Plan",
+      "price": "$25.00",
+      "billing": "monthly",
+      "calls": "30 calls per month",
+      "duration_limit": "2 minutes per call",
+      "features": [
+        "All Basic features",
+        "Priority support",
+        "Advanced analytics"
+      ]
+    }
+  ],
+  "addon": {
+    "id": "addon",
+    "name": "Additional Calls",
     "price": "$4.99",
-    "billing": "weekly",
-    "features": ["Unlimited calls", "Fun scenarios", "Call friends"]
+    "calls": "5 additional calls",
+    "expires": "30 days",
+    "description": "Perfect when you need a few more calls"
   }
 }
 ```
 
-**What it does**: Returns mobile-specific pricing information for display in upgrade prompts and pricing screens.
+**What it does**: Returns comprehensive pricing information including all subscription tiers, duration limits, and addon options for display in upgrade prompts and pricing screens.
 
 ---
 
@@ -234,7 +279,7 @@ username=user@example.com&password=securepassword123
 
 #### **POST /mobile/make-call**
 
-**Purpose**: Initiate a phone call with usage tracking
+**Purpose**: Initiate a phone call with enhanced usage tracking and duration limits
 **Headers Required**:
 
 - `Authorization: Bearer <token>`
@@ -256,9 +301,11 @@ username=user@example.com&password=securepassword123
 {
   "call_sid": "CA1234567890abcdef",
   "status": "initiated",
+  "duration_limit": 60,
   "usage_stats": {
-    "trial_calls_remaining": 1,
-    "calls_made_total": 2,
+    "calls_remaining_this_week": 4,
+    "calls_remaining_this_month": 29,
+    "addon_calls_remaining": 0,
     "upgrade_recommended": false
   }
 }
@@ -270,19 +317,35 @@ username=user@example.com&password=securepassword123
 {
   "detail": {
     "error": "trial_exhausted",
-    "message": "Your 3 free trial calls have been used. Upgrade to $4.99/week for unlimited calls!",
-    "upgrade_url": "/mobile/upgrade"
+    "message": "Trial calls exhausted. Upgrade to Basic ($4.99/week) for 5 calls per week!",
+    "upgrade_options": [
+      {
+        "plan": "basic",
+        "price": "$4.99",
+        "calls": "5/week",
+        "product_id": "speech_assistant_basic_weekly"
+      },
+      {
+        "plan": "premium",
+        "price": "$25.00",
+        "calls": "30/month",
+        "product_id": "speech_assistant_premium_monthly"
+      }
+    ],
+    "timestamp": "2024-01-15T10:30:00Z"
   }
 }
 ```
 
 **What it does**:
 
-1. Validates user can make calls (trial/subscription)
-2. Uses shared system phone number (no individual provisioning needed)
-3. Initiates Twilio call with selected scenario
-4. Records call in usage statistics
-5. Returns updated usage stats
+1. **Checks and resets limits** based on 7-day/30-day cycles from user start date
+2. **Validates user can make calls** (trial/subscription/addon calls)
+3. **Applies duration limits** (60s for basic/trial, 120s for premium)
+4. **Uses shared system phone number** (no individual provisioning needed)
+5. **Initiates Twilio call** with duration tracking and status callback
+6. **Records call start** (duration recorded when call ends)
+7. **Returns updated usage stats** with remaining calls and limits
 
 ---
 
@@ -357,9 +420,61 @@ username=user@example.com&password=securepassword123
 
 ### **Subscription Management Endpoints**
 
-#### **POST /mobile/upgrade-subscription**
+#### **POST /mobile/purchase-subscription**
 
-**Purpose**: Handle App Store subscription purchases with receipt validation
+**Purpose**: Handle App Store subscription and addon purchases with receipt validation
+**Headers Required**:
+
+- `Authorization: Bearer <token>`
+- `X-App-Type: mobile`
+- `Content-Type: application/json`
+
+**Request Body**:
+
+```json
+{
+  "receipt_data": "base64_encoded_receipt_from_app_store",
+  "is_sandbox": false,
+  "product_id": "speech_assistant_basic_weekly"
+}
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "message": "Purchase processed successfully!",
+  "usage_stats": {
+    "subscription_tier": "mobile_basic",
+    "is_subscribed": true,
+    "calls_remaining_this_week": 5,
+    "calls_remaining_this_month": 30,
+    "addon_calls_remaining": 0
+  }
+}
+```
+
+**Supported Product IDs**:
+
+- `speech_assistant_basic_weekly` - Basic Plan ($4.99/week, 5 calls)
+- `speech_assistant_premium_monthly` - Premium Plan ($25/month, 30 calls)
+- `speech_assistant_addon_calls` - Addon Calls ($4.99, 5 additional calls)
+
+**What it does**:
+
+1. **Validates App Store receipt** with Apple's servers
+2. **Extracts subscription information** from validated receipt
+3. **Prevents duplicate processing** of the same transaction
+4. **Processes based on product type** (subscription or addon)
+5. **Updates user limits** with proper reset cycles and expiration dates
+6. **Returns updated usage statistics**
+
+---
+
+#### **POST /mobile/upgrade-subscription** _(Legacy - Use purchase-subscription instead)_
+
+**Purpose**: Handle legacy App Store subscription purchases
 **Headers Required**:
 
 - `Authorization: Bearer <token>`
@@ -470,6 +585,33 @@ username=user@example.com&password=securepassword123
 
 ---
 
+## Call Duration Tracking & Limits
+
+### **Duration Limits by Plan**
+
+- **Trial**: 60 seconds per call
+- **Basic Plan**: 60 seconds per call
+- **Premium Plan**: 120 seconds per call
+- **Addon Calls**: Follows the user's current plan limit
+
+### **Call End Webhook**
+
+The backend automatically tracks call duration through Twilio's status callback system:
+
+- **Endpoint**: `/call-end-webhook`
+- **Trigger**: When a call completes (status: completed)
+- **Data**: CallSid and CallDuration from Twilio
+- **Action**: Updates user's usage with actual call duration
+
+### **Duration Enforcement**
+
+- **Simple enforcement**: Calls are automatically terminated when duration limit is reached
+- **No AI warnings**: Clean termination without interruption messages
+- **Real-time tracking**: Duration is monitored during the call
+- **Accurate billing**: Actual call duration is recorded for usage tracking
+
+---
+
 ## Authentication Flow
 
 ### **1. User Registration**
@@ -563,21 +705,42 @@ struct UsageStats: Codable {
     let trial_calls_remaining: Int
     let trial_calls_used: Int
     let calls_made_today: Int
+    let calls_made_this_week: Int
+    let calls_made_this_month: Int
     let calls_made_total: Int
     let is_subscribed: Bool
     let subscription_tier: String?
     let upgrade_recommended: Bool
-    let pricing: PricingInfo?
+    let total_call_duration_this_week: Int?
+    let total_call_duration_this_month: Int?
+    let addon_calls_remaining: Int?
+    let addon_calls_expiry: String?
+    let week_start_date: String?
+    let month_start_date: String?
 }
 
 struct PricingInfo: Codable {
-    let weekly_plan: PricingPlan
+    let plans: [PricingPlan]
+    let addon: AddonPlan
 }
 
 struct PricingPlan: Codable {
+    let id: String
+    let name: String
     let price: String
     let billing: String
+    let calls: String
+    let duration_limit: String
     let features: [String]
+}
+
+struct AddonPlan: Codable {
+    let id: String
+    let name: String
+    let price: String
+    let calls: String
+    let expires: String
+    let description: String
 }
 
 func getUsageStats() async throws -> UsageStats {
@@ -605,11 +768,21 @@ struct CallPermission: Codable {
 }
 
 struct CallPermissionDetails: Codable {
-    let calls_remaining: Int?
+    let calls_remaining_this_week: Int?
+    let calls_remaining_this_month: Int?
+    let duration_limit: Int?
+    let addon_calls_remaining: Int?
     let trial_ends: String?
     let app_type: String?
     let message: String?
-    let pricing: PricingInfo?
+    let upgrade_options: [UpgradeOption]?
+}
+
+struct UpgradeOption: Codable {
+    let plan: String
+    let price: String
+    let calls: String
+    let product_id: String
 }
 
 func checkCallPermission() async throws -> CallPermission {
@@ -666,12 +839,14 @@ struct MakeCallRequest: Codable {
 struct CallResponse: Codable {
     let call_sid: String
     let status: String
+    let duration_limit: Int
     let usage_stats: UsageStatsUpdate
 }
 
 struct UsageStatsUpdate: Codable {
-    let trial_calls_remaining: Int
-    let calls_made_total: Int
+    let calls_remaining_this_week: Int?
+    let calls_remaining_this_month: Int?
+    let addon_calls_remaining: Int?
     let upgrade_recommended: Bool
 }
 
@@ -724,7 +899,7 @@ enum CallError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .trialExhausted:
-            return "Your 3 free trial calls have been used. Upgrade to $4.99/week for unlimited calls!"
+            return "Your 3 free trial calls have been used. Upgrade to Basic ($4.99/week) for 5 calls per week!"
         case .permissionDenied(let message):
             return message
         case .paymentRequired(let error):
@@ -742,8 +917,8 @@ struct PaymentRequiredError: Codable {
 struct PaymentDetail: Codable {
     let error: String
     let message: String
-    let upgrade_url: String?
-    let pricing: PricingInfo?
+    let upgrade_options: [UpgradeOption]?
+    let timestamp: String?
 }
 ```
 
@@ -759,7 +934,11 @@ import StoreKit
 class SubscriptionManager: NSObject, ObservableObject {
     @Published var isSubscribed = false
 
-    private let productID = "speech_assistant_weekly"
+    private let productIDs = [
+        "speech_assistant_basic_weekly",
+        "speech_assistant_premium_monthly",
+        "speech_assistant_addon_calls"
+    ]
     private var product: Product?
 
     override init() {
@@ -771,15 +950,16 @@ class SubscriptionManager: NSObject, ObservableObject {
 
     func loadProducts() async {
         do {
-            let products = try await Product.products(for: [productID])
-            self.product = products.first
+            let products = try await Product.products(for: productIDs)
+            // Store all products for different subscription tiers
+            self.products = products
         } catch {
             print("Failed to load products: \(error)")
         }
     }
 
-    func purchaseSubscription() async throws {
-        guard let product = product else {
+    func purchaseSubscription(productID: String) async throws {
+        guard let product = products.first(where: { $0.id == productID }) else {
             throw SubscriptionError.productNotFound
         }
 
@@ -790,7 +970,7 @@ class SubscriptionManager: NSObject, ObservableObject {
             let transaction = try checkVerified(verification)
 
             // Send to backend
-            try await upgradeSubscription(transaction: transaction)
+            try await purchaseSubscription(productID: product.id, transaction: transaction)
 
             await transaction.finish()
             self.isSubscribed = true
@@ -834,8 +1014,8 @@ struct UpgradeResponse: Codable {
     let usage_stats: UsageStats
 }
 
-func upgradeSubscription(transaction: Transaction) async throws -> UpgradeResponse {
-    let url = URL(string: "\(baseURL)/mobile/upgrade-subscription")!
+func purchaseSubscription(productID: String, transaction: Transaction) async throws -> PurchaseResponse {
+    let url = URL(string: "\(baseURL)/mobile/purchase-subscription")!
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -851,12 +1031,12 @@ func upgradeSubscription(transaction: Transaction) async throws -> UpgradeRespon
     // Determine if this is a sandbox receipt
     let isSandbox = transaction.environment == .sandbox
 
-    let upgradeData = UpgradeRequest(
+    let purchaseData = PurchaseRequest(
         receipt_data: receiptString,
         is_sandbox: isSandbox,
-        subscription_tier: "mobile_weekly"
+        product_id: productID
     )
-    request.httpBody = try JSONEncoder().encode(upgradeData)
+    request.httpBody = try JSONEncoder().encode(purchaseData)
 
     let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -873,10 +1053,22 @@ func upgradeSubscription(transaction: Transaction) async throws -> UpgradeRespon
         }
     }
 
-    return try JSONDecoder().decode(UpgradeResponse.self, from: data)
+    return try JSONDecoder().decode(PurchaseResponse.self, from: data)
 }
 
-// Error handling for subscription upgrades
+struct PurchaseRequest: Codable {
+    let receipt_data: String
+    let is_sandbox: Bool
+    let product_id: String
+}
+
+struct PurchaseResponse: Codable {
+    let success: Bool
+    let message: String
+    let usage_stats: UsageStats
+}
+
+// Error handling for subscription purchases
 enum SubscriptionError: Error, LocalizedError {
     case productNotFound
     case userCancelled
@@ -900,7 +1092,7 @@ enum SubscriptionError: Error, LocalizedError {
     }
 }
 
-struct UpgradeError: Codable {
+struct PurchaseError: Codable {
     let detail: String
 }
 ```
@@ -955,14 +1147,23 @@ struct CallScreen: View {
             }
             .disabled(!canMakeCall)
 
-            // Upgrade Button (if needed)
+            // Upgrade Buttons (if needed)
             if usageStats?.upgrade_recommended == true {
-                Button("Upgrade to Unlimited ($4.99/week)") {
-                    Task {
-                        try await subscriptionManager.purchaseSubscription()
+                VStack(spacing: 10) {
+                    Button("Upgrade to Basic ($4.99/week)") {
+                        Task {
+                            try await subscriptionManager.purchaseSubscription(productID: "speech_assistant_basic_weekly")
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Upgrade to Premium ($25/month)") {
+                        Task {
+                            try await subscriptionManager.purchaseSubscription(productID: "speech_assistant_premium_monthly")
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding()
@@ -975,7 +1176,7 @@ struct CallScreen: View {
 
     private var canMakeCall: Bool {
         guard let stats = usageStats else { return false }
-        return stats.is_subscribed || stats.trial_calls_remaining > 0
+        return stats.is_subscribed || stats.trial_calls_remaining > 0 || (stats.addon_calls_remaining ?? 0) > 0
     }
 
     private func makeCall() {
@@ -1028,11 +1229,11 @@ struct UsageStatsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Trial Status")
+                Text("Plan Status")
                     .font(.headline)
                 Spacer()
                 if stats.is_subscribed {
-                    Text("Subscribed ✅")
+                    Text("\(stats.subscription_tier?.replacingOccurrences(of: "mobile_", with: "").capitalized ?? "Subscribed") ✅")
                         .foregroundColor(.green)
                 } else if stats.is_trial_active {
                     Text("Trial Active")
@@ -1045,11 +1246,39 @@ struct UsageStatsView: View {
 
             if stats.is_trial_active && !stats.is_subscribed {
                 HStack {
-                    Text("Calls Remaining:")
+                    Text("Trial Calls Remaining:")
                     Spacer()
                     Text("\(stats.trial_calls_remaining)")
                         .fontWeight(.bold)
                         .foregroundColor(stats.trial_calls_remaining > 0 ? .green : .red)
+                }
+            }
+
+            if stats.is_subscribed {
+                if stats.subscription_tier == "mobile_basic" {
+                    HStack {
+                        Text("Calls This Week:")
+                        Spacer()
+                        Text("\(stats.calls_made_this_week ?? 0)/5")
+                            .fontWeight(.bold)
+                    }
+                } else if stats.subscription_tier == "mobile_premium" {
+                    HStack {
+                        Text("Calls This Month:")
+                        Spacer()
+                        Text("\(stats.calls_made_this_month ?? 0)/30")
+                            .fontWeight(.bold)
+                    }
+                }
+            }
+
+            if let addonCalls = stats.addon_calls_remaining, addonCalls > 0 {
+                HStack {
+                    Text("Addon Calls:")
+                    Spacer()
+                    Text("\(addonCalls)")
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
                 }
             }
 
@@ -1230,4 +1459,46 @@ curl -X POST http://localhost:5050/mobile/make-call \
   -d '{"phone_number":"+1234567890","scenario":"default"}'
 ```
 
-This comprehensive guide provides everything your iOS development team needs to integrate with the Speech Assistant backend API. The mobile app will have a clean, simple user experience focused on fun calling scenarios with a straightforward trial-to-subscription conversion flow.
+## 🎉 Enhanced Mobile Features Summary
+
+### **New Features Implemented**
+
+✅ **Enhanced Pricing Tiers**
+
+- Basic Plan: $4.99/week (5 calls, 1-minute limit)
+- Premium Plan: $25/month (30 calls, 2-minute limit)
+- Addon Calls: $4.99 (5 additional calls, 30-day expiry)
+
+✅ **Duration Tracking & Limits**
+
+- Real-time call duration monitoring
+- Automatic call termination at limits
+- Duration tracking for usage analytics
+
+✅ **7-Day/30-Day Reset Cycles**
+
+- Based on user start date (not calendar weeks)
+- Automatic limit resets
+- Addon call expiry management
+
+✅ **Enhanced App Store Integration**
+
+- Support for all subscription tiers
+- Addon call purchases
+- Comprehensive receipt validation
+
+✅ **Improved Error Handling**
+
+- Detailed upgrade options in error responses
+- Consistent error format
+- Better user guidance
+
+### **Key Benefits**
+
+- **Flexible Pricing**: Multiple tiers to suit different user needs
+- **Accurate Tracking**: Real-time duration and usage monitoring
+- **User-Friendly**: Clear upgrade paths and error messages
+- **Scalable**: Easy to adjust limits and pricing as needed
+- **App Store Compliant**: Full integration with Apple's payment system
+
+This comprehensive guide provides everything your iOS development team needs to integrate with the enhanced Speech Assistant backend API. The mobile app now supports a complete entertainment-focused experience with flexible pricing tiers, accurate usage tracking, and seamless App Store integration.

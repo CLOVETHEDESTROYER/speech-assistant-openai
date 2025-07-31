@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class UsageService:
+    # Constants for mobile usage limits
+    BASIC_WEEKLY_CALLS = 5
+    BASIC_CALL_DURATION_LIMIT = 60  # seconds
+    PREMIUM_MONTHLY_CALLS = 30
+    PREMIUM_CALL_DURATION_LIMIT = 120  # seconds
+    ADDON_CALLS_COUNT = 5
+    ADDON_CALLS_PRICE = 4.99
 
     @staticmethod
     def initialize_user_usage(user_id: int, app_type: AppType, db: Session) -> UsageLimits:
@@ -36,8 +43,9 @@ class UsageService:
                 trial_start_date=datetime.utcnow(),
                 trial_end_date=trial_end,
                 subscription_tier=tier,
-                week_start_date=date.today(),
-                month_start_date=date.today()
+                week_start_date=date.today(),  # Start counting from now
+                month_start_date=date.today(),  # Start counting from now
+                is_trial_active=True
             )
 
             db.add(usage_limits)
@@ -68,37 +76,89 @@ class UsageService:
                 if usage.trial_calls_remaining > 0:
                     return True, "trial_call_available", {
                         "calls_remaining": usage.trial_calls_remaining,
+                        "duration_limit": UsageService.BASIC_CALL_DURATION_LIMIT,
                         "trial_ends": usage.trial_end_date.isoformat(),
                         "app_type": usage.app_type.value
                     }
                 else:
-                    return False, "trial_calls_exhausted", {
-                        "message": "Trial calls exhausted. Please upgrade to continue.",
-                        "app_type": usage.app_type.value,
-                        "trial_ends": usage.trial_end_date.isoformat()
+                    return False, "trial_exhausted", {
+                        "message": "Trial calls exhausted. Upgrade to Basic ($4.99/week) for 5 calls per week!",
+                        "upgrade_options": [
+                            {"plan": "basic", "price": "$4.99", "calls": "5/week",
+                                "product_id": "speech_assistant_basic_weekly"},
+                            {"plan": "premium", "price": "$25.00", "calls": "30/month",
+                                "product_id": "speech_assistant_premium_monthly"}
+                        ]
                     }
 
             # Check subscription status
             if usage.is_subscribed and usage.subscription_end_date > datetime.utcnow():
-                # Check weekly/monthly limits for business users
-                if usage.app_type == AppType.WEB_BUSINESS:
+                if usage.subscription_tier == SubscriptionTier.MOBILE_BASIC:
+                    # Check weekly limits (reset every 7 days from start date)
+                    if usage.calls_made_this_week >= UsageService.BASIC_WEEKLY_CALLS:
+                        # Check if they have valid addon calls
+                        if (usage.addon_calls_remaining > 0 and
+                            usage.addon_calls_expiry and
+                                usage.addon_calls_expiry > datetime.utcnow()):
+                            return True, "addon_call_available", {
+                                "addon_calls_remaining": usage.addon_calls_remaining,
+                                "duration_limit": UsageService.BASIC_CALL_DURATION_LIMIT
+                            }
+                        else:
+                            return False, "weekly_limit_reached", {
+                                "message": "Weekly limit reached. Upgrade to Premium or buy 5 more calls for $4.99!",
+                                "upgrade_options": [
+                                    {"plan": "premium", "price": "$25.00", "calls": "30/month",
+                                        "product_id": "speech_assistant_premium_monthly"},
+                                    {"plan": "addon", "price": "$4.99", "calls": "5 additional",
+                                        "product_id": "speech_assistant_addon_calls"}
+                                ]
+                            }
+                    else:
+                        return True, "basic_call_available", {
+                            "calls_remaining_this_week": UsageService.BASIC_WEEKLY_CALLS - usage.calls_made_this_week,
+                            "duration_limit": UsageService.BASIC_CALL_DURATION_LIMIT
+                        }
+
+                elif usage.subscription_tier == SubscriptionTier.MOBILE_PREMIUM:
+                    # Check monthly limits (reset every 30 days from start date)
+                    if usage.calls_made_this_month >= UsageService.PREMIUM_MONTHLY_CALLS:
+                        return False, "monthly_limit_reached", {
+                            "message": "Monthly limit reached. Buy 5 more calls for $4.99!",
+                            "upgrade_options": [
+                                {"plan": "addon", "price": "$4.99", "calls": "5 additional",
+                                    "product_id": "speech_assistant_addon_calls"}
+                            ]
+                        }
+                    else:
+                        return True, "premium_call_available", {
+                            "calls_remaining_this_month": UsageService.PREMIUM_MONTHLY_CALLS - usage.calls_made_this_month,
+                            "duration_limit": UsageService.PREMIUM_CALL_DURATION_LIMIT
+                        }
+
+                # Handle business users (existing logic)
+                elif usage.app_type == AppType.WEB_BUSINESS:
                     if usage.weekly_call_limit and usage.calls_made_this_week >= usage.weekly_call_limit:
                         return False, "weekly_limit_reached", {
                             "message": f"Weekly limit of {usage.weekly_call_limit} calls reached",
                             "resets_on": (usage.week_start_date + timedelta(days=7)).isoformat()
                         }
 
-                return True, "subscription_active", {
-                    "subscription_tier": usage.subscription_tier.value,
-                    "calls_this_week": usage.calls_made_this_week,
-                    "weekly_limit": usage.weekly_call_limit
-                }
+                    return True, "subscription_active", {
+                        "subscription_tier": usage.subscription_tier.value,
+                        "calls_this_week": usage.calls_made_this_week,
+                        "weekly_limit": usage.weekly_call_limit
+                    }
 
             # No active trial or subscription
             return False, "upgrade_required", {
                 "message": "Please upgrade to continue making calls",
-                "app_type": usage.app_type.value,
-                "pricing": UsageService.get_pricing_info(usage.app_type)
+                "upgrade_options": [
+                    {"plan": "basic", "price": "$4.99", "calls": "5/week",
+                        "product_id": "speech_assistant_basic_weekly"},
+                    {"plan": "premium", "price": "$25.00", "calls": "30/month",
+                        "product_id": "speech_assistant_premium_monthly"}
+                ]
             }
 
         except Exception as e:
@@ -377,3 +437,216 @@ class UsageService:
             return AppType.MOBILE_CONSUMER
         else:
             return AppType.WEB_BUSINESS
+
+    # Enhanced mobile usage methods
+    @staticmethod
+    def record_call_start(user_id: int, db: Session) -> bool:
+        """Record call start (without duration)"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            # Update call counts
+            usage.calls_made_today += 1
+            usage.calls_made_this_week += 1
+            usage.calls_made_this_month += 1
+            usage.calls_made_total += 1
+
+            # Update trial calls if applicable
+            if usage.is_trial_active:
+                usage.trial_calls_remaining = max(
+                    0, usage.trial_calls_remaining - 1)
+                usage.trial_calls_used += 1
+
+                if usage.trial_calls_remaining == 0:
+                    usage.is_trial_active = False
+
+            # Update addon calls if applicable
+            if usage.addon_calls_remaining > 0:
+                usage.addon_calls_remaining -= 1
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error recording call start: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
+    def record_call_duration(user_id: int, call_duration: int, db: Session) -> bool:
+        """Record call duration when call ends"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            # Update duration tracking
+            usage.total_call_duration_this_week += call_duration
+            usage.total_call_duration_this_month += call_duration
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error recording call duration: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
+    def check_and_reset_limits(user_id: int, db: Session) -> bool:
+        """Check and reset limits based on 7-day/30-day cycles from start date"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            now = datetime.utcnow()
+            today = now.date()
+            reset_occurred = False
+
+            # Check weekly reset (7 days from week_start_date)
+            if usage.week_start_date and (today - usage.week_start_date).days >= 7:
+                usage.calls_made_this_week = 0
+                usage.total_call_duration_this_week = 0
+                usage.week_start_date = today
+                reset_occurred = True
+                logger.info(f"Reset weekly limits for user {user_id}")
+
+            # Check monthly reset (30 days from month_start_date)
+            if usage.month_start_date and (today - usage.month_start_date).days >= 30:
+                usage.calls_made_this_month = 0
+                usage.total_call_duration_this_month = 0
+                usage.month_start_date = today
+                reset_occurred = True
+                logger.info(f"Reset monthly limits for user {user_id}")
+
+            # Check addon call expiry
+            if usage.addon_calls_expiry and usage.addon_calls_expiry < now:
+                usage.addon_calls_remaining = 0
+                usage.addon_calls_expiry = None
+                reset_occurred = True
+                logger.info(f"Expired addon calls for user {user_id}")
+
+            if reset_occurred:
+                usage.updated_at = now
+                db.commit()
+
+            return reset_occurred
+
+        except Exception as e:
+            logger.error(f"Error checking/resetting limits: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
+    def upgrade_to_basic_subscription(user_id: int, subscription_info: Dict, db: Session) -> bool:
+        """Upgrade user to basic subscription"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            usage.subscription_tier = SubscriptionTier.MOBILE_BASIC
+            usage.is_subscribed = True
+            usage.subscription_start_date = datetime.utcnow()
+            usage.subscription_end_date = datetime.utcnow() + timedelta(days=7)  # Weekly
+            usage.app_store_transaction_id = subscription_info.get(
+                "transaction_id")
+
+            # Reset trial status
+            usage.is_trial_active = False
+            usage.trial_calls_remaining = 0
+
+            # Reset weekly counts for new subscription period
+            usage.calls_made_this_week = 0
+            usage.total_call_duration_this_week = 0
+            usage.week_start_date = date.today()
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            logger.info(f"Upgraded user {user_id} to basic subscription")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error upgrading to basic subscription: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
+    def upgrade_to_premium_subscription(user_id: int, subscription_info: Dict, db: Session) -> bool:
+        """Upgrade user to premium subscription"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            usage.subscription_tier = SubscriptionTier.MOBILE_PREMIUM
+            usage.is_subscribed = True
+            usage.subscription_start_date = datetime.utcnow()
+            usage.subscription_end_date = datetime.utcnow() + timedelta(days=30)  # Monthly
+            usage.app_store_transaction_id = subscription_info.get(
+                "transaction_id")
+
+            # Reset trial status
+            usage.is_trial_active = False
+            usage.trial_calls_remaining = 0
+
+            # Reset monthly counts for new subscription period
+            usage.calls_made_this_month = 0
+            usage.total_call_duration_this_month = 0
+            usage.month_start_date = date.today()
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            logger.info(f"Upgraded user {user_id} to premium subscription")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error upgrading to premium subscription: {str(e)}")
+            db.rollback()
+            return False
+
+    @staticmethod
+    def purchase_addon_calls(user_id: int, subscription_info: Dict, db: Session) -> bool:
+        """Purchase additional 5 calls"""
+        try:
+            usage = db.query(UsageLimits).filter(
+                UsageLimits.user_id == user_id).first()
+
+            if not usage:
+                return False
+
+            # Add 5 calls, expire in 30 days
+            usage.addon_calls_remaining += 5
+            usage.addon_calls_expiry = datetime.utcnow() + timedelta(days=30)
+            usage.app_store_transaction_id = subscription_info.get(
+                "transaction_id")
+
+            usage.updated_at = datetime.utcnow()
+            db.commit()
+
+            logger.info(f"Purchased addon calls for user {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error purchasing addon calls: {str(e)}")
+            db.rollback()
+            return False
