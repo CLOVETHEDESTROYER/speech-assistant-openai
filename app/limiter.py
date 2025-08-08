@@ -4,9 +4,18 @@ from typing import Callable, Optional
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from typing import Optional
 
-# Create the limiter instance
-limiter = Limiter(key_func=get_remote_address)
+
+def get_client_ip(request: Request) -> str:
+    # Honor X-Forwarded-For if present (use left-most as client)
+    xff: Optional[str] = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return get_remote_address(request)
+
+# Create the limiter instance with proxy-aware IP extraction
+limiter = Limiter(key_func=get_client_ip)
 
 
 def rate_limit(limit_value: str) -> Callable:

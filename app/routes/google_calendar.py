@@ -15,6 +15,11 @@ from pydantic import BaseModel
 from twilio.twiml.voice_response import VoiceResponse, Gather, Connect
 from app.services.twilio_client import get_twilio_client
 from app.config import PUBLIC_URL
+from app.utils.crypto import encrypt_string, decrypt_string
+from fastapi import status
+from uuid import uuid4
+from datetime import timedelta
+from fastapi import BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +37,12 @@ async def google_auth(request: Request, current_user: User = Depends(get_current
         prompt='consent'
     )
 
-    # Store user ID in state by appending it to the URL
-    # We'll extract this in the callback
-    state_data = f"{state}:{current_user.id}"
-
-    return {"authorization_url": authorization_url.replace(f"state={state}", f"state={state_data}")}
+    # Create opaque state with user binding and ttl via server-side store (signed/opaque)
+    # For simplicity, include a nonce we can validate later using server session (or Redis); here we encrypt
+    nonce = str(uuid4())
+    combined = f"{state}:{current_user.id}:{nonce}"
+    secure_state = encrypt_string(combined)
+    return {"authorization_url": authorization_url.replace(f"state={state}", f"state={secure_state}")}
 
 
 @router.get("/callback")
@@ -50,12 +56,17 @@ async def google_callback(
     and redirects back to the frontend with success/error status.
     """
     try:
-        # Extract user ID from state
-        state_parts = state.split(":")
-        if len(state_parts) < 2:
-            logger.error(f"Invalid state parameter: {state}")
-            raise HTTPException(
-                status_code=400, detail="Invalid state parameter")
+        # Decrypt and validate state
+        try:
+            decrypted = decrypt_string(state)
+        except Exception:
+            logger.error("Failed to decrypt state parameter")
+            raise HTTPException(status_code=400, detail="Invalid state parameter")
+
+        state_parts = decrypted.split(":")
+        if len(state_parts) < 3:
+            logger.error(f"Invalid state parameter structure: {decrypted}")
+            raise HTTPException(status_code=400, detail="Invalid state parameter")
 
         user_id = state_parts[1]
         logger.info(
@@ -80,8 +91,8 @@ async def google_callback(
 
         if existing_creds:
             # Update existing credentials
-            existing_creds.token = credentials.token
-            existing_creds.refresh_token = credentials.refresh_token
+            existing_creds.token = encrypt_string(credentials.token)
+            existing_creds.refresh_token = encrypt_string(credentials.refresh_token)
             existing_creds.token_expiry = credentials.expiry
             existing_creds.updated_at = datetime.utcnow()
             logger.info(
@@ -90,8 +101,8 @@ async def google_callback(
             # Create new credentials
             google_creds = GoogleCalendarCredentials(
                 user_id=current_user.id,
-                token=credentials.token,
-                refresh_token=credentials.refresh_token,
+                token=encrypt_string(credentials.token),
+                refresh_token=encrypt_string(credentials.refresh_token),
                 token_expiry=credentials.expiry
             )
             db.add(google_creds)
@@ -273,8 +284,8 @@ async def schedule_calendar_event(
 
     calendar_service = GoogleCalendarService()
     service = calendar_service.get_calendar_service({
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
+        "token": decrypt_string(credentials.token),
+        "refresh_token": decrypt_string(credentials.refresh_token),
         "token_uri": "https://oauth2.googleapis.com/token",
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
@@ -319,8 +330,8 @@ async def get_upcoming_events(
 
     calendar_service = GoogleCalendarService()
     service = calendar_service.get_calendar_service({
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
+        "token": decrypt_string(credentials.token),
+        "refresh_token": decrypt_string(credentials.refresh_token),
         "token_uri": "https://oauth2.googleapis.com/token",
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
@@ -381,8 +392,8 @@ async def check_time_availability(
 
     calendar_service = GoogleCalendarService()
     service = calendar_service.get_calendar_service({
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
+        "token": decrypt_string(credentials.token),
+        "refresh_token": decrypt_string(credentials.refresh_token),
         "token_uri": "https://oauth2.googleapis.com/token",
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),

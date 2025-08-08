@@ -16,7 +16,7 @@ if not RECAPTCHA_SECRET_KEY:
         "RECAPTCHA_SECRET_KEY not set in environment variables. CAPTCHA validation will not work correctly.")
 
 
-async def verify_captcha(request: Request = None):
+async def verify_captcha(captcha_response: str = Form(None), request: Request = None):
     """
     Verify Google reCAPTCHA v2.
 
@@ -35,13 +35,13 @@ async def verify_captcha(request: Request = None):
     Raises:
         HTTPException if verification fails
     """
-    # For development purposes, always return True to bypass CAPTCHA
-    # COMMENT THIS OUT IN PRODUCTION
-    return True
-
     # Skip verification if RECAPTCHA_SECRET_KEY is not set (for development/testing)
     if not RECAPTCHA_SECRET_KEY:
         return True
+
+    # Support fallback to query parameter if not provided as form field
+    if not captcha_response and request is not None:
+        captcha_response = request.query_params.get("captcha_response")
 
     if not captcha_response:
         raise HTTPException(

@@ -3,10 +3,13 @@ from dotenv import load_dotenv
 from pathlib import Path
 from typing import List, Dict
 
-# Load from both .env and dev.env
-env_path = Path('.') / 'dev.env'
-load_dotenv(env_path)
-load_dotenv()  # This will load .env as fallback
+# Load .env by default
+load_dotenv()
+
+# Load dev.env only when in development mode
+if os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true':
+    env_path = Path('.') / 'dev.env'
+    load_dotenv(env_path, override=True)
 
 # API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

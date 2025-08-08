@@ -19,6 +19,7 @@ import json
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import timedelta
 from app.limiter import rate_limit
+from app.captcha import verify_captcha
 
 
 router = APIRouter()
@@ -57,7 +58,7 @@ def create_refresh_token():
 
 @router.post("/register", response_model=TokenResponse)
 @rate_limit("5/minute")
-async def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
+async def register(request: Request, user: UserCreate, db: Session = Depends(get_db), captcha: bool = Depends(verify_captcha)):
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -117,7 +118,7 @@ def authenticate_user(db: Session, email: str, password: str):
 
 @router.post("/login", response_model=TokenSchema)
 @rate_limit("5/minute")
-def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), captcha: bool = Depends(verify_captcha)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(

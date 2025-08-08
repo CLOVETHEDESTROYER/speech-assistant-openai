@@ -1,3 +1,4 @@
+from app.server import create_app
 from app.services.twilio_service import TwilioPhoneService
 from app.routes.onboarding import router as onboarding_router
 from app.routes.twilio_management import router as twilio_router
@@ -7,6 +8,7 @@ from app.services.google_calendar import GoogleCalendarService
 from app.routes import google_calendar
 from app.middleware.security_headers import add_security_headers
 from app.utils.log_helpers import safe_log_request_data, sanitize_text
+from app.utils.crypto import decrypt_string
 import logging.handlers
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
@@ -81,8 +83,9 @@ import os
 from app.routes.mobile_app import router as mobile_router
 from app.utils.url_helpers import clean_and_validate_url
 
-# Load environment variables
-load_dotenv('dev.env')  # Load from dev.env explicitly
+# Load environment variables (only load dev.env in development mode)
+if os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true':
+    load_dotenv('dev.env')
 
 # Configure logging
 
@@ -581,40 +584,10 @@ LOG_EVENT_TYPES = [
     'input_audio_buffer.speech_started', 'session.created'
 ]
 
-# Initialize FastAPI app
-app = FastAPI()
+# Initialize via app factory
+app = create_app()
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite default dev server
-        "http://localhost:3000",  # Create React App default
-        "http://localhost:5000",  # Other common dev ports
-        "*"  # Temporary for development - remove in production
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Add rate limiting middleware
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# Add security headers middleware
-if config.ENABLE_SECURITY_HEADERS:
-    add_security_headers(
-        app,
-        content_security_policy=config.CONTENT_SECURITY_POLICY,
-        enable_hsts=config.ENABLE_HSTS,
-        xss_protection=config.XSS_PROTECTION,
-        content_type_options=config.CONTENT_TYPE_OPTIONS,
-        frame_options=config.FRAME_OPTIONS,
-        permissions_policy=config.PERMISSIONS_POLICY,
-        referrer_policy=config.REFERRER_POLICY,
-        cache_control=config.CACHE_CONTROL,
-    )
+# Middlewares, security headers and routers are configured in server.create_app()
 
 # Add global exception handler
 
@@ -656,14 +629,7 @@ app.add_middleware(SlowAPIMiddleware)
 # Create database tables (do this only once)
 Base.metadata.create_all(bind=engine)
 
-# Include routers
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(google_calendar.router, tags=["google-calendar"])
-app.include_router(twilio_router, tags=["twilio"])
-app.include_router(onboarding_router, tags=["onboarding"])
-
-# Import and include mobile router
-app.include_router(mobile_router, tags=["mobile"])
+# Routers are included in server.create_app()
 
 if not OPENAI_API_KEY:
     raise ValueError(
@@ -1250,6 +1216,9 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
         shared_state["should_stop"] = True
 
 
+from app.services.transcription import TranscriptionService
+
+
 async def process_outgoing_audio(audio_data, call_sid,  speaker="AI", scenario_name="unknown"):
     """Process and transcribe outgoing audio."""
     db = None
@@ -1265,17 +1234,13 @@ async def process_outgoing_audio(audio_data, call_sid,  speaker="AI", scenario_n
 
             # Transcribe the audio file
             with open(temp_file_path, "rb") as audio_file:
-                transcription = transcription_service.client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file
-                )
-
-                outgoing_transcript = transcription.text
+                transcription_service = TranscriptionService()
+                outgoing_transcript = await transcription_service.transcribe_audio(audio_file)
 
                 # If we got a valid transcript, save it
                 if outgoing_transcript and outgoing_transcript.strip():
                     # Save to database
-                    await transcription_service.save_conversation(
+                    await TranscriptionService().save_conversation(
                         db=db,
                         call_sid=call_sid or "unknown",
                         phone_number=speaker,
@@ -1335,6 +1300,7 @@ async def send_session_update(openai_ws, scenario):
 # Then define the WebSocket endpoint
 
 
+# moved to app/routers/realtime.py
 @app.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
     """Handle media stream for Twilio calls with enhanced interruption handling."""
@@ -1624,6 +1590,7 @@ async def update_scenario(openai_ws, new_scenario):
 # For example, you could add a new WebSocket route for scenario updates:
 
 
+# moved to app/routers/realtime.py
 @app.websocket("/update-scenario/{scenario}")
 async def handle_scenario_update(websocket: WebSocket, scenario: str):
     await websocket.accept()
@@ -1929,209 +1896,13 @@ realtime_manager = OpenAIRealtimeManager(config.OPENAI_API_KEY)
 # New realtime endpoints
 
 
-@app.post("/realtime/session", response_model=RealtimeSessionResponse)
-@rate_limit("5/minute")
-async def create_realtime_session(
-    request: Request,
-    session_data: RealtimeSessionCreate,
-    current_user: User = Depends(get_current_user)
-):
-    """Create a new realtime session for WebRTC communication."""
-    try:
-        if session_data.scenario not in SCENARIOS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid scenario"
-            )
-
-        # Use the current user's ID if not specified
-        user_id = session_data.user_id or current_user.id
-
-        # Create session with OpenAI
-        session_info = await realtime_manager.create_session(
-            str(user_id),
-            SCENARIOS[session_data.scenario]
-        )
-
-        return session_info
-
-    except Exception as e:
-        logger.error(
-            f"Error creating realtime session: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+# moved to app/routers/realtime.py
 
 
-@app.post("/realtime/signal", response_model=SignalingResponse)
-async def handle_signaling(
-    signal: SignalingMessage,
-    current_user: User = Depends(get_current_user)
-):
-    """Handle WebRTC signaling messages."""
-    try:
-        # Verify session belongs to user
-        session = realtime_manager.get_session(signal.session_id)
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
-            )
-
-        if str(session["user_id"]) != str(current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
-            )
-
-        # Handle signaling message
-        response = await realtime_manager.handle_signaling(
-            signal.session_id,
-            {
-                "type": signal.type,
-                "sdp": signal.sdp,
-                "candidate": signal.candidate
-            }
-        )
-
-        return response
-
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error handling signaling: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+# moved to app/routers/realtime.py
 
 
-@app.get("/test-realtime", response_class=HTMLResponse)
-async def test_realtime_page():
-    """Test endpoint for OpenAI Realtime API"""
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>OpenAI Realtime API Test</title>
-        <style>
-            .container { margin: 20px; }
-            #status, #log { margin: 10px 0; }
-            #log {
-                height: 200px;
-                overflow-y: scroll;
-                border: 1px solid #ccc;
-                padding: 10px;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>OpenAI Realtime API Test</h1>
-            <button id="startBtn">Start Session</button>
-            <button id="stopBtn" disabled>Stop Session</button>
-            <div id="status">Not connected</div>
-            <div id="log"></div>
-        </div>
-
-        <script>
-            let rtcPeerConnection;
-
-            function log(message) {
-                const logDiv = document.getElementById('log');
-                const timestamp = new Date().toISOString();
-                logDiv.innerHTML += `<div>${timestamp}: ${message}</div>`;
-                logDiv.scrollTop = logDiv.scrollHeight;
-            }
-
-            async function startSession() {
-                try {
-                    // Get authentication token
-                    const tokenResponse = await fetch('/token', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: 'username=test@example.com&password=testpassword123'
-                    });
-                    const tokenData = await tokenResponse.json();
-
-                    // Create realtime session
-                    const sessionResponse = await fetch('/realtime/session?scenario_id=default', {
-                        headers: {
-                            'Authorization': `Bearer ${tokenData.access_token}`
-                        }
-                    });
-                    const sessionData = await sessionResponse.json();
-                    log('Session created successfully');
-
-                    // Initialize WebRTC
-                    rtcPeerConnection = new RTCPeerConnection({
-                        iceServers: sessionData.ice_servers
-                    });
-
-                    // Create and send offer
-                    const offer = await rtcPeerConnection.createOffer({
-                        offerToReceiveAudio: true
-                    });
-                    await rtcPeerConnection.setLocalDescription(offer);
-
-                    const signalResponse = await fetch('/realtime/signal', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${tokenData.access_token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            session_id: sessionData.session_id,
-                            client_secret: sessionData.client_secret,
-                            sdp: offer.sdp
-                        })
-                    });
-                    const answerData = await signalResponse.json();
-
-                    // Set remote description
-                    await rtcPeerConnection.setRemoteDescription(
-                        new RTCSessionDescription({
-                            type: 'answer',
-                            sdp: answerData.sdp_answer
-                        })
-                    );
-
-                    document.getElementById(
-                        'status').textContent = 'Connected';
-                    document.getElementById('startBtn').disabled = true;
-                    document.getElementById('stopBtn').disabled = false;
-                    log('WebRTC connection established');
-
-                } catch (error) {
-                    log(`Error: ${error.message}`);
-                    console.error(error);
-                }
-            }
-
-            function stopSession() {
-                if (rtcPeerConnection) {
-                    rtcPeerConnection.close();
-                    rtcPeerConnection = null;
-                }
-                document.getElementById('status').textContent = 'Disconnected';
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('stopBtn').disabled = true;
-                log('Session stopped');
-            }
-
-            document.getElementById('startBtn').onclick = startSession;
-            document.getElementById('stopBtn').onclick = stopSession;
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+# moved to app/routers/realtime.py
 
 # Add a dictionary to store custom scenarios
 CUSTOM_SCENARIOS: Dict[str, dict] = {}
@@ -2383,6 +2154,7 @@ async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Se
         )
 
 
+# moved to app/routers/realtime.py
 @app.websocket("/media-stream-custom/{scenario_id}")
 async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
     """Handle media stream for custom scenarios."""
@@ -2628,6 +2400,7 @@ async def link_transcript_to_conversation(db: Session, call_sid: str, transcript
     return False
 
 
+# moved to app/routers/twilio_webhooks.py
 @app.post("/recording-callback")
 async def handle_recording_callback(request: Request, db: Session = Depends(get_db)):
     try:
@@ -2744,147 +2517,14 @@ async def handle_recording_callback(request: Request, db: Session = Depends(get_
         return {"status": "error", "message": "An unexpected error occurred", "code": "unknown_error"}
 
 
-@app.get("/twilio-transcripts/{transcript_sid}")
-@with_twilio_retry(max_retries=3)
-async def get_twilio_transcript(transcript_sid: str):
-    try:
-        # Using direct Twilio API access - fetch() is not async and should not use await
-        transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
-
-        # list() is not async and should not use await
-        sentences = get_twilio_client().intelligence.v2.transcripts(
-            transcript_sid).sentences.list()
-
-        # Log the structure of the first sentence to debug
-        if sentences and len(sentences) > 0:
-            first_sentence = sentences[0]
-            logger.info(f"Sentence object attributes: {dir(first_sentence)}")
-            logger.info(
-                f"Sentence object representation: {repr(first_sentence)}")
-
-        # Format the response
-        formatted_transcript = {
-            "sid": transcript.sid,
-            "status": transcript.status,
-            "date_created": str(transcript.date_created) if transcript.date_created else None,
-            "date_updated": str(transcript.date_updated) if transcript.date_updated else None,
-            "duration": transcript.duration,
-            "language_code": transcript.language_code,
-            "sentences": []
-        }
-
-        # Add sentences if available
-        if sentences:
-            formatted_transcript["sentences"] = [
-                {
-                    # Use the correct property name 'transcript' instead of 'text'
-                    "text": getattr(sentence, "transcript", "No text available"),
-                    "speaker": getattr(sentence, "media_channel", 0),
-                    "start_time": getattr(sentence, "start_time", 0),
-                    "end_time": getattr(sentence, "end_time", 0),
-                    "confidence": getattr(sentence, "confidence", None)
-                } for sentence in sentences
-            ]
-
-        return formatted_transcript
-
-    except TwilioRestException as e:
-        logger.error(f"Twilio REST error: {str(e)}")
-        if e.status == 404:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Transcript not found: {transcript_sid}"
-            )
-        else:
-            raise HTTPException(
-                status_code=e.status or 500,
-                detail=f"Twilio API error: {str(e)}"
-            )
-    except TwilioResourceError as e:
-        logger.error(f"Transcript not found: {e.message}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Transcript not found: {transcript_sid}"
-        )
-    except TwilioAuthError as e:
-        logger.error(f"Authentication error: {e.message}")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication error with Twilio service"
-        )
-    except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-            "details": e.details})
-        raise HTTPException(
-            status_code=500,
-            detail="Error communicating with Twilio service"
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error fetching transcript: {str(e)}")
+# moved to app/routers/twilio_transcripts.py
         raise HTTPException(
             status_code=500,
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
 
-@app.get("/twilio-transcripts")
-@with_twilio_retry(max_retries=3)
-async def list_twilio_transcripts(
-    page_size: int = 20,
-    page_token: Optional[str] = None,
-    status: Optional[str] = None,
-    source_sid: Optional[str] = None
-):
-    try:
-        # Build filter parameters
-        params = {"limit": page_size}
-        if page_token:
-            params["page_token"] = page_token
-        if status:
-            params["status"] = status
-        if source_sid:
-            params["source_sid"] = source_sid
-
-        # List transcripts with filters - list() is not async and should not use await
-        transcripts = get_twilio_client().intelligence.v2.transcripts.list(**params)
-
-        # Format the response with proper datetime handling
-        formatted_transcripts = [
-            {
-                "sid": transcript.sid,
-                "status": transcript.status,
-                "date_created": str(transcript.date_created) if transcript.date_created else None,
-                "date_updated": str(transcript.date_updated) if transcript.date_updated else None,
-                "duration": transcript.duration,
-                "customer_key": transcript.customer_key
-            } for transcript in transcripts
-        ]
-
-        # Get pagination information
-        meta = {
-            "page_size": page_size,
-            "next_page_token": transcripts.next_page_token if hasattr(transcripts, "next_page_token") else None,
-            "previous_page_token": transcripts.previous_page_token if hasattr(transcripts, "previous_page_token") else None,
-        }
-
-        return {
-            "transcripts": formatted_transcripts,
-            "meta": meta
-        }
-
-    except TwilioAuthError as e:
-        logger.error(f"Authentication error: {e.message}")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication error with Twilio service"
-        )
-    except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-            "details": e.details})
-        raise HTTPException(
-            status_code=500,
-            detail="Error communicating with Twilio service"
-        )
+# moved to app/routers/twilio_transcripts.py
     except Exception as e:
         logger.error(f"Unexpected error listing transcripts: {str(e)}")
         raise HTTPException(
@@ -2893,9 +2533,7 @@ async def list_twilio_transcripts(
         )
 
 
-@app.get("/twilio-transcripts/recording/{recording_sid}")
-@with_twilio_retry(max_retries=3)
-async def get_transcript_by_recording(recording_sid: str):
+# moved to app/routers/twilio_transcripts.py
     try:
         # List transcripts filtered by recording SID - list() is not async
         transcripts = get_twilio_client().intelligence.v2.transcripts.list(
@@ -3016,131 +2654,8 @@ async def delete_twilio_transcript(transcript_sid: str):
 
 
 @app.post("/twilio-transcripts/create-with-participants")
-@with_twilio_retry(max_retries=3)
-async def create_transcript_with_participants(
-    request: Request,
-    recording_sid: str = Body(...),
-    participants: List[Dict] = Body(...)
-):
-    try:
-        # Validate the recording_sid format
-        if not recording_sid or not recording_sid.startswith("RE"):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid recording_sid format"
-            )
-
-        # Validate participants structure
-        for participant in participants:
-            if "channel_participant" not in participant or "role" not in participant:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Each participant must have channel_participant and role fields"
-                )
-
-        # Create the transcript with participants
-        transcript = get_twilio_client().intelligence.v2.transcripts.create(
-            service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
-            channel={
-                "media_properties": {
-                    "source_sid": recording_sid
-                },
-                "participants": participants
-            },
-            redaction=config.ENABLE_PII_REDACTION
-        )
-
-        return {
-            "status": "success",
-            "transcript_sid": transcript.sid,
-            "message": "Transcript creation initiated with custom participants"
-        }
-
-    except TwilioAuthError as e:
-        logger.error(f"Authentication error: {e.message}")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication error with Twilio service"
-        )
-    except TwilioResourceError as e:
-        logger.error(f"Resource error: {e.message}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid resource: {e.message}"
-        )
-    except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-            "details": e.details})
-        raise HTTPException(
-            status_code=500,
-            detail="Error communicating with Twilio service"
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error creating transcript: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred"
-        )
-
-
-@app.post("/twilio-transcripts/create-with-media-url")
-@rate_limit("10/minute")
-@with_twilio_retry(max_retries=3)
-async def create_transcript_with_media_url(
-    request: Request,
-    media_url: str = Body(...),
-    language_code: str = Body("en-US"),
-    redaction: bool = Body(True),
-    customer_key: str = Body(None),
-    data_logging: bool = Body(True)
-):
-    try:
-        # Log the request (sanitized for any sensitive data)
-        logger.info(
-            f"Transcript creation request: {safe_log_request_data({'media_url': media_url, 'language_code': language_code, 'redaction': redaction})}"
-        )
-
-        # Create a transcript using Twilio Voice Intelligence
-        transcript = get_twilio_client().intelligence.v2.transcripts.create(
-            service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
-            channel={
-                "media_properties": {
-                    "source_url": media_url
-                }
-            },
-            language_code=language_code,
-            redaction=redaction
-        )
-
-        logger.info(f"Transcript created with SID: {transcript.sid}")
-
-        return {
-            "status": "success",
-            "transcript_sid": transcript.sid,
-            "message": "Transcript creation initiated"
-        }
-
-    except TwilioAuthError as e:
-        logger.exception(
-            f"Authentication error creating transcript with media URL")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication error with Twilio service"
-        )
-    except TwilioResourceError as e:
-        logger.exception(f"Resource error creating transcript with media URL")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid resource: {e.message}"
-        )
-    except Exception as e:
-        logger.exception(f"Error creating transcript with media URL")
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred while creating the transcript"
-        )
-
-
+# moved to app/routers/twilio_transcripts.py
+# moved to app/routers/twilio_transcripts.py
 @app.post("/twilio-transcripts/webhook-callback")
 async def handle_transcript_webhook(
     request: Request,
@@ -3152,9 +2667,25 @@ async def handle_transcript_webhook(
     This endpoint should be configured as the webhook URL in your Voice Intelligence Service settings.
     """
     try:
-        # Parse the webhook payload
+        # Verify Twilio signature (skip in development or if token not set)
+        if config.TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+            # For JSON callbacks, parameters are not form-encoded; validate URL-only as best-effort
+            if not validator.validate(request_url, {}, twilio_signature):
+                logger.warning(
+                    "Invalid Twilio signature on transcript webhook")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for transcript webhook")
+
+        # Parse the webhook payload after validation
         payload = await request.json()
-        logger.info(f"Received transcript webhook callback: {payload}")
+        logger.info(
+            f"Received transcript webhook callback: {safe_log_request_data(payload)}")
 
         # Extract the transcript SID and status
         transcript_sid = payload.get('transcript_sid') or payload.get('sid')
@@ -3735,44 +3266,9 @@ async def get_transcript_details(
 
 
 @app.post("/whisper/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
-    """
-    Endpoint to transcribe audio using OpenAI's Whisper API.
-    Accepts audio file uploads and returns the transcription.
-    """
-    try:
-        # Create a temporary file to store the uploaded audio
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-            # Write the uploaded file content to the temporary file
-            content = await file.read()
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
-        # Use the existing TranscriptionService to transcribe the audio
-        transcription_result = await transcription_service.transcribe_audio(content)
-
-        if transcription_result:
-            return {
-                "status": "success",
-                "transcription": transcription_result
-            }
-        else:
-            return {
-                "status": "error",
-                "message": "Failed to transcribe audio"
-            }
-    except Exception as e:
-        logger.error(f"Error in transcribe_audio endpoint: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
-    finally:
-        # Clean up the temporary file
-        try:
-            os.unlink(temp_file_path)
-        except:
-            pass
+# moved to app/routers/transcription.py (/api/transcribe-audio)
+def _placeholder_transcribe_route():
+    raise HTTPException(status_code=410, detail="Endpoint moved to /api/transcribe-audio")
 
 
 @app.post("/api/transcripts/{transcript_sid}/summarize")
@@ -4460,6 +3956,7 @@ async def get_enhanced_transcript_details(
         )
 
 
+# moved to app/routers/realtime.py
 @app.websocket("/calendar-media-stream")
 async def handle_calendar_media_stream(websocket: WebSocket):
     """Handle media stream for calendar-related calls"""
@@ -4543,8 +4040,8 @@ async def handle_calendar_media_stream(websocket: WebSocket):
                 # User has calendar connected - prepare calendar service
                 calendar_service = GoogleCalendarService()
                 service = calendar_service.get_calendar_service({
-                    "token": credentials.token,
-                    "refresh_token": credentials.refresh_token,
+                    "token": decrypt_string(credentials.token),
+                    "refresh_token": decrypt_string(credentials.refresh_token),
                     "token_uri": "https://oauth2.googleapis.com/token",
                     "client_id": os.getenv("GOOGLE_CLIENT_ID"),
                     "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
@@ -4837,16 +4334,29 @@ async def handle_user_input(request: Request):
         )
 
 
+# moved to app/routers/twilio_webhooks.py
 @app.post("/twilio-callback")
 async def handle_twilio_callback(request: Request, db: Session = Depends(get_db)):
     """Handle Twilio status callbacks for call status updates"""
     try:
+        # Verify Twilio signature (skip in development or if token not set)
+        request_url = str(request.url)
         form_data = await request.form()
+        if config.TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            params = dict(form_data)
+            if not validator.validate(request_url, params, twilio_signature):
+                logger.warning("Invalid Twilio signature on status callback")
+                return {"status": "error", "message": "Invalid signature"}
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for status callback")
         call_sid = form_data.get("CallSid")
         call_status = form_data.get("CallStatus")
 
         logger.info(
-            f"Received Twilio callback for call {call_sid} with status {call_status}")
+            f"Received Twilio callback for call {sanitize_text(str(call_sid))} with status {sanitize_text(str(call_status))}")
 
         if not call_sid:
             return {"status": "error", "message": "No CallSid provided"}
@@ -4919,8 +4429,8 @@ async def make_calendar_call_scenario(
         # Prepare calendar service
         calendar_service = GoogleCalendarService()
         service = calendar_service.get_calendar_service({
-            "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
+            "token": decrypt_string(credentials.token),
+            "refresh_token": decrypt_string(credentials.refresh_token),
             "token_uri": "https://oauth2.googleapis.com/token",
             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
@@ -5285,8 +4795,8 @@ async def handle_calendar_event_creation(message, user_id, db):
         # Create calendar service
         calendar_service = GoogleCalendarService()
         service = calendar_service.get_calendar_service({
-            "token": credentials.token,
-            "refresh_token": credentials.refresh_token,
+            "token": decrypt_string(credentials.token),
+            "refresh_token": decrypt_string(credentials.refresh_token),
             "token_uri": "https://oauth2.googleapis.com/token",
             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
