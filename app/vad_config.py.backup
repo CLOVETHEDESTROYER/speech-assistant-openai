@@ -50,33 +50,6 @@ class VADConfig:
         "interrupt_response": True
     }
 
-
-    # Ultra-responsive configuration for immediate AI responses
-    ULTRA_RESPONSIVE_VAD = {
-        "type": "semantic_vad",
-        "eagerness": "medium",  # Balanced responsiveness for better turn-taking
-        "create_response": True,
-        "interrupt_response": True
-    }
-
-    # Natural conversation configuration
-    NATURAL_CONVERSATION_VAD = {
-        "type": "semantic_vad", 
-        "eagerness": "medium",  # Balanced responsiveness
-        "create_response": True,
-        "interrupt_response": True
-    }
-
-    # Quick greeting detection
-    GREETING_DETECTION_VAD = {
-        "type": "server_vad",
-        "threshold": 0.3,  # Lower threshold to detect "hello" quickly
-        "prefix_padding_ms": 100,  # Shorter padding
-        "silence_duration_ms": 300,  # Shorter silence detection
-        "create_response": True,
-        "interrupt_response": True
-    }
-
     @staticmethod
     def get_vad_config(vad_type: str = "semantic_vad", eagerness: str = "auto",
                        threshold: float = 0.5, prefix_padding_ms: int = 300,
@@ -105,23 +78,18 @@ class VADConfig:
             raise ValueError(f"Unsupported VAD type: {vad_type}")
 
     @staticmethod
-    @staticmethod
     def get_scenario_vad_config(scenario_name: str) -> dict:
         """Get VAD configuration optimized for specific scenarios"""
         scenario_lower = scenario_name.lower()
 
-        # For inbound calls and general conversations - ultra responsive
-        if any(keyword in scenario_lower for keyword in ["default", "general", "inbound"]):
-            return VADConfig.ULTRA_RESPONSIVE_VAD
+        # Conversational scenarios - let users speak naturally
+        if any(keyword in scenario_lower for keyword in ["therapy", "counseling", "interview", "conversation"]):
+            return VADConfig.CONVERSATIONAL_VAD
 
-        # Conversational scenarios - natural flow
-        elif any(keyword in scenario_lower for keyword in ["therapy", "counseling", "interview", "conversation"]):
-            return VADConfig.NATURAL_CONVERSATION_VAD
-
-        # Quick response scenarios - very responsive
+        # Quick response scenarios - more responsive
         elif any(keyword in scenario_lower for keyword in ["support", "help", "emergency", "urgent"]):
             return VADConfig.RESPONSIVE_VAD
 
-        # Default to ultra responsive for better user experience
+        # Default to semantic VAD with auto eagerness
         else:
-            return VADConfig.ULTRA_RESPONSIVE_VAD
+            return VADConfig.DEFAULT_SEMANTIC_VAD

@@ -38,13 +38,14 @@ SCENARIOS = {
         "persona": (
             "You are Mike Thompson, an aggressive 45-year-old real estate agent "
             "with 20 years of experience. You're known for closing difficult deals. "
-            "You speak confidently and directly, often using phrases like 'listen' and 'look'."
+            "You speak confidently and directly, often using phrases like 'listen' and 'look'. "
+            "You're pushy but professional - you get straight to the point."
         ),
         "prompt": (
             "You're calling about a $5M property deal that must close today. "
             "The seller is being difficult about the closing costs. "
-            "You need to convey urgency without seeming desperate. "
-            "Keep pushing for a resolution but maintain professional composure."
+            "Be direct and pushy but keep responses short and focused. "
+            "Get straight to the point - no long explanations."
         ),
         "voice_config": {
             "voice": VOICES["aggressive_male"],

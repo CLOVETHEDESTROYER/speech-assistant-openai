@@ -690,7 +690,7 @@ async def handle_outgoing_call(request: Request, scenario: str):
         # Add a brief pause and greeting to confirm telephony audio path
         response = VoiceResponse()
         response.pause(length=0.1)
-        response.say("Thanks for calling. Connecting you now.", voice="alice")
+        # response.say("Thanks for calling. Connecting you now.", voice="alice")  # Removed
 
         # Set up the stream connection
         connect = Connect()
@@ -1233,13 +1233,21 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
                 "output_audio_format": "g711_ulaw",
                 "instructions": (
                     f"{SYSTEM_MESSAGE}\n\n"
+                    f"CRITICAL CONVERSATION RULES - FOLLOW THESE STRICTLY:\n"
+                    f"- STOP TALKING IMMEDIATELY when the other person starts speaking\n"
+                    f"- Keep responses SHORT and CONCISE (1-2 sentences max)\n"
+                    f"- NEVER ramble or go on long monologues\n"
+                    f"- Wait for clear pauses before responding\n"
+                    f"- Listen and acknowledge what they say before continuing\n"
+                    f"- Be direct and to the point\n"
+                    f"- Respect turn-taking - let them finish speaking\n\n"
                     f"Persona: {scenario['persona']}\n\n"
                     f"Scenario: {scenario['prompt']}\n\n"
                     f"{additional_instructions}\n\n"
                     + ("IMPORTANT: Greet the caller immediately when the call connects. "
                        "Introduce yourself as specified in your persona and ask how you can help."
                        if direction == "inbound" else
-                       "IMPORTANT: Follow the scenario prompt exactly. Address the user by name if known.")
+                       "IMPORTANT: Follow the scenario prompt exactly. Address the user by name if known. Be responsive and natural in conversation.")
                 ),
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
