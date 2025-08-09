@@ -45,14 +45,8 @@ class OpenAIRealtimeManager:
                 "type": "session.update",
                 "session": {
                     "turn_detection": vad_config,
-                    "input_audio_format": {
-                        "type": "mulaw",
-                        "sample_rate": 8000
-                    },
-                    "output_audio_format": {
-                        "type": "mulaw",
-                        "sample_rate": 8000
-                    },
+                    "input_audio_format": "g711_ulaw",
+                    "output_audio_format": "g711_ulaw",
                     "instructions": self._get_instructions(scenario),
                     "voice": scenario["voice_config"]["voice"],
                     "temperature": scenario["voice_config"]["temperature"],

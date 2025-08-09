@@ -91,221 +91,150 @@ async def test_realtime_page():
 # WebSocket/media stream endpoints moved from main
 @router.websocket("/media-stream/{scenario}")
 async def handle_media_stream(websocket: WebSocket, scenario: str):
-    """
-    Full OpenAI Bridge Implementation:
-    - Receives Twilio μ-law audio frames
-    - Forwards audio to OpenAI Realtime API
-    - Receives OpenAI audio responses
-    - Converts and sends audio back to Twilio
-    """
+    """Handle media stream for Twilio calls with enhanced interruption handling."""
+    MAX_RECONNECT_ATTEMPTS = 3
+    RECONNECT_DELAY = 2  # seconds
+
+    # Get the direction and user_name from query parameters
     params = dict(websocket.query_params)
-    direction = params.get("direction", "outbound")
+    direction = params.get("direction", "inbound")
     user_name = params.get("user_name", "")
     logger.info(
         f"WebSocket connection for scenario: {scenario}, direction: {direction}, user_name: {user_name}")
 
-    # Validate scenario exists
-    if scenario not in SCENARIOS:
-        logger.error(f"Invalid scenario: {scenario}")
-        await websocket.close(code=4004, reason="Invalid scenario")
-        return
-
-    # Get actual scenario data
-    scenario_data = SCENARIOS[scenario]
-    logger.info(f"Using scenario: {scenario_data}")
-
     async with websocket_manager(websocket) as ws:
-        stream_sid: str | None = None
-        openai_ws = None
-        session_id = None
-        audio_buffer_count = 0
-        last_commit_time = time.time()
-
         try:
-            # Create an OpenAI session per call using actual scenario data
-            try:
-                session_info = await realtime_manager.create_session("twilio", {
-                    "name": scenario,
-                    "persona": scenario_data["persona"],
-                    "prompt": scenario_data["prompt"],
-                    "voice_config": scenario_data["voice_config"],
-                    "direction": direction,
-                    "user_name": user_name,
-                })
-                session_id = session_info.get("session_id")
-                logger.info(f"Created OpenAI session: {session_id}")
-            except Exception as e:
-                logger.warning(f"OpenAI session unavailable: {e}")
-                session_id = None
+            logger.info(
+                f"WebSocket connection established for scenario: {scenario}")
 
-            # Get the OpenAI WebSocket from the session
-            if session_id:
-                session = realtime_manager.get_session(session_id)
-                if session and "openai_ws" in session:
-                    openai_ws = session["openai_ws"]
-                    logger.info("Using OpenAI WebSocket from session")
+            if scenario not in SCENARIOS:
+                logger.error(f"Invalid scenario: {scenario}")
+                return
 
-                    # For outbound calls, create initial response to start the conversation
-                    if direction == "outbound":
+            selected_scenario = SCENARIOS[scenario]
+            logger.info(f"Using scenario: {selected_scenario}")
+
+            # Initialize reconnection counter
+            reconnect_attempts = 0
+
+            # Start reconnection loop
+            while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                try:
+                    async with websockets.connect(
+                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
+                        extra_headers={
+                            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+                            "OpenAI-Beta": "realtime=v1"
+                        },
+                        ping_interval=20,
+                        ping_timeout=60,
+                        close_timeout=60
+                    ) as openai_ws:
+                        logger.info("Connected to OpenAI WebSocket")
+
+                        # Initialize shared state
+                        shared_state = {
+                            "should_stop": False,
+                            "stream_sid": None,
+                            "latest_media_timestamp": 0,
+                            "greeting_sent": False,
+                            "reconnecting": False,
+                            "ai_speaking": False,
+                            "user_speaking": False
+                        }
+
+                        # Initialize conversation state for enhanced interruption handling
+                        from app.main import ConversationState
+                        conversation_state = ConversationState()
+                        shared_state["conversation_state"] = conversation_state
+
+                        # Initialize session with the selected scenario
+                        from app.main import initialize_session
+                        await initialize_session(openai_ws, selected_scenario, is_incoming=direction == "outbound")
+                        logger.info("Session initialized with OpenAI")
+
+                        # Add a delay before sending the initial greeting
+                        await asyncio.sleep(.1)
+
+                        # Check if Twilio WebSocket is still connected
                         try:
-                            await openai_ws.send(json.dumps({
-                                "type": "response.create"
-                            }))
-                            logger.info(
-                                "Sent initial response.create for outbound call")
+                            await ws.send_text(json.dumps({"status": "connected"}))
+                            logger.info("Twilio WebSocket is still connected")
                         except Exception as e:
                             logger.warning(
-                                f"Failed to create initial response: {e}")
-                else:
-                    logger.warning("No OpenAI WebSocket found in session")
+                                f"Twilio WebSocket connection closed before sending greeting: {e}")
+                            break
 
-            await ws.send_text(json.dumps({"status": "connected"}))
+                        # Send initial greeting in a separate task
+                        from app.main import send_initial_greeting
+                        greeting_task = asyncio.create_task(
+                            send_initial_greeting(openai_ws, selected_scenario))
 
-            # Main media stream processing loop
-            while True:
-                msg = await ws.receive_text()
-                event = json.loads(msg)
-                etype = event.get("event")
+                        # Create tasks for receiving and sending with enhanced state management
+                        from app.main import receive_from_twilio, send_to_twilio
+                        receive_task = asyncio.create_task(
+                            receive_from_twilio(ws, openai_ws, shared_state))
+                        send_task = asyncio.create_task(
+                            send_to_twilio(ws, openai_ws, shared_state, conversation_state))
 
-                if etype == "start":
-                    stream_sid = event.get("start", {}).get("streamSid")
-                    logger.info(f"Twilio stream start: {stream_sid}")
+                        # Define a constant for greeting timeout
+                        GREETING_TIMEOUT = 10  # seconds
+                        greeting_success = False
 
-                elif etype == "media":
-                    # Incoming caller audio (base64 ulaw 8k)
-                    media_payload = event.get("media", {}).get("payload")
-                    if not stream_sid and event.get("streamSid"):
-                        stream_sid = event.get("streamSid")
-
-                    if stream_sid and media_payload and openai_ws:
+                        # Wait for greeting to complete first with a longer timeout
                         try:
-                            # Send audio to OpenAI - Twilio sends μ-law, but we need to convert to base64 properly
-                            # The media_payload is already base64 encoded μ-law from Twilio
-                            openai_message = {
-                                "type": "input_audio_buffer.append",
-                                "audio": media_payload  # Already base64 encoded μ-law from Twilio
-                            }
-                            await openai_ws.send(json.dumps(openai_message))
-                            audio_buffer_count += 1
-
-                            # Debug: Log audio data size
-                            logger.debug(
-                                f"Sent audio to OpenAI: {len(media_payload)} chars base64, buffer count: {audio_buffer_count}")
-
-                            # Commit audio buffer periodically (every 5 frames or 200ms)
-                            current_time = time.time()
-                            if audio_buffer_count >= 5 or (current_time - last_commit_time) >= 0.2:
-                                try:
-                                    # Commit the audio buffer
-                                    await openai_ws.send(json.dumps({
-                                        "type": "input_audio_buffer.commit"
-                                    }))
-
-                                    # Create a response
-                                    await openai_ws.send(json.dumps({
-                                        "type": "response.create"
-                                    }))
-
-                                    audio_buffer_count = 0
-                                    last_commit_time = current_time
-                                    logger.debug(
-                                        "Committed audio buffer and created response")
-                                except Exception as commit_error:
-                                    logger.warning(
-                                        f"Failed to commit audio buffer: {commit_error}")
-
-                            # Try to receive response from OpenAI (non-blocking)
-                            try:
-                                openai_response = await asyncio.wait_for(openai_ws.recv(), timeout=0.05)
-                                response_data = json.loads(openai_response)
-
-                                # Debug: Log response type
-                                logger.debug(
-                                    f"OpenAI response type: {response_data.get('type')}")
-
-                                # Handle both response.audio.delta and response.output_audio.delta
-                                if response_data.get("type") in ["response.audio.delta", "response.output_audio.delta"]:
-                                    # Extract audio data from OpenAI response
-                                    openai_audio = response_data.get("delta")
-                                    if openai_audio:
-                                        # OpenAI returns base64 encoded audio in the format we specified
-                                        # Since we specified mulaw, it should return mulaw format
-                                        out_message = {
-                                            "event": "media",
-                                            "streamSid": stream_sid,
-                                            "media": {
-                                                "payload": openai_audio
-                                            }
-                                        }
-                                        await ws.send_text(json.dumps(out_message))
-                                        logger.debug(
-                                            f"Sent OpenAI audio back to Twilio (size: {len(openai_audio)})")
-
-                                elif response_data.get("type") == "text":
-                                    # Log text responses for debugging
-                                    text_content = response_data.get(
-                                        "text", {}).get("content", "")
-                                    logger.info(
-                                        f"OpenAI text response: {text_content}")
-
-                            except asyncio.TimeoutError:
-                                # No response from OpenAI, send silence to keep connection alive
-                                try:
-                                    # 20ms of μ-law silence (0xFF = silence in μ-law)
-                                    silence = bytes([0xFF] * 160)
-                                    silence_b64 = base64.b64encode(
-                                        silence).decode("ascii")
-                                    out_message = {
-                                        "event": "media",
-                                        "streamSid": stream_sid,
-                                        "media": {
-                                            "payload": silence_b64
-                                        }
-                                    }
-                                    await ws.send_text(json.dumps(out_message))
-                                except Exception as send_error:
-                                    logger.warning(
-                                        f"Could not send silence after timeout: {send_error}")
-                                    break  # Exit the loop if we can't send
-
-                        except Exception as e:
-                            logger.error(f"Error processing audio: {e}")
-                            # Try to send silence on error, but don't fail if WebSocket is closed
-                            try:
-                                silence = bytes([0xFF] * 160)
-                                silence_b64 = base64.b64encode(
-                                    silence).decode("ascii")
-                                out_message = {
-                                    "event": "media",
-                                    "streamSid": stream_sid,
-                                    "media": {
-                                        "payload": silence_b64
-                                    }
-                                }
-                                await ws.send_text(json.dumps(out_message))
-                            except Exception as send_error:
+                            greeting_result = await asyncio.wait_for(greeting_task, timeout=GREETING_TIMEOUT)
+                            if greeting_result:
+                                logger.info(
+                                    "Initial greeting sent successfully")
+                                shared_state["greeting_sent"] = True
+                                greeting_success = True
+                            else:
                                 logger.warning(
-                                    f"Could not send silence after audio error: {send_error}")
-                                break  # Exit the loop if we can't send
+                                    "Failed to send initial greeting, but continuing with call")
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"Greeting timeout after {GREETING_TIMEOUT} seconds, continuing with call")
+                        except Exception as e:
+                            logger.error(f"Error during greeting: {e}")
 
-                    elif stream_sid:
-                        # No OpenAI connection, send silence
-                        silence = bytes([0xFF] * 160)
-                        silence_b64 = base64.b64encode(silence).decode("ascii")
-                        out_message = {
-                            "event": "media",
-                            "streamSid": stream_sid,
-                            "media": {
-                                "payload": silence_b64
-                            }
-                        }
-                        await ws.send_text(json.dumps(out_message))
+                        # Wait for both tasks to complete
+                        try:
+                            await asyncio.gather(receive_task, send_task, return_exceptions=True)
+                        except Exception as e:
+                            logger.error(f"Error in main tasks: {e}")
 
-                elif etype == "stop":
-                    logger.info(f"Twilio stream stop: {stream_sid}")
-                    break
-                else:
-                    logger.debug(f"Unhandled Twilio media event: {etype}")
+                        # Check if we should reconnect
+                        if shared_state.get("should_stop"):
+                            logger.info(
+                                "Call ended normally, not reconnecting")
+                            break
+
+                        # If we get here, we need to reconnect
+                        reconnect_attempts += 1
+                        if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                            logger.warning(
+                                f"Connection lost, attempting reconnect {reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}")
+                            shared_state["reconnecting"] = True
+                            await asyncio.sleep(RECONNECT_DELAY)
+                        else:
+                            logger.error("Max reconnection attempts reached")
+                            break
+
+                except websockets.exceptions.ConnectionClosed:
+                    logger.warning("OpenAI WebSocket connection closed")
+                    reconnect_attempts += 1
+                    if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                        await asyncio.sleep(RECONNECT_DELAY)
+                    else:
+                        break
+                except Exception as e:
+                    logger.error(f"Error in reconnection loop: {e}")
+                    reconnect_attempts += 1
+                    if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                        await asyncio.sleep(RECONNECT_DELAY)
+                    else:
+                        break
 
         except websockets.exceptions.ConnectionClosed:
             logger.warning("WebSocket connection closed")
@@ -313,11 +242,7 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
             logger.error(f"Error in media stream: {str(e)}", exc_info=True)
         finally:
             # Cleanup
-            if session_id:
-                try:
-                    await realtime_manager.close_session(session_id)
-                except:
-                    pass
+            pass
 
 
 @router.websocket("/update-scenario/{scenario}")
