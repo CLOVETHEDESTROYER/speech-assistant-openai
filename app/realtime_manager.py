@@ -25,7 +25,7 @@ class OpenAIRealtimeManager:
         try:
             session_id = str(uuid.uuid4())
 
-            async with websockets.connect(
+            openai_ws = await websockets.connect(
                 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
                 extra_headers={
                     "Authorization": f"Bearer {self.openai_api_key}",
@@ -34,58 +34,94 @@ class OpenAIRealtimeManager:
                 ping_interval=20,
                 ping_timeout=60,
                 close_timeout=60
-            ) as openai_ws:
-                # Get optimized VAD configuration for this scenario
-                scenario_name = scenario.get("name", "default")
-                vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+            )
 
-                # Initialize session configuration with enhanced VAD
-                session_config = {
-                    "type": "session.update",
-                    "session": {
-                        "turn_detection": vad_config,
-                        "input_audio_format": "g711_ulaw",
-                        "output_audio_format": "g711_ulaw",
-                        "sample_rate": 16000,
-                        "instructions": self._get_instructions(scenario),
-                        "voice": scenario["voice_config"]["voice"],
-                        "temperature": scenario["voice_config"]["temperature"],
-                        "modalities": ["text", "audio"]
-                    }
+            # Get optimized VAD configuration for this scenario
+            scenario_name = scenario.get("name", "default")
+            vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+
+            # Initialize session configuration with enhanced VAD
+            session_config = {
+                "type": "session.update",
+                "session": {
+                    "turn_detection": vad_config,
+                    "input_audio_format": {
+                        "type": "mulaw",
+                        "sample_rate": 8000
+                    },
+                    "output_audio_format": {
+                        "type": "mulaw",
+                        "sample_rate": 8000
+                    },
+                    "instructions": self._get_instructions(scenario),
+                    "voice": scenario["voice_config"]["voice"],
+                    "temperature": scenario["voice_config"]["temperature"],
+                    "modalities": ["text", "audio"]
                 }
+            }
 
-                await openai_ws.send(json.dumps(session_config))
-                response = await openai_ws.recv()
-                session_response = json.loads(response)
+            self.logger.info(
+                f"Creating session with config: {json.dumps(session_config, indent=2)}")
+            await openai_ws.send(json.dumps(session_config))
+            response = await openai_ws.recv()
+            session_response = json.loads(response)
 
-                if session_response.get("type") == "error":
-                    raise Exception(
-                        f"OpenAI session error: {session_response}")
+            if session_response.get("type") == "error":
+                raise Exception(
+                    f"OpenAI session error: {session_response}")
 
-                # Store session information
-                self.active_sessions[session_id] = {
-                    "openai_ws": openai_ws,
-                    "user_id": user_id,
-                    "scenario": scenario,
-                    "vad_config": vad_config,  # Store VAD config for reference
-                    "created_at": datetime.utcnow(),
-                    "ice_servers": self.ice_servers
-                }
+            self.logger.info(
+                f"Session response: {json.dumps(session_response, indent=2)}")
 
-                self.logger.info(
-                    f"Session created with VAD config: {vad_config}")
+            # Store session information
+            self.active_sessions[session_id] = {
+                "openai_ws": openai_ws,
+                "user_id": user_id,
+                "scenario": scenario,
+                "vad_config": vad_config,  # Store VAD config for reference
+                "created_at": datetime.utcnow(),
+                "ice_servers": self.ice_servers
+            }
 
-                return {
-                    "session_id": session_id,
-                    "ice_servers": self.ice_servers,
-                    "vad_config": vad_config,
-                    "created_at": datetime.utcnow().isoformat()
-                }
+            self.logger.info(
+                f"Session created with VAD config: {vad_config}")
+            self.logger.info(
+                f"Session config sent: {json.dumps(session_config, indent=2)}")
+
+            return {
+                "session_id": session_id,
+                "ice_servers": self.ice_servers,
+                "vad_config": vad_config,
+                "created_at": datetime.utcnow().isoformat()
+            }
 
         except Exception as e:
             self.logger.error(
                 f"Error creating session: {str(e)}", exc_info=True)
             raise
+
+    async def create_initial_response(self, session_id: str) -> bool:
+        """Create an initial response for outbound calls to start the conversation."""
+        try:
+            session = self.active_sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Invalid session ID: {session_id}")
+
+            openai_ws = session["openai_ws"]
+
+            # Send response.create to start the conversation
+            await openai_ws.send(json.dumps({
+                "type": "response.create"
+            }))
+
+            self.logger.info(
+                f"Created initial response for session: {session_id}")
+            return True
+
+        except Exception as e:
+            self.logger.error(
+                f"Error creating initial response: {str(e)}", exc_info=True)
+            return False
 
     async def handle_signaling(self, session_id: str, signal_data: dict) -> dict:
         """Handle WebRTC signaling messages."""

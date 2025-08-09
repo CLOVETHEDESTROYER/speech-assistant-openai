@@ -3,7 +3,8 @@ import time
 import threading
 import datetime
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request, JSONResponse, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db import get_db
@@ -14,7 +15,7 @@ from app import config
 from app.limiter import rate_limit
 from app.utils.crypto import decrypt_string
 from app.utils.url_helpers import clean_and_validate_url
-from app.main import USER_CONFIG, DEVELOPMENT_MODE, SCENARIOS
+from app.app_config import USER_CONFIG, DEVELOPMENT_MODE, SCENARIOS
 from app.utils.log_helpers import sanitize_text
 from twilio.base.exceptions import TwilioRestException
 
@@ -99,7 +100,10 @@ async def make_call(
         user_name = USER_CONFIG.get("name", "")
         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
 
-        client = get_twilio_client()
+        # Use per-user Twilio credentials if provided
+        from app.services.twilio_client import twilio_client_service
+        twilio_client_service.set_user_context(current_user.id)
+        client = twilio_client_service.client
         call = client.calls.create(
             to=phone_number,
             from_=from_number,

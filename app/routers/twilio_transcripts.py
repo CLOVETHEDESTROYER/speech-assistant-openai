@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.db import get_db
@@ -16,7 +16,8 @@ router = APIRouter()
 async def get_twilio_transcript(transcript_sid: str, current_user: User = Depends(get_current_user)):
     try:
         transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
-        sentences = get_twilio_client().intelligence.v2.transcripts(transcript_sid).sentences.list()
+        sentences = get_twilio_client().intelligence.v2.transcripts(
+            transcript_sid).sentences.list()
         formatted_transcript = {
             "sid": transcript.sid,
             "status": transcript.status,
@@ -79,7 +80,8 @@ async def list_twilio_transcripts(
 @with_twilio_retry(max_retries=3)
 async def get_transcript_by_recording(recording_sid: str, current_user: User = Depends(get_current_user)):
     try:
-        transcript_list = get_twilio_client().intelligence.v2.transcripts.list(source_sid=recording_sid, limit=1)
+        transcript_list = get_twilio_client().intelligence.v2.transcripts.list(
+            source_sid=recording_sid, limit=1)
         if not transcript_list:
             raise HTTPException(status_code=404, detail="Transcript not found")
         transcript = transcript_list[0]
@@ -92,6 +94,7 @@ async def get_transcript_by_recording(recording_sid: str, current_user: User = D
 @rate_limit("10/minute")
 @with_twilio_retry(max_retries=3)
 async def create_transcript_with_media_url(
+    request: Request,
     media_url: str = Body(...),
     language_code: str = Body("en-US"),
     redaction: bool = Body(True),
@@ -108,7 +111,8 @@ async def create_transcript_with_media_url(
         )
         return {"status": "success", "transcript_sid": transcript.sid, "message": "Transcript creation initiated"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while creating the transcript")
+        raise HTTPException(
+            status_code=500, detail="An unexpected error occurred while creating the transcript")
 
 
 @router.post("/twilio-transcripts/create-with-participants")
@@ -118,5 +122,3 @@ async def create_transcript_with_participants(
 ):
     # Placeholder to be filled with actual implementation moved from main
     return {"status": "not_implemented"}
-
-

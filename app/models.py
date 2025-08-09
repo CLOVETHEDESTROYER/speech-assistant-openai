@@ -58,6 +58,8 @@ class User(Base):
         "UserOnboardingStatus", back_populates="user", uselist=False)
     usage_limits = relationship(
         "UsageLimits", back_populates="user", uselist=False)
+    provider_credentials = relationship(
+        "ProviderCredentials", back_populates="user", uselist=False)
 
 
 class CallSchedule(Base):
@@ -309,7 +311,26 @@ class UsageLimits(Base):
     user = relationship("User", back_populates="usage_limits")
 
 
+class ProviderCredentials(Base):
+    __tablename__ = "provider_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+
+    # Encrypted fields
+    openai_api_key = Column(String, nullable=True)
+    twilio_account_sid = Column(String, nullable=True)
+    twilio_auth_token = Column(String, nullable=True)
+    twilio_phone_number = Column(String, nullable=True)
+    twilio_vi_sid = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="provider_credentials")
+
+
 __all__ = ["User", "Token", "Base", "CallSchedule",
            "Conversation", "TranscriptRecord", "CustomScenario", "GoogleCalendarCredentials",
            "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus",
-           "UsageLimits", "AppType", "SubscriptionTier", "SubscriptionStatus"]
+           "UsageLimits", "ProviderCredentials", "AppType", "SubscriptionTier", "SubscriptionStatus"]

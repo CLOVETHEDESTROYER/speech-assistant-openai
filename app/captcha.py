@@ -1,6 +1,6 @@
 import os
 import requests
-from fastapi import HTTPException, Form, Depends, Request
+from fastapi import HTTPException, Request
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -10,13 +10,13 @@ load_dotenv()
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
 RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY")
 
-if not RECAPTCHA_SECRET_KEY:
+if not RECAPTCHA_SECRET_KEY or RECAPTCHA_SECRET_KEY.strip() == "":
     import logging
     logging.warning(
         "RECAPTCHA_SECRET_KEY not set in environment variables. CAPTCHA validation will not work correctly.")
 
 
-async def verify_captcha(captcha_response: str = Form(None), request: Request = None):
+async def verify_captcha(request: Request):
     """
     Verify Google reCAPTCHA v2.
 
@@ -36,16 +36,18 @@ async def verify_captcha(captcha_response: str = Form(None), request: Request = 
         HTTPException if verification fails
     """
     # Skip verification if RECAPTCHA_SECRET_KEY is not set (for development/testing)
-    if not RECAPTCHA_SECRET_KEY:
+    if not RECAPTCHA_SECRET_KEY or RECAPTCHA_SECRET_KEY.strip() == "":
         return True
 
-    # Support fallback to query parameter if not provided as form field
-    if not captcha_response and request is not None:
-        captcha_response = request.query_params.get("captcha_response")
+    # Do NOT consume the request body here to avoid interfering with downstream parsing
+    # Accept captcha from header or query string
+    captcha_response = (
+        request.headers.get("X-Captcha")
+        or request.query_params.get("captcha_response")
+    )
 
     if not captcha_response:
-        raise HTTPException(
-            status_code=400, detail="CAPTCHA verification required")
+        raise HTTPException(status_code=400, detail="CAPTCHA verification required")
 
     # Prepare verification data
     payload = {

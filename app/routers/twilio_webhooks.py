@@ -40,7 +40,7 @@ async def handle_twilio_callback(request: Request, db: Session = Depends(get_db)
         params = dict(form_data)
         if not validator.validate(request_url, params, twilio_signature):
             logger.warning("Invalid Twilio signature on status callback")
-            return {"status": "error", "message": "Invalid signature"}
+            raise HTTPException(status_code=401, detail="Invalid signature")
     else:
         logger.warning("TWILIO_AUTH_TOKEN not configured; skipping signature validation for status callback")
 

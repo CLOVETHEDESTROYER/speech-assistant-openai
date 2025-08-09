@@ -4,6 +4,9 @@ from typing import Optional
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException, TwilioException
 from app.utils.twilio_helpers import TwilioAuthError, TwilioApiError
+from app.db import SessionLocal
+from app.models import ProviderCredentials
+from app.utils.crypto import decrypt_string
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,26 @@ class TwilioClientService:
         """
         self._client = None
         self._init_client()
+
+    def set_user_context(self, user_id: int) -> None:
+        """Optionally set client credentials from a user's stored provider credentials."""
+        try:
+            db = SessionLocal()
+            creds = db.query(ProviderCredentials).filter(ProviderCredentials.user_id == user_id).first()
+            if not creds:
+                return
+            # Decrypt values if present; fall back to existing env values when missing
+            self.account_sid = decrypt_string(creds.twilio_account_sid) if creds.twilio_account_sid else self.account_sid
+            self.auth_token = decrypt_string(creds.twilio_auth_token) if creds.twilio_auth_token else self.auth_token
+            self.phone_number = decrypt_string(creds.twilio_phone_number) if creds.twilio_phone_number else self.phone_number
+            self.refresh_client()
+        except Exception as e:
+            logger.warning(f"Failed to load user provider credentials: {e}")
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
 
     def validate_connection(self) -> bool:
         """

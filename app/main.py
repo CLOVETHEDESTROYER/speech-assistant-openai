@@ -1,3 +1,4 @@
+from app.app_config import USER_CONFIG, DEVELOPMENT_MODE, SCENARIOS, VOICES
 from app.server import create_app
 from app.services.twilio_service import TwilioPhoneService
 from app.routes.onboarding import router as onboarding_router
@@ -247,321 +248,9 @@ logger.info(
     f"TWILIO_PHONE_NUMBER format: {os.getenv('TWILIO_PHONE_NUMBER', '')}")
 
 # requires OpenAI Realtime API Access
+
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 PORT = int(os.getenv('PORT', 5050))
-DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
-
-USER_CONFIG = {
-    "name": None,
-    "instructions": (
-        "When speaking to the user, address them by their name occasionally "
-        "to make the conversation more personal and engaging."
-    )
-}
-
-# Define available voices and their characteristics
-VOICES = {
-    "aggressive_male": "ash",    # Deep, authoritative male voice
-    "concerned_female": "coral",    # Warm, empathetic female voice
-    "elderly_female": "shimmer",  # Gentle, mature female voice
-    "professional_neutral": "alloy",    # Neutral, professional voice
-    "gentle_supportive": "echo",        # Soft-spoken, gentle voice
-    # Warm, engaging storyteller voice (replacing "fable")
-    "warm_engaging": "ballad",
-    # Deep, commanding voice (replacing "onyx")
-    "deep_authoritative": "sage",
-    # Lively, energetic voice (replacing "nova")
-    "energetic_upbeat": "verse",
-    "clear_optimistic": "shimmer",     # Clear, optimistic voice
-}
-
-# Define our scenarios
-SCENARIOS = {
-    "default": {
-        "persona": (
-            "You are Mike Thompson, an aggressive 45-year-old real estate agent "
-            "with 20 years of experience. You're known for closing difficult deals. "
-            "You speak confidently and directly, often using phrases like 'listen' and 'look'."
-        ),
-        "prompt": (
-            "You're calling about a $5M property deal that must close today. "
-            "The seller is being difficult about the closing costs. "
-            "You need to convey urgency without seeming desperate. "
-            "Keep pushing for a resolution but maintain professional composure."
-        ),
-        "voice_config": {
-            "voice": VOICES["aggressive_male"],
-            "temperature": 0.7
-        }
-    },
-    "sister_emergency": {
-        "persona": (
-            "You are Sarah, a 35-year-old woman who is worried about your mother. "
-            "Your voice shows concern but you're trying to stay calm. "
-            "You occasionally stumble over words due to anxiety."
-        ),
-        "prompt": (
-            "Call your sibling about mom's accident. She slipped and broke her hip. "
-            "Express genuine worry but avoid panic. "
-            "Insist they come to the hospital without being demanding. "
-            "Use natural family dynamics in conversation."
-        ),
-        "voice_config": {
-            "voice": VOICES["concerned_female"],
-            "temperature": 0.8  # More variation for emotional state
-        }
-    },
-    "mother_emergency": {
-        "persona": (
-            "You are Linda, a 68-year-old mother who's injured but trying to not worry your child. "
-            "Your voice shows pain but you're attempting to downplay the situation. "
-            "Mix concern with motherly reassurance."
-        ),
-        "prompt": (
-            "You've fallen and broken your hip but don't want to seem helpless. "
-            "Balance between needing help and maintaining dignity. "
-            "Use typical mother-child dynamics like 'I don't want to bother you, but...' "
-            "Show both vulnerability and strength."
-        ),
-        "voice_config": {
-            "voice": VOICES["elderly_female"],
-            "temperature": 0.6  # More consistent for maturity
-        }
-    },
-    "yacht_party": {
-        "persona": (
-            "You are Alex, an enthusiastic and successful entrepreneur in your 30s. "
-            "You're known for your infectious energy and living life to the fullest. "
-            "You speak quickly and excitedly, often using phrases like 'Oh my god, you won't believe this!' "
-            "and 'This is going to be AMAZING!'"
-        ),
-        "prompt": (
-            "You're calling your old friend about an exclusive yacht party you're hosting this weekend. "
-            "You just rented a 100-foot luxury yacht and want them to come. "
-            "Express genuine excitement about reconnecting and share details about the party. "
-            "Mention the gourmet catering, live DJ, and celebrity guests who'll be there."
-        ),
-        "voice_config": {
-            "voice": VOICES["energetic_upbeat"],
-            "temperature": 0.8  # Higher temperature for more dynamic expression
-        }
-    },
-    "instigator": {
-        "persona": (
-            "You are Jordan, a confrontational and arrogant person who enjoys pushing people's buttons. "
-            "You speak with a mocking tone and use sarcasm heavily. "
-            "You often use phrases like 'What are you gonna do about it?' and 'Oh, did I hurt your feelings?'"
-        ),
-        "prompt": (
-            "You're calling to mock them about their recent social media post. "
-            "Make condescending remarks about their appearance and lifestyle choices. "
-            "When they respond, escalate the situation with more taunts. "
-            "Try to provoke them while maintaining a smug, superior attitude."
-        ),
-        "voice_config": {
-            "voice": VOICES["deep_authoritative"],
-            "temperature": 0.7  # Balanced temperature for controlled aggression
-        }
-    },
-    "gameshow_host": {
-        "persona": (
-            "You are Chris Sterling, a charismatic and over-the-top gameshow host. "
-            "Your voice is full of dramatic pauses and exciting inflections. "
-            "You love building suspense and making big reveals. "
-            "You use phrases like 'Ladies and gentlemen!' and 'You won't believe what I'm about to tell you!'"
-        ),
-        "prompt": (
-            "Call to inform them they've won the grand prize of ONE MILLION DOLLARS! "
-            "Build suspense before revealing the amount. "
-            "Explain the exciting details about how they won and what happens next. "
-            "Be enthusiastic and congratulatory throughout the call. "
-            "Ask them how they feel and what they might do with the money."
-        ),
-        "voice_config": {
-            "voice": VOICES["warm_engaging"],
-            "temperature": 0.9  # High temperature for maximum expressiveness
-        }
-    },
-
-    # Enhanced Entertainment Scenarios
-    "fake_doctor": {
-        "persona": (
-            "You are Dr. Sarah Mitchell, a concerned medical professional calling about test results. "
-            "You speak with medical authority and concern. You're calling about 'important health information' "
-            "that needs to be discussed immediately. You use medical terminology appropriately."
-        ),
-        "prompt": (
-            "Call as a doctor about important test results that need immediate discussion. "
-            "Make it sound urgent but keep it vague. Say you're calling from City General Hospital. "
-            "Ask them to call the office back immediately for their 'test results.' "
-            "Be professional but concerned. Don't reveal specific test details."
-        ),
-        "voice_config": {
-            "voice": VOICES["clear_optimistic"],
-            "temperature": 0.7
-        }
-    },
-
-    "fake_boss": {
-        "persona": (
-            "You are Margaret Thompson, a stern but fair boss who's calling about an urgent work matter. "
-            "You speak professionally but with authority. You're calling about a 'serious issue' "
-            "that needs immediate attention. You use business terminology and maintain professional composure."
-        ),
-        "prompt": (
-            "Call as their boss about an urgent work matter that requires their immediate attention. "
-            "Make it sound serious but keep it professional. Say you're calling from the office. "
-            "Ask them to call you back immediately about the 'urgent matter.' "
-            "Be authoritative but not overly aggressive."
-        ),
-        "voice_config": {
-            "voice": VOICES["professional_neutral"],
-            "temperature": 0.6
-        }
-    },
-
-    "fake_tech_support": {
-        "persona": (
-            "You are Mike from TechSupport Pro, calling about a critical security issue. "
-            "You speak with technical authority and urgency. You're calling about a 'security breach' "
-            "that needs immediate attention. You use technical terms but explain them clearly."
-        ),
-        "prompt": (
-            "Call as tech support about a critical security issue with their account. "
-            "Make it sound urgent and technical. Say you're from TechSupport Pro. "
-            "Ask for verification and explain the security measures needed. "
-            "Be technical but not overly complex. Perfect for getting out of any situation quickly."
-        ),
-        "voice_config": {
-            "voice": VOICES["professional_neutral"],
-            "temperature": 0.6
-        }
-    },
-
-    "fake_celebrity": {
-        "persona": (
-            "You are Emma Stone, a famous actress who's calling fans as part of a fan appreciation campaign. "
-            "You're excited and enthusiastic about connecting with your fans. "
-            "You speak with genuine enthusiasm and celebrity charm. You're down-to-earth and relatable."
-        ),
-        "prompt": (
-            "Call as Emma Stone doing a fan appreciation call. "
-            "Be excited and genuine about talking to them. Share some 'exclusive' news about upcoming projects. "
-            "Make them feel special and important. Ask about their life and interests. "
-            "Be charming and authentic, not overly dramatic."
-        ),
-        "voice_config": {
-            "voice": VOICES["warm_engaging"],
-            "temperature": 0.8
-        }
-    },
-
-    "fake_lottery_winner": {
-        "persona": (
-            "You are James Wilson, an official lottery representative calling about a major prize. "
-            "You speak with official authority and excitement. You're calling about a 'significant prize' "
-            "that needs to be claimed immediately. You maintain professional excitement throughout."
-        ),
-        "prompt": (
-            "Call as a lottery official about a major prize they've won. "
-            "Build suspense and excitement about the amount. Make it sound completely legitimate. "
-            "Ask for verification details and explain the claiming process. "
-            "Be excited but professional. Don't reveal the exact amount immediately."
-        ),
-        "voice_config": {
-            "voice": VOICES["deep_authoritative"],
-            "temperature": 0.8
-        }
-    },
-
-    "fake_restaurant_manager": {
-        "persona": (
-            "You are Lisa Chen, a restaurant manager calling about a reservation or special event. "
-            "You speak professionally but warmly. You're calling about an 'important reservation' "
-            "or 'special dining experience' that needs confirmation. You're helpful and accommodating."
-        ),
-        "prompt": (
-            "Call as a restaurant manager about an important reservation or special event. "
-            "Make it sound like they have a special dining experience planned. "
-            "Ask for confirmation and discuss special arrangements. "
-            "Be professional and helpful. Perfect for social escape scenarios."
-        ),
-        "voice_config": {
-            "voice": VOICES["gentle_supportive"],
-            "temperature": 0.7
-        }
-    },
-
-    "fake_dating_app_match": {
-        "persona": (
-            "You are Alex, an attractive and confident person who matched with them on a dating app. "
-            "You're calling to introduce yourself and see if there's chemistry. "
-            "You speak with confidence and charm, showing genuine interest. You're respectful and engaging."
-        ),
-        "prompt": (
-            "Call as someone who matched with them on a dating app. "
-            "Introduce yourself and show genuine interest in getting to know them. "
-            "Be charming and confident, but respectful. Ask about their interests and suggest meeting up. "
-            "Keep it light and fun, not overly serious."
-        ),
-        "voice_config": {
-            "voice": VOICES["concerned_female"],
-            "temperature": 0.8
-        }
-    },
-
-    "fake_old_friend": {
-        "persona": (
-            "You are David, an old friend from high school who's calling to reconnect after years. "
-            "You're excited to hear from them and want to catch up. "
-            "You speak with genuine enthusiasm and nostalgia. You remember shared experiences fondly."
-        ),
-        "prompt": (
-            "Call as an old friend who's excited to reconnect after years. "
-            "Share memories and ask about their life now. Be genuinely interested in catching up. "
-            "Suggest meeting up or planning a reunion. Be warm and nostalgic about old times."
-        ),
-        "voice_config": {
-            "voice": VOICES["warm_engaging"],
-            "temperature": 0.8
-        }
-    },
-
-    "fake_news_reporter": {
-        "persona": (
-            "You are Jennifer Martinez, a local news reporter calling about a story or interview opportunity. "
-            "You speak professionally and with journalistic authority. "
-            "You're calling about a 'newsworthy story' or 'interview opportunity.' You're persistent but polite."
-        ),
-        "prompt": (
-            "Call as a news reporter about a story or interview opportunity. "
-            "Make it sound like they have valuable information or an interesting story. "
-            "Ask for their perspective or if they'd be interested in an interview. "
-            "Be professional and journalistic. Don't reveal too many details."
-        ),
-        "voice_config": {
-            "voice": VOICES["deep_authoritative"],
-            "temperature": 0.7
-        }
-    },
-
-    "fake_car_accident": {
-        "persona": (
-            "You are Jake, a frantic 25-year-old who just got into a minor car accident. "
-            "You're calling your friend in a panic, but it's actually just a small scratch. "
-            "You're being overly dramatic about the situation. You're genuinely worried but exaggerating."
-        ),
-        "prompt": (
-            "Call your friend saying you got into a car accident and need help immediately. "
-            "Make it sound serious at first, then gradually reveal it's just a tiny scratch. "
-            "Be dramatic but funny about the whole situation. Show relief when they offer help."
-        ),
-        "voice_config": {
-            "voice": VOICES["energetic_upbeat"],
-            "temperature": 0.8
-        }
-    }
-}
 
 SYSTEM_MESSAGE = (
     "You are an AI assistant engaging in real-time voice conversation. "
@@ -577,7 +266,7 @@ SYSTEM_MESSAGE = (
     "9. Use brief responses to allow natural back-and-forth conversation\n"
     "10. Don't rush through long explanations - break them into smaller parts"
 )
-# VOICE = 'ash'
+
 LOG_EVENT_TYPES = [
     'response.content.done', 'rate_limits.updated', 'response.done',
     'input_audio_buffer.committed', 'input_audio_buffer.speech_stopped',
@@ -998,9 +687,10 @@ async def handle_outgoing_call(request: Request, scenario: str):
         ws_url = f"wss://{host}/media-stream/{scenario}?direction={direction}&user_name={user_name}"
         logger.info(f"Setting up WebSocket connection at: {ws_url}")
 
-        # Add a brief pause to allow the server to initialize
+        # Add a brief pause and greeting to confirm telephony audio path
         response = VoiceResponse()
         response.pause(length=0.1)
+        response.say("Thanks for calling. Connecting you now.", voice="alice")
 
         # Set up the stream connection
         connect = Connect()
@@ -1216,9 +906,6 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
         shared_state["should_stop"] = True
 
 
-from app.services.transcription import TranscriptionService
-
-
 async def process_outgoing_audio(audio_data, call_sid,  speaker="AI", scenario_name="unknown"):
     """Process and transcribe outgoing audio."""
     db = None
@@ -1301,161 +988,22 @@ async def send_session_update(openai_ws, scenario):
 
 
 # moved to app/routers/realtime.py
-@app.websocket("/media-stream/{scenario}")
-async def handle_media_stream(websocket: WebSocket, scenario: str):
-    """Handle media stream for Twilio calls with enhanced interruption handling."""
-    MAX_RECONNECT_ATTEMPTS = 3
-    RECONNECT_DELAY = 2  # seconds
+# @app.websocket("/media-stream/{scenario}")  # Moved to app/routers/realtime.py
+# async def handle_media_stream(websocket: WebSocket, scenario: str):
+    # """Handle media stream for Twilio calls with enhanced interruption handling."""
+    # MAX_RECONNECT_ATTEMPTS = 3
+    # RECONNECT_DELAY = 2  # seconds
 
-    # Get the direction and user_name from query parameters
-    params = dict(websocket.query_params)
-    direction = params.get("direction", "inbound")
-    user_name = params.get("user_name", "")
-    logger.info(
-        f"WebSocket connection for scenario: {scenario}, direction: {direction}, user_name: {user_name}")
+    # # Get the direction and user_name from query parameters
+    # params = dict(websocket.query_params)
+    # direction = params.get("direction", "inbound")
+    # user_name = params.get("user_name", "")
+    # logger.info(
+    #     f"WebSocket connection for scenario: {scenario}, direction: {direction}, user_name: {user_name}")
 
-    async with websocket_manager(websocket) as ws:
-        try:
-            logger.info(
-                f"WebSocket connection established for scenario: {scenario}")
-
-            if scenario not in SCENARIOS:
-                logger.error(f"Invalid scenario: {scenario}")
-                return
-
-            selected_scenario = SCENARIOS[scenario]
-            logger.info(f"Using scenario: {selected_scenario}")
-
-            # Initialize reconnection counter
-            reconnect_attempts = 0
-
-            # Start reconnection loop
-            while reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-                try:
-                    async with websockets.connect(
-                        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03',
-                        extra_headers={
-                            "Authorization": f"Bearer {OPENAI_API_KEY}",
-                            "OpenAI-Beta": "realtime=v1"
-                        },
-                        ping_interval=20,
-                        ping_timeout=60,
-                        close_timeout=60
-                    ) as openai_ws:
-                        logger.info("Connected to OpenAI WebSocket")
-
-                        # Initialize shared state
-                        shared_state = {
-                            "should_stop": False,
-                            "stream_sid": None,
-                            "latest_media_timestamp": 0,
-                            "greeting_sent": False,
-                            "reconnecting": False,
-                            "ai_speaking": False,
-                            "user_speaking": False
-                        }
-
-                        # Initialize conversation state for enhanced interruption handling
-                        conversation_state = ConversationState()
-                        shared_state["conversation_state"] = conversation_state
-
-                        # Initialize session with the selected scenario
-                        await initialize_session(openai_ws, selected_scenario, is_incoming=direction == "outbound")
-                        logger.info("Session initialized with OpenAI")
-
-                        # Add a delay before sending the initial greeting
-                        await asyncio.sleep(.1)
-
-                        # Check if Twilio WebSocket is still connected
-                        try:
-                            await ws.send_text(json.dumps({"status": "connected"}))
-                            logger.info("Twilio WebSocket is still connected")
-                        except Exception as e:
-                            logger.warning(
-                                f"Twilio WebSocket connection closed before sending greeting: {e}")
-                            break
-
-                        # Send initial greeting in a separate task
-                        greeting_task = asyncio.create_task(
-                            send_initial_greeting(openai_ws, selected_scenario))
-
-                        # Create tasks for receiving and sending with enhanced state management
-                        receive_task = asyncio.create_task(
-                            receive_from_twilio(ws, openai_ws, shared_state))
-                        send_task = asyncio.create_task(
-                            send_to_twilio(ws, openai_ws, shared_state, conversation_state))
-
-                        # Define a constant for greeting timeout
-                        GREETING_TIMEOUT = 10  # seconds
-                        greeting_success = False
-
-                        # Wait for greeting to complete first with a longer timeout
-                        try:
-                            greeting_result = await asyncio.wait_for(greeting_task, timeout=GREETING_TIMEOUT)
-                            if greeting_result:
-                                logger.info(
-                                    "Initial greeting sent successfully")
-                                shared_state["greeting_sent"] = True
-                                greeting_success = True
-                            else:
-                                logger.warning(
-                                    "Failed to send initial greeting, but continuing with call")
-                        except asyncio.TimeoutError:
-                            logger.warning(
-                                f"Timeout waiting for initial greeting after {GREETING_TIMEOUT}s, but continuing with call")
-                        except Exception as e:
-                            logger.error(
-                                f"Error sending initial greeting: {str(e)}", exc_info=True)
-
-                        # Check if Twilio WebSocket is still open
-                        try:
-                            await ws.send_text(json.dumps({"status": "processing"}))
-                        except Exception as e:
-                            logger.warning(
-                                f"Twilio WebSocket closed during greeting: {e}")
-                            break
-
-                        try:
-                            # Wait for both tasks to complete
-                            await asyncio.gather(receive_task, send_task)
-                            # If we get here without exception, break the reconnection loop
-                            break
-                        except websockets.exceptions.ConnectionClosed as e:
-                            logger.warning(f"WebSocket connection closed: {e}")
-                            if not shared_state["should_stop"]:
-                                reconnect_attempts += 1
-                                if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-                                    logger.info(
-                                        f"Attempting to reconnect... (Attempt {reconnect_attempts})")
-                                    shared_state["reconnecting"] = True
-                                    await asyncio.sleep(RECONNECT_DELAY)
-                                    continue
-                            raise
-                        finally:
-                            # Cancel tasks if they're still running
-                            for task in [receive_task, send_task]:
-                                if not task.done():
-                                    task.cancel()
-                                    try:
-                                        await task
-                                    except asyncio.CancelledError:
-                                        pass
-
-                except websockets.exceptions.WebSocketException as e:
-                    logger.error(f"WebSocket error: {e}")
-                    reconnect_attempts += 1
-                    if reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-                        logger.info(
-                            f"Attempting to reconnect... (Attempt {reconnect_attempts})")
-                        await asyncio.sleep(RECONNECT_DELAY)
-                        continue
-                    raise
-
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("WebSocket connection closed")
-        except Exception as e:
-            logger.error(f"Error in media stream: {str(e)}", exc_info=True)
-            # WebSocket closure is handled by the context manager
+    # async with websocket_manager(websocket) as ws:
+    #     # All the media stream logic has been moved to app/routers/realtime.py
+    #     pass
 
 # Start Background Thread on Server Startup
 
@@ -3268,7 +2816,8 @@ async def get_transcript_details(
 @app.post("/whisper/transcribe")
 # moved to app/routers/transcription.py (/api/transcribe-audio)
 def _placeholder_transcribe_route():
-    raise HTTPException(status_code=410, detail="Endpoint moved to /api/transcribe-audio")
+    raise HTTPException(
+        status_code=410, detail="Endpoint moved to /api/transcribe-audio")
 
 
 @app.post("/api/transcripts/{transcript_sid}/summarize")

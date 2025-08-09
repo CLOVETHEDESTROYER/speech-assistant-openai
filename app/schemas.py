@@ -20,7 +20,7 @@ class TokenSchema(BaseModel):
     token_type: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TokenData(BaseModel):
@@ -32,11 +32,12 @@ class TokenResponse(BaseModel):
     token_type: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class RealtimeSessionCreate(BaseModel):
     scenario: str
+    scenario_id: Optional[str] = None  # For backward compatibility
     user_id: Optional[int] = None
 
 
@@ -71,7 +72,7 @@ class ConversationResponse(BaseModel):
     user_id: Optional[int]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CallScheduleCreate(BaseModel):

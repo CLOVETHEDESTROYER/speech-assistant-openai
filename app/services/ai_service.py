@@ -1,8 +1,18 @@
+import os
 import openai
-from log import logger
+import logging
+from app.db import SessionLocal
+from app.models import ProviderCredentials
+from app.utils.crypto import decrypt_string
+
+logger = logging.getLogger(__name__)
 
 async def get_ai_response(conversation_text: str) -> str:
     try:
+        # Resolve API key from user context in future; for now support env only
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            openai.api_key = api_key
         response = await openai.ChatCompletion.acreate(
             model="gpt-3.5-turbo",
             messages=[
@@ -19,6 +29,9 @@ async def get_ai_response(conversation_text: str) -> str:
 
 async def text_to_speech(text: str) -> bytes:
     try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            openai.api_key = api_key
         response = await openai.Audio.create(
             model="tts-1",
             voice="alloy",
