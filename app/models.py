@@ -315,7 +315,8 @@ class ProviderCredentials(Base):
     __tablename__ = "provider_credentials"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    user_id = Column(Integer, ForeignKey("users.id"),
+                     nullable=False, unique=True)
 
     # Encrypted fields
     openai_api_key = Column(String, nullable=True)
@@ -325,8 +326,10 @@ class ProviderCredentials(Base):
     twilio_vi_sid = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
 
+    # Relationship
     user = relationship("User", back_populates="provider_credentials")
 
 

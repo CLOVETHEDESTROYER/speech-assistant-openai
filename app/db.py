@@ -8,18 +8,31 @@ import logging
 from sqlalchemy import text
 from dotenv import load_dotenv
 
-load_dotenv("/var/www/AiFriendChatBeta/.env")
+# Load environment variables from multiple possible locations
+# Try production path first, then local paths
+env_paths = [
+    "/var/www/AiFriendChatBeta/.env",  # Production path
+    ".env",                            # Local development
+    "dev.env",                         # Development environment
+    "test.env"                         # Test environment
+]
+
+for env_path in env_paths:
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        break
 
 logger = logging.getLogger(__name__)
 
 # Get database URL from environment, fallback to SQLite
 SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
+    "DATABASE_URL",
     "sqlite:///./sql_app.db"
 )
 
 if os.getenv("ENV", "production") == "production" and SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    raise RuntimeError("DATABASE_URL points to SQLite in production. Set a Postgres DSN in .env.")
+    raise RuntimeError(
+        "DATABASE_URL points to SQLite in production. Set a Postgres DSN in .env.")
 
 # Database configuration
 DATABASE_POOL_SIZE = int(os.getenv("DATABASE_POOL_SIZE", "5"))
@@ -42,11 +55,12 @@ if IS_POSTGRESQL:
         pool_pre_ping=True,  # Verify connections before use
         echo=os.getenv("DEBUG", "false").lower() == "true"
     )
-    logger.info(f"Using PostgreSQL with connection pooling (pool_size={DATABASE_POOL_SIZE})")
+    logger.info(
+        f"Using PostgreSQL with connection pooling (pool_size={DATABASE_POOL_SIZE})")
 else:
     # SQLite configuration (development)
     engine = create_engine(
-        SQLALCHEMY_DATABASE_URL, 
+        SQLALCHEMY_DATABASE_URL,
         connect_args={"check_same_thread": False}
     )
     logger.info("Using SQLite database (development mode)")
@@ -58,7 +72,8 @@ if IS_POSTGRESQL:
         # Set PostgreSQL-specific connection settings
         with dbapi_connection.cursor() as cursor:
             cursor.execute("SET SESSION timezone = 'UTC'")
-            cursor.execute("SET SESSION statement_timeout = '30000'")  # 30 seconds
+            # 30 seconds
+            cursor.execute("SET SESSION statement_timeout = '30000'")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
