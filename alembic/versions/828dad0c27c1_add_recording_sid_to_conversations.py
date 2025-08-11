@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -27,9 +28,16 @@ def upgrade() -> None:
     op.create_index(op.f('ix_conversations_recording_sid'),
                     'conversations', ['recording_sid'], unique=False)
 
-    # Create index on call_sid since we removed the unique constraint
-    op.create_index(op.f('ix_conversations_call_sid'),
-                    'conversations', ['call_sid'], unique=False)
+    # Safely drop index if it already exists
+    op.execute(text("DROP INDEX IF EXISTS ix_conversations_call_sid"))
+    
+    # Recreate the index
+    op.create_index(
+        op.f('ix_conversations_call_sid'),
+        'conversations',
+        ['call_sid'],
+        unique=False
+    )
 
     # Drop the unique constraint on call_sid if it exists
     try:
