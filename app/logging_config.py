@@ -6,13 +6,12 @@ from app import config
 
 class SensitiveDataFilter(logging.Filter):
     def filter(self, record):
-        if hasattr(record, 'msg') and isinstance(record.msg, str):
-            if 'OPENAI_API_KEY' in record.msg and os.getenv('OPENAI_API_KEY'):
-                record.msg = record.msg.replace(
-                    os.getenv('OPENAI_API_KEY'), '[OPENAI_API_KEY_REDACTED]')
-            if 'TWILIO_AUTH_TOKEN' in record.msg and os.getenv('TWILIO_AUTH_TOKEN'):
-                record.msg = record.msg.replace(
-                    os.getenv('TWILIO_AUTH_TOKEN'), '[TWILIO_AUTH_TOKEN_REDACTED]')
+        if hasattr(record, "msg") and isinstance(record.msg, str):
+            for env_key in ["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SECRET_KEY", "DATA_ENCRYPTION_KEY"]:
+                val = os.getenv(env_key)
+                if val and val in record.msg:
+                    record.msg = record.msg.replace(
+                        val, f"[{env_key}_REDACTED]")
         return True
 
 
@@ -41,5 +40,3 @@ def configure_logging() -> logging.Logger:
     logger = logging.getLogger(__name__)
     logger.addFilter(SensitiveDataFilter())
     return logger
-
-

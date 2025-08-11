@@ -2,18 +2,24 @@ import os
 import requests
 from fastapi import HTTPException, Request
 from dotenv import load_dotenv
+from app.config import CAPTCHA_ENABLED, RECAPTCHA_SECRET_KEY, RECAPTCHA_SITE_KEY
 
 # Load environment variables
 load_dotenv()
 
-# Environment variables
-RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
-RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY")
+# Environment variables - now imported from config
+# RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
+# RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY")
 
 if not RECAPTCHA_SECRET_KEY or RECAPTCHA_SECRET_KEY.strip() == "":
     import logging
     logging.warning(
         "RECAPTCHA_SECRET_KEY not set in environment variables. CAPTCHA validation will not work correctly.")
+
+if not CAPTCHA_ENABLED:
+    import logging
+    logging.info(
+        "CAPTCHA is disabled via configuration. All CAPTCHA checks will be bypassed.")
 
 
 async def verify_captcha(request: Request):
@@ -35,39 +41,41 @@ async def verify_captcha(request: Request):
     Raises:
         HTTPException if verification fails
     """
-    # Skip verification if RECAPTCHA_SECRET_KEY is not set (for development/testing)
-    if not RECAPTCHA_SECRET_KEY or RECAPTCHA_SECRET_KEY.strip() == "":
+    # Skip verification entirely if disabled
+    if not CAPTCHA_ENABLED:
         return True
 
-    # Do NOT consume the request body here to avoid interfering with downstream parsing
-    # Accept captcha from header or query string
+    # Secret is required in production
+    if not RECAPTCHA_SECRET_KEY or RECAPTCHA_SECRET_KEY.strip() == "":
+        if IS_DEV:
+            return True
+        raise HTTPException(status_code=500, detail="CAPTCHA misconfigured")
+
+    # Accept token from header or query string
     captcha_response = (
         request.headers.get("X-Captcha")
         or request.query_params.get("captcha_response")
     )
 
     if not captcha_response:
-        raise HTTPException(status_code=400, detail="CAPTCHA verification required")
+        raise HTTPException(
+            status_code=400, detail="CAPTCHA verification required")
 
-    # Prepare verification data
     payload = {
-        'secret': RECAPTCHA_SECRET_KEY,
-        'response': captcha_response,
-        'remoteip': request.client.host if request else None
+        "secret": RECAPTCHA_SECRET_KEY,
+        "response": captcha_response,
+        "remoteip": request.client.host if request else None,
     }
 
-    # Send verification request to Google
     try:
         response = requests.post(
             "https://www.google.com/recaptcha/api/siteverify",
-            data=payload
+            data=payload,
         )
         result = response.json()
-
         if not result.get("success", False):
             raise HTTPException(
                 status_code=400, detail="CAPTCHA verification failed")
-
         return True
     except Exception as e:
         raise HTTPException(

@@ -28,6 +28,9 @@ from app.services.twilio_client import get_twilio_client
 from contextlib import contextmanager
 from app import config  # Import the config module
 from sqlalchemy.exc import SQLAlchemyError
+import os
+
+IS_DEV = os.getenv("DEVELOPMENT_MODE", "false").lower() == "true"
 import uuid
 from twilio.base.exceptions import TwilioRestException
 from openai import OpenAI
@@ -364,14 +367,20 @@ async def validate_twilio_connection():
         client.api.accounts(client.account_sid).fetch()
         logger.info("Twilio client connection validated successfully")
     except TwilioAuthError as e:
-        logger.error(f"Twilio authentication error: {e.message}", extra={
-                     "details": e.details})
-        raise RuntimeError("Failed to authenticate with Twilio")
+        logger.warning(f"Twilio authentication error: {e.message} - continuing without Twilio", extra={
+            "details": e.details})
+        logger.info(
+            "Application starting without Twilio authentication - some features may not work")
     except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-                     "details": e.details})
+        logger.warning(f"Twilio API error: {e.message} - continuing without Twilio", extra={
+            "details": e.details})
+        logger.info(
+            "Application starting without Twilio configuration - some features may not work")
+    except Exception as e:
         logger.warning(
-            "Application starting with invalid Twilio configuration")
+            f"Twilio validation failed: {e} - continuing without Twilio")
+        logger.info(
+            "Application starting without Twilio - some features may not work")
 
 # User Login Endpoint
 
@@ -535,6 +544,23 @@ async def make_call(
                         raise HTTPException(status_code=400, detail=details.get(
                             "message", "Cannot make call"))
 
+        # Check and fix database sequence if needed
+        try:
+            # Check if sequence is working
+            result = db.execute(
+                "SELECT nextval('conversations_id_seq')").scalar()
+            logger.info(f"Next conversation ID: {result}")
+        except Exception as e:
+            logger.error(f"Sequence error: {str(e)}")
+            # Reset sequence if needed
+            try:
+                db.execute(
+                    "SELECT setval('conversations_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM conversations))")
+                db.commit()
+                logger.info("Database sequence reset successfully")
+            except Exception as reset_error:
+                logger.error(f"Failed to reset sequence: {str(reset_error)}")
+
         # Determine which phone number to use
         from_number = None
 
@@ -573,7 +599,9 @@ async def make_call(
                     f"Using system-wide phone number for backward compatibility: {from_number}")
 
         # Build the media stream URL with user name and direction parameters
-        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        # Allow private hosts for development testing
+        base_url = clean_and_validate_url(
+            config.PUBLIC_URL, allow_private=True)
         user_name = USER_CONFIG.get("name", "")
         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
@@ -588,16 +616,30 @@ async def make_call(
         )
 
         # Create a conversation record in the database with the call_sid
-        conversation = Conversation(
-            user_id=current_user.id,
-            scenario=scenario,
-            phone_number=phone_number,
-            direction="outbound",
-            status="in-progress",
-            call_sid=call.sid
-        )
-        db.add(conversation)
-        db.commit()
+        try:
+            conversation = Conversation(
+                user_id=current_user.id,
+                scenario=scenario,
+                phone_number=phone_number,
+                direction="outbound",
+                status="in-progress",
+                call_sid=call.sid
+            )
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create conversation: {str(e)}")
+            # Try to get the next available ID
+            try:
+                result = db.execute(
+                    "SELECT nextval('conversations_id_seq')").scalar()
+                logger.info(f"Next available ID: {result}")
+            except Exception as seq_error:
+                logger.error(f"Sequence error: {str(seq_error)}")
+            raise HTTPException(
+                status_code=500, detail="Database error creating conversation")
 
         # Record the call in usage statistics (only for business users not in development mode)
         if not DEVELOPMENT_MODE:
@@ -661,7 +703,33 @@ async def make_call(
 
 
 @app.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
-async def handle_outgoing_call(request: Request, scenario: str):
+@rate_limit("2/minute")
+async def handle_outgoing_call(
+    request: Request,
+    scenario: str,
+    db: Session = Depends(get_db)
+):
+    """Handle outgoing call webhooks from Twilio - Uses signature validation instead of user auth"""
+    # Validate Twilio signature if configured
+    if not IS_DEV and not config.TWILIO_AUTH_TOKEN:
+        raise HTTPException(status_code=500, detail="Twilio signature validation not configured")
+    
+    if config.TWILIO_AUTH_TOKEN:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+        twilio_signature = request.headers.get("X-Twilio-Signature", "")
+        request_url = str(request.url)
+        
+        # Get form data for validation
+        form_data = await request.form()
+        params = dict(form_data)
+        
+        if not validator.validate(request_url, params, twilio_signature):
+            logger.warning("Invalid Twilio signature on outgoing call webhook")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        form_data = await request.form()
+        
     logger.info(f"Outgoing call webhook received for scenario: {scenario}")
     try:
         # Extract direction and user_name from query parameters
@@ -717,7 +785,34 @@ async def handle_outgoing_call(request: Request, scenario: str):
 
 
 @app.api_route("/incoming-call/{scenario}", methods=["GET", "POST"])
+@rate_limit("1/minute")
 async def handle_incoming_call(request: Request, scenario: str):
+    """Handle incoming calls from customers - No authentication required for business logic"""
+    # Enhanced security for incoming calls
+    try:
+        # Validate Twilio signature if configured
+        if config.TWILIO_AUTH_TOKEN:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+
+            # Get form data for validation
+            form_data = await request.form()
+            params = dict(form_data)
+
+            if not validator.validate(request_url, params, twilio_signature):
+                logger.warning("Invalid Twilio signature on incoming call")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call")
+            form_data = await request.form()
+    except Exception as e:
+        logger.error(f"Error validating incoming call: {e}")
+        raise HTTPException(status_code=401, detail="Invalid request")
+
     logger.info(f"Incoming call webhook received for scenario: {scenario}")
     try:
         if scenario not in SCENARIOS:
@@ -763,7 +858,34 @@ async def handle_incoming_call(request: Request, scenario: str):
 
 # Add a compatibility route for the old webhook URL format
 @app.api_route("/incoming-call-webhook/{scenario}", methods=["GET", "POST"])
+@rate_limit("1/minute")
 async def handle_incoming_call_webhook(request: Request, scenario: str):
+    """Handle incoming call webhooks from customers - No authentication required for business logic"""
+    # Enhanced security for incoming calls
+    try:
+        # Validate Twilio signature if configured
+        if config.TWILIO_AUTH_TOKEN:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+
+            # Get form data for validation
+            form_data = await request.form()
+            params = dict(form_data)
+
+            if not validator.validate(request_url, params, twilio_signature):
+                logger.warning(
+                    "Invalid Twilio signature on incoming call webhook")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call webhook")
+            form_data = await request.form()
+    except Exception as e:
+        logger.error(f"Error validating incoming call webhook: {e}")
+        raise HTTPException(status_code=401, detail="Invalid request")
     """Compatibility route that redirects to the main incoming-call route."""
     logger.info(
         f"Received call on compatibility webhook route for scenario: {scenario}")
@@ -1188,6 +1310,7 @@ async def print_routes():
 
 
 @app.post("/incoming-call", response_class=Response)
+@rate_limit("1/minute")
 async def incoming_call(request: Request, scenario: str):
     response = VoiceResponse()
     response.say("Hello! This is your speech assistant powered by OpenAI.")
@@ -1389,8 +1512,7 @@ async def enhanced_handle_speech_started_event(websocket, openai_ws, shared_stat
                 "type": "conversation.item.truncate",
                 "item_id": conversation_state.last_assistant_item,
                 "content_index": 0,
-                "audio_end_ms": int(current_time_ms),
-                "reason": "user_interrupt"
+                "audio_end_ms": int(current_time_ms)
             }
 
             try:
@@ -1658,7 +1780,34 @@ async def make_custom_call(
 
 
 @app.api_route("/incoming-custom-call/{scenario_id}", methods=["GET", "POST"], operation_id="handle_custom_incoming_call")
+@rate_limit("1/minute")
 async def handle_incoming_custom_call(request: Request, scenario_id: str, db: Session = Depends(get_db)):
+    """Handle incoming custom calls from customers - No authentication required for business logic"""
+    # Enhanced security for incoming calls
+    try:
+        # Validate Twilio signature if configured
+        if config.TWILIO_AUTH_TOKEN:
+            from twilio.request_validator import RequestValidator
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+
+            # Get form data for validation
+            form_data = await request.form()
+            params = dict(form_data)
+
+            if not validator.validate(request_url, params, twilio_signature):
+                logger.warning(
+                    "Invalid Twilio signature on incoming custom call")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming custom call")
+            form_data = await request.form()
+    except Exception as e:
+        logger.error(f"Error validating incoming custom call: {e}")
+        raise HTTPException(status_code=401, detail="Invalid request")
     logger.info(
         f"Incoming custom call webhook received for scenario: {scenario_id}")
     try:
@@ -1958,10 +2107,24 @@ async def link_transcript_to_conversation(db: Session, call_sid: str, transcript
 
 # moved to app/routers/twilio_webhooks.py
 @app.post("/recording-callback")
-async def handle_recording_callback(request: Request, db: Session = Depends(get_db)):
+async def handle_recording_callback(
+    request: Request,
+    db: Session = Depends(get_db)
+):
     try:
+        # Validate Twilio webhook signature using centralized validator
+        from app.utils.twilio_validation import TwilioWebhookValidator
+        validator = TwilioWebhookValidator()
+
+        try:
+            await validator.validate_webhook_signature(request)
+            form_data = await request.form()
+        except HTTPException as e:
+            logger.error(
+                f"Twilio webhook signature validation failed: {e.detail}")
+            raise e
+
         # Log the raw request for debugging
-        form_data = await request.form()
         form_data_dict = dict(form_data)
         # Sanitize form data for logging
         logger.info(
@@ -2209,161 +2372,7 @@ async def delete_twilio_transcript(transcript_sid: str):
         )
 
 
-@app.post("/twilio-transcripts/create-with-participants")
-# moved to app/routers/twilio_transcripts.py
-# moved to app/routers/twilio_transcripts.py
-@app.post("/twilio-transcripts/webhook-callback")
-async def handle_transcript_webhook(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """
-    Webhook endpoint to receive notifications when a Twilio Voice Intelligence transcript is complete.
-
-    This endpoint should be configured as the webhook URL in your Voice Intelligence Service settings.
-    """
-    try:
-        # Verify Twilio signature (skip in development or if token not set)
-        if config.TWILIO_AUTH_TOKEN:
-            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-            twilio_signature = request.headers.get("X-Twilio-Signature", "")
-            request_url = str(request.url)
-            # For JSON callbacks, parameters are not form-encoded; validate URL-only as best-effort
-            if not validator.validate(request_url, {}, twilio_signature):
-                logger.warning(
-                    "Invalid Twilio signature on transcript webhook")
-                raise HTTPException(
-                    status_code=401, detail="Invalid signature")
-        else:
-            logger.warning(
-                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for transcript webhook")
-
-        # Parse the webhook payload after validation
-        payload = await request.json()
-        logger.info(
-            f"Received transcript webhook callback: {safe_log_request_data(payload)}")
-
-        # Extract the transcript SID and status
-        transcript_sid = payload.get('transcript_sid') or payload.get('sid')
-        status = payload.get('status')
-        event_type = payload.get('event_type')
-
-        if not transcript_sid:
-            logger.error("No transcript SID provided in webhook")
-            return {"status": "error", "message": "No transcript SID provided"}
-
-        # Handle voice_intelligence_transcript_available event type
-        if event_type == "voice_intelligence_transcript_available":
-            # Fetch the transcript details using the transcript_sid
-            try:
-                transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
-                status = transcript.status
-                logger.info(
-                    f"Retrieved transcript {transcript_sid} with status: {status}")
-            except Exception as e:
-                logger.error(f"Error fetching transcript details: {str(e)}")
-                return {"status": "error", "message": f"Error fetching transcript details: {str(e)}"}
-
-        if status == "completed":
-            # Fetch the complete transcript with sentences - fetch() and list() are not async
-            transcript = get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
-            sentences = get_twilio_client().intelligence.v2.transcripts(
-                transcript_sid).sentences.list()
-
-            # Log the structure of the first sentence to debug
-            if sentences and len(sentences) > 0:
-                first_sentence = sentences[0]
-                logger.info(
-                    f"Webhook - Sentence object attributes: {dir(first_sentence)}")
-                logger.info(
-                    f"Webhook - Sentence object representation: {repr(first_sentence)}")
-
-            # Format the transcript text with proper attribute checking
-            sorted_sentences = sorted(
-                sentences, key=lambda s: getattr(s, "start_time", 0))
-
-            # Use getattr to safely access attributes that might be named differently
-            full_text = " ".join(
-                getattr(s, "transcript", "No text available")
-                for s in sorted_sentences
-            )
-
-            # Helper function to convert Decimal to float for JSON serialization
-            def decimal_to_float(obj):
-                from decimal import Decimal
-                if isinstance(obj, Decimal):
-                    return float(obj)
-                return obj
-
-            # Store the transcript in TranscriptRecord for later retrieval
-            # This allows you to serve it from your own backend without going to Twilio each time
-            transcript_record = TranscriptRecord(
-                transcript_sid=transcript_sid,
-                status=status,
-                full_text=full_text,
-                date_created=transcript.date_created,
-                date_updated=transcript.date_updated,
-                duration=decimal_to_float(transcript.duration),
-                language_code=transcript.language_code,
-                # Set a default user_id (1) for transcripts created via webhook
-                user_id=1,  # Default to first user since webhook doesn't have authentication
-                # Store the raw sentences as JSON for detailed access if needed
-                sentences_json=json.dumps([{
-                    "transcript": getattr(s, "transcript", "No text available"),
-                    "speaker": getattr(s, "media_channel", 0),
-                    "start_time": decimal_to_float(getattr(s, "start_time", 0)),
-                    "end_time": decimal_to_float(getattr(s, "end_time", 0)),
-                    "confidence": decimal_to_float(getattr(s, "confidence", None))
-                } for s in sorted_sentences], default=decimal_to_float)
-            )
-
-            db.add(transcript_record)
-
-            # Also update the Conversation model if it exists
-            # Find the conversation by recording_sid or transcript_sid
-            # Log available attributes to debug
-            logger.info(f"Transcript object attributes: {dir(transcript)}")
-
-            # Try different possible attribute names for the recording SID
-            recording_sid = None
-            for attr_name in ['recording_sid', 'source_sid', 'sid', 'call_sid']:
-                if hasattr(transcript, attr_name):
-                    recording_sid = getattr(transcript, attr_name)
-                    logger.info(
-                        f"Found recording identifier: {attr_name}={recording_sid}")
-                    break
-
-            if recording_sid:
-                # Try to find the conversation by the recording SID
-                conversation = db.query(Conversation).filter(
-                    Conversation.recording_sid == recording_sid
-                ).first()
-
-                if conversation:
-                    # Update the conversation with the full transcript text
-                    conversation.transcript = full_text
-                    logger.info(
-                        f"Updated conversation {conversation.id} with full transcript text")
-                else:
-                    logger.info(
-                        f"No conversation found with recording_sid={recording_sid}")
-            else:
-                logger.info(
-                    "Could not find recording identifier in transcript object")
-
-            db.commit()
-
-            logger.info(
-                f"Stored completed transcript {transcript_sid} in database")
-
-            return {"status": "success", "message": "Transcript processed and stored"}
-        else:
-            logger.info(f"Transcript {transcript_sid} status update: {status}")
-            return {"status": "success", "message": f"Received status update: {status}"}
-
-    except Exception as e:
-        logger.error(f"Error processing transcript webhook: {str(e)}")
-        return {"status": "error", "message": "Error processing webhook"}
+# This endpoint has been moved to app/routers/twilio_transcripts.py
 
 
 @app.get("/stored-transcripts/", response_model=List[Dict])
@@ -2632,13 +2641,44 @@ async def update_custom_scenario(
 
 @app.get("/test-db-connection")
 async def test_db_connection(db: Session = Depends(get_db)):
+    """Test database connection and sequence health"""
     try:
         # Import the text function from SQLAlchemy
         from sqlalchemy import text
 
         # Use the text() function to properly format the SQL query
         result = db.execute(text("SELECT 1")).fetchone()
-        return {"status": "Database connection working", "result": result[0]}
+
+        # Check conversations sequence health
+        try:
+            seq_result = db.execute(
+                text("SELECT nextval('conversations_id_seq')")).scalar()
+            max_id_result = db.execute(
+                text("SELECT MAX(id) FROM conversations")).scalar()
+            max_id = max_id_result if max_id_result else 0
+
+            sequence_healthy = seq_result > max_id
+
+            return {
+                "status": "Database connection working",
+                "result": result[0],
+                "sequence_health": {
+                    "healthy": sequence_healthy,
+                    "next_sequence_id": seq_result,
+                    "max_conversation_id": max_id,
+                    "sequence_gap": seq_result - max_id if sequence_healthy else f"Sequence needs reset (current: {seq_result}, max: {max_id})"
+                }
+            }
+        except Exception as seq_error:
+            return {
+                "status": "Database connection working",
+                "result": result[0],
+                "sequence_health": {
+                    "healthy": False,
+                    "error": str(seq_error)
+                }
+            }
+
     except Exception as e:
         return {"status": "Database connection failed", "error": str(e)}
 
@@ -3867,10 +3907,29 @@ async def handle_calendar_media_stream(websocket: WebSocket):
 
 
 @app.post("/handle-user-input")
-async def handle_user_input(request: Request):
+async def handle_user_input(
+    request: Request,
+    db: Session = Depends(get_db)
+):
     """Handle user input from Twilio Gather verb"""
     try:
-        form_data = await request.form()
+        # Verify Twilio signature (skip in development or if token not set)
+        if config.TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+            form_data = await request.form()
+            params = dict(form_data)
+            if not validator.validate(request_url, params, twilio_signature):
+                logger.warning(
+                    "Invalid Twilio signature on user input webhook")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for user input webhook")
+            form_data = await request.form()
+
         speech_result = form_data.get("SpeechResult", "")
         call_sid = form_data.get("CallSid", "")
 
@@ -3893,7 +3952,10 @@ async def handle_user_input(request: Request):
 
 # moved to app/routers/twilio_webhooks.py
 @app.post("/twilio-callback")
-async def handle_twilio_callback(request: Request, db: Session = Depends(get_db)):
+async def handle_twilio_callback(
+    request: Request,
+    db: Session = Depends(get_db)
+):
     """Handle Twilio status callbacks for call status updates"""
     try:
         # Verify Twilio signature (skip in development or if token not set)
@@ -4068,7 +4130,9 @@ async def make_calendar_call_scenario(
         SCENARIOS[temp_scenario_key] = calendar_scenario
 
         # Build the media stream URL
-        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        # Allow private hosts for development testing
+        base_url = clean_and_validate_url(
+            config.PUBLIC_URL, allow_private=True)
         user_name = current_user.email
         outgoing_call_url = f"{base_url}/outgoing-call/{temp_scenario_key}?direction=outbound&user_name={user_name}"
         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
@@ -4730,6 +4794,21 @@ async def handle_call_end(
 ):
     """Handle call end and record duration"""
     try:
+        # Verify Twilio signature (skip in development or if token not set)
+        if config.TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+            # For JSON callbacks, we need to get the raw body for validation
+            body = await request.body()
+            if not validator.validate(request_url, body.decode(), twilio_signature):
+                logger.warning("Invalid Twilio signature on call end webhook")
+                raise HTTPException(
+                    status_code=401, detail="Invalid signature")
+        else:
+            logger.warning(
+                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for call end webhook")
+
         data = await request.json()
         call_sid = data.get("CallSid")
         call_duration = data.get("CallDuration", 0)

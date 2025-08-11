@@ -30,11 +30,13 @@ ENABLE_PII_REDACTION = os.getenv(
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sql_app.db")
 
 # Server configuration
-PORT = int(os.getenv("PORT", "8000"))
-PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000")
+PORT = int(os.getenv("PORT", "5051"))
+PUBLIC_URL = os.getenv("PUBLIC_URL", "https://localhost:5051")
 
 # JWT Authentication
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-for-development-only")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable must be set")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
@@ -105,3 +107,12 @@ PERMISSIONS_POLICY = os.getenv(
 REFERRER_POLICY = os.getenv(
     "REFERRER_POLICY", "strict-origin-when-cross-origin")
 CACHE_CONTROL = os.getenv("CACHE_CONTROL", "no-store, max-age=0")
+
+# CAPTCHA Configuration (Google reCAPTCHA v2)
+RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
+RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY")
+CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "true").lower() == "true"
+
+# Rate Limiting
+ENABLE_RATE_LIMITING = os.getenv(
+    "ENABLE_RATE_LIMITING", "true").lower() == "true"

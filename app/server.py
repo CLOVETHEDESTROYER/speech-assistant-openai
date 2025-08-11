@@ -17,6 +17,7 @@ from app.routes.onboarding import router as onboarding_router
 
 # New routers (to be created/filled next)
 from app.routers import twilio_transcripts, twilio_webhooks, calls, realtime, transcription
+from app.routers.validation import router as validation_router
 
 
 def create_app() -> FastAPI:
@@ -24,14 +25,16 @@ def create_app() -> FastAPI:
     app = FastAPI()
 
     allowed_origins = [
-        os.getenv("FRONTEND_URL", "http://localhost:5173")
+        o.strip() for o in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")
+        if o.strip()
     ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type",
+                       "X-Captcha"],  # added X-Captcha
     )
 
     app.state.limiter = limiter
@@ -60,7 +63,6 @@ def create_app() -> FastAPI:
     app.include_router(calls.router, tags=["calls"])
     app.include_router(realtime.router, tags=["realtime"])
     app.include_router(transcription.router, tags=["transcription"])
+    app.include_router(validation_router, tags=["validation"])
 
     return app
-
-

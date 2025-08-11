@@ -20,6 +20,7 @@ from fastapi import status
 from uuid import uuid4
 from datetime import timedelta
 from fastapi import BackgroundTasks
+from app.limiter import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +460,7 @@ async def find_available_slots(
 
 
 @router.api_route("/incoming-calendar-call", methods=["GET", "POST"])
+@rate_limit("1/minute")
 async def handle_incoming_calendar_call(
     request: Request,
     db: Session = Depends(get_db)

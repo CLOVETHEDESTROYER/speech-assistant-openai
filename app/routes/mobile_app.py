@@ -163,18 +163,31 @@ async def make_mobile_call(
 
         # Store call info in Conversation before making the call
         from app.models import Conversation
-        conversation = Conversation(
-            user_id=current_user.id,
-            scenario=call_request.scenario,
-            phone_number=call_request.phone_number,
-            direction="outbound",
-            status="initiated",
-            call_sid=None,  # Will be set after call creation
-            duration_limit=duration_limit
-        )
-        db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
+        try:
+            conversation = Conversation(
+                user_id=current_user.id,
+                scenario=call_request.scenario,
+                phone_number=call_request.phone_number,
+                direction="outbound",
+                status="initiated",
+                call_sid=None,  # Will be set after call creation
+                duration_limit=duration_limit
+            )
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create conversation: {str(e)}")
+            # Try to get the next available ID
+            try:
+                result = db.execute(
+                    "SELECT nextval('conversations_id_seq')").scalar()
+                logger.info(f"Next available ID: {result}")
+            except Exception as seq_error:
+                logger.error(f"Sequence error: {str(seq_error)}")
+            raise HTTPException(
+                status_code=500, detail="Database error creating conversation")
 
         # Use system phone number for mobile users
         from_number = os.getenv('TWILIO_PHONE_NUMBER')

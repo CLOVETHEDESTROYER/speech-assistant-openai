@@ -1547,8 +1547,7 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
                 "type": "conversation.item.truncate",
                 "item_id": last_assistant_item,
                 "content_index": 0,
-                "audio_end_ms": int(time.time() * 1000),
-                "reason": "user_interrupt"
+                "audio_end_ms": int(time.time() * 1000)
             }
             try:
                 await openai_ws.send(json.dumps(truncate_event))

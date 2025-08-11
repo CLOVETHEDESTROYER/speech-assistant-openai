@@ -13,8 +13,8 @@ def _get_fernet() -> Optional[Fernet]:
 def encrypt_string(plaintext: str) -> str:
     f = _get_fernet()
     if not f:
-        # if no key, return plaintext (caller should avoid this in prod)
-        return plaintext
+        raise ValueError(
+            "DATA_ENCRYPTION_KEY environment variable must be set for encryption")
     token = f.encrypt(plaintext.encode("utf-8"))
     return token.decode("utf-8")
 
@@ -22,12 +22,10 @@ def encrypt_string(plaintext: str) -> str:
 def decrypt_string(ciphertext: str) -> str:
     f = _get_fernet()
     if not f:
-        return ciphertext
+        raise ValueError(
+            "DATA_ENCRYPTION_KEY environment variable must be set for decryption")
     try:
         data = f.decrypt(ciphertext.encode("utf-8"))
         return data.decode("utf-8")
     except InvalidToken:
-        # Not encrypted or invalid token; return as-is to avoid data loss
-        return ciphertext
-
-
+        raise ValueError("Invalid or corrupted encrypted data")
