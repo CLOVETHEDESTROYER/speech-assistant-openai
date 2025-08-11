@@ -1,3 +1,57 @@
+from app.utils.url_helpers import clean_and_validate_url
+from app.routes.mobile_app import router as mobile_router
+import json
+import base64
+import asyncio
+import websockets
+import logging
+import sys
+import tempfile
+import io
+import requests
+import re
+from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query, BackgroundTasks, File, Form, Path, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.websockets import WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from twilio.twiml.voice_response import VoiceResponse, Gather, Connect, Say, Stream
+from dotenv import load_dotenv
+from twilio.rest import Client
+import datetime
+from pydantic import BaseModel, EmailStr, field_validator, ValidationError
+from typing import Optional, Dict, List, Any, Union, Tuple
+from jose import JWTError, jwt
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from pathlib import Path
+import sqlalchemy
+import threading
+import time
+from app.auth import router as auth_router, get_current_user
+from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript, UserPhoneNumber
+from app.utils import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    decode_token
+)
+from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
+from app.db import engine, get_db, SessionLocal, Base
+from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+from app.vad_config import VADConfig
+from app.realtime_manager import OpenAIRealtimeManager
+from os import getenv
+from app.services.conversation_service import ConversationService
+from app.services.transcription import TranscriptionService
+from app.services.twilio_intelligence import TwilioIntelligenceService
+from twilio.request_validator import RequestValidator
+import traceback
+import openai
+from openai import OpenAI
+from twilio.base.exceptions import TwilioRestException
+import uuid
 from app.app_config import USER_CONFIG, DEVELOPMENT_MODE, SCENARIOS, VOICES
 from app.server import create_app
 from app.services.twilio_service import TwilioPhoneService
@@ -31,61 +85,6 @@ from sqlalchemy.exc import SQLAlchemyError
 import os
 
 IS_DEV = os.getenv("DEVELOPMENT_MODE", "false").lower() == "true"
-import uuid
-from twilio.base.exceptions import TwilioRestException
-from openai import OpenAI
-import openai
-import traceback
-from twilio.request_validator import RequestValidator
-from app.services.twilio_intelligence import TwilioIntelligenceService
-from app.services.transcription import TranscriptionService
-from app.services.conversation_service import ConversationService
-from os import getenv
-from app.realtime_manager import OpenAIRealtimeManager
-from app.vad_config import VADConfig
-from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
-from app.db import engine, get_db, SessionLocal, Base
-from app.schemas import TokenResponse, RealtimeSessionCreate, RealtimeSessionResponse, SignalingMessage, SignalingResponse
-from app.utils import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token
-)
-from app.models import User, Token, CallSchedule, Conversation, TranscriptRecord, CustomScenario, GoogleCalendarCredentials, StoredTwilioTranscript, UserPhoneNumber
-from app.auth import router as auth_router, get_current_user
-import time
-import threading
-import sqlalchemy
-from pathlib import Path
-from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
-from typing import Optional, Dict, List, Any, Union, Tuple
-from pydantic import BaseModel, EmailStr, field_validator, ValidationError
-import datetime
-from twilio.rest import Client
-from dotenv import load_dotenv
-from twilio.twiml.voice_response import VoiceResponse, Gather, Connect, Say, Stream
-from fastapi.exceptions import RequestValidationError
-from fastapi.websockets import WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
-from fastapi import FastAPI, WebSocket, Request, Depends, HTTPException, status, Body, Query, BackgroundTasks, File, Form, Path, UploadFile
-import re
-import requests
-import io
-import tempfile
-import sys
-import logging
-import websockets
-import asyncio
-import base64
-import json
-import os
-from app.routes.mobile_app import router as mobile_router
-from app.utils.url_helpers import clean_and_validate_url
 
 # Load environment variables (only load dev.env in development mode)
 if os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true':
@@ -98,27 +97,30 @@ log_level_name = config.LOG_LEVEL.upper()  # Ensure uppercase for level name
 log_level = getattr(logging, log_level_name, logging.INFO)
 
 # Create logs directory if it doesn't exist
-os.makedirs(config.LOG_DIR, exist_ok=True)
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
 
-# Configure root logger
+# Configure logging with file and console handlers
 logging.basicConfig(
     level=log_level,
-    format=config.LOG_FORMAT,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        # Console handler
-        logging.StreamHandler(),
-        # Rotating file handler
         logging.handlers.RotatingFileHandler(
-            os.path.join(config.LOG_DIR, 'app.log'),
-            maxBytes=config.LOG_MAX_SIZE_MB * 1024 * 1024,
-            backupCount=config.LOG_BACKUP_COUNT,
-            encoding='utf-8'
-        )
+            "logs/app.log",
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        ),
+        logging.StreamHandler()
     ]
 )
 
-# Configure application logger
 logger = logging.getLogger(__name__)
+
+# Create FastAPI app instance
+app = create_app()
+
+# OAuth2 scheme for authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 # Create a filter to sanitize sensitive data
 
@@ -342,7 +344,7 @@ class UserRead(BaseModel):
 
 
 # Dependency
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def get_db():
@@ -712,24 +714,25 @@ async def handle_outgoing_call(
     """Handle outgoing call webhooks from Twilio - Uses signature validation instead of user auth"""
     # Validate Twilio signature if configured
     if not IS_DEV and not config.TWILIO_AUTH_TOKEN:
-        raise HTTPException(status_code=500, detail="Twilio signature validation not configured")
-    
+        raise HTTPException(
+            status_code=500, detail="Twilio signature validation not configured")
+
     if config.TWILIO_AUTH_TOKEN:
         from twilio.request_validator import RequestValidator
         validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
         twilio_signature = request.headers.get("X-Twilio-Signature", "")
         request_url = str(request.url)
-        
+
         # Get form data for validation
         form_data = await request.form()
         params = dict(form_data)
-        
+
         if not validator.validate(request_url, params, twilio_signature):
             logger.warning("Invalid Twilio signature on outgoing call webhook")
             raise HTTPException(status_code=401, detail="Invalid signature")
     else:
         form_data = await request.form()
-        
+
     logger.info(f"Outgoing call webhook received for scenario: {scenario}")
     try:
         # Extract direction and user_name from query parameters
