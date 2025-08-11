@@ -6,6 +6,9 @@ from sqlalchemy.pool import QueuePool
 from sqlalchemy import event
 import logging
 from sqlalchemy import text
+from dotenv import load_dotenv
+
+load_dotenv("/var/www/AiFriendChatBeta/.env")
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,9 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", 
     "sqlite:///./sql_app.db"
 )
+
+if os.getenv("ENV", "production") == "production" and SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    raise RuntimeError("DATABASE_URL points to SQLite in production. Set a Postgres DSN in .env.")
 
 # Database configuration
 DATABASE_POOL_SIZE = int(os.getenv("DATABASE_POOL_SIZE", "5"))
