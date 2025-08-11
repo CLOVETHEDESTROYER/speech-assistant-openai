@@ -15,6 +15,9 @@ from twilio.rest import Client
 from app import config
 from app.utils.url_helpers import clean_and_validate_url
 
+# Development mode check
+DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
+
 
 def create_error_response(error_type: str, message: str, upgrade_options: list = None):
     """Create consistent error responses"""
@@ -143,23 +146,29 @@ async def make_mobile_call(
 ):
     """Enhanced mobile call with duration tracking and limits"""
     try:
-        # Check and reset limits if needed (7-day/30-day cycles)
-        UsageService.check_and_reset_limits(current_user.id, db)
+        # SKIP USAGE LIMITS IN DEVELOPMENT MODE
+        if not DEVELOPMENT_MODE:
+            # Check and reset limits if needed (7-day/30-day cycles)
+            UsageService.check_and_reset_limits(current_user.id, db)
 
-        # Check if user can make a call
-        can_call, status_code, details = UsageService.can_make_call(
-            current_user.id, db)
+            # Check if user can make a call
+            can_call, status_code, details = UsageService.can_make_call(
+                current_user.id, db)
 
-        if not can_call:
-            error_response = create_error_response(
-                status_code,
-                details.get("message", "Cannot make call"),
-                details.get("upgrade_options", [])
-            )
-            raise HTTPException(status_code=402, detail=error_response)
+            if not can_call:
+                error_response = create_error_response(
+                    status_code,
+                    details.get("message", "Cannot make call"),
+                    details.get("upgrade_options", [])
+                )
+                raise HTTPException(status_code=402, detail=error_response)
 
-        # Get duration limit from permission check
-        duration_limit = details.get("duration_limit", 60)
+            # Get duration limit from permission check
+            duration_limit = details.get("duration_limit", 60)
+        else:
+            # Development mode - no limits
+            duration_limit = 300  # 5 minutes for dev testing
+            logger.info(f"🧪 DEV MODE: Skipping usage limits for user {current_user.id}")
 
         # Store call info in Conversation before making the call
         from app.models import Conversation

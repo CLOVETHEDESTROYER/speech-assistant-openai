@@ -18,6 +18,7 @@ from app.routes.onboarding import router as onboarding_router
 # New routers (to be created/filled next)
 from app.routers import twilio_transcripts, twilio_webhooks, calls, realtime, transcription
 from app.routers.validation import router as validation_router
+from app.routers.testing import router as testing_router
 
 
 def create_app() -> FastAPI:
@@ -64,5 +65,6 @@ def create_app() -> FastAPI:
     app.include_router(realtime.router, tags=["realtime"])
     app.include_router(transcription.router, tags=["transcription"])
     app.include_router(validation_router, tags=["validation"])
+    app.include_router(testing_router, prefix="/testing", tags=["testing"])
 
     return app

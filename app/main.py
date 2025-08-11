@@ -2117,7 +2117,7 @@ async def handle_recording_callback(
         validator = TwilioWebhookValidator()
 
         try:
-            await validator.validate_webhook_signature(request)
+            await validator.validate_webhook(request, webhook_type="form")
             form_data = await request.form()
         except HTTPException as e:
             logger.error(
