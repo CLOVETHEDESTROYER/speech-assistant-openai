@@ -98,6 +98,7 @@ async def create_custom_scenario(
 @router.get("/custom-scenarios", response_model=List[Dict])
 @rate_limit("20/minute")
 async def get_custom_scenarios(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -294,6 +295,7 @@ async def handle_custom_incoming_call(
 @rate_limit("20/minute")
 async def get_custom_scenario(
     scenario_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -333,6 +335,7 @@ async def get_custom_scenario(
 @rate_limit("10/minute")
 async def delete_custom_scenario(
     scenario_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
