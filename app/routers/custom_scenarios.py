@@ -269,14 +269,14 @@ async def handle_custom_incoming_call(
 
         # Get the correct host - use the host header from the request
         host = request.headers.get('host', 'localhost:5050')
-        
+
         # For production, ensure we're using the right protocol and host
         if 'localhost' in host or '127.0.0.1' in host:
             # Development - might be HTTP
-            stream_url = f"ws://{host}/ws/{scenario_id}"
+            stream_url = f"ws://{host}/media-stream-custom/{scenario_id}"
         else:
             # Production - use secure WebSocket
-            stream_url = f"wss://{host}/ws/{scenario_id}"
+            stream_url = f"wss://{host}/media-stream-custom/{scenario_id}"
 
         stream = Stream(url=stream_url)
         connect.append(stream)
