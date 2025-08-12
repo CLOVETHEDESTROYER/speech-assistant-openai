@@ -1790,8 +1790,9 @@ async def test_call_endpoint(
 ):
     """Testing endpoint for droplet deployment - NO AUTH, NO RATE LIMITING"""
     try:
-        logger.info(f"TEST CALL: Initiating test call to {phone_number} with scenario {scenario}")
-        
+        logger.info(
+            f"TEST CALL: Initiating test call to {phone_number} with scenario {scenario}")
+
         # Always use system phone number for testing
         from_number = os.getenv('TWILIO_PHONE_NUMBER')
         if not from_number:
@@ -1799,12 +1800,13 @@ async def test_call_endpoint(
                 status_code=400,
                 detail="System phone number not configured. Please set TWILIO_PHONE_NUMBER."
             )
-        
-        # Build the media stream URL 
-        base_url = clean_and_validate_url(config.PUBLIC_URL, allow_private=True)
+
+        # Build the media stream URL
+        base_url = clean_and_validate_url(
+            config.PUBLIC_URL, allow_private=True)
         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name=TestUser"
         logger.info(f"TEST CALL: Using URL: {outgoing_call_url}")
-        
+
         # Make the call
         client = get_twilio_client()
         call = client.calls.create(
@@ -1813,9 +1815,9 @@ async def test_call_endpoint(
             url=outgoing_call_url,
             record=True
         )
-        
+
         logger.info(f"TEST CALL: Call initiated with SID: {call.sid}")
-        
+
         return {
             "status": "success",
             "call_sid": call.sid,
@@ -1825,15 +1827,17 @@ async def test_call_endpoint(
             "message": "Test call initiated successfully (testing mode - no auth required)",
             "note": "This is a testing endpoint that bypasses authentication and rate limiting"
         }
-        
+
     except TwilioRestException as e:
-        logger.exception(f"TEST CALL: Twilio error when calling {phone_number}")
+        logger.exception(
+            f"TEST CALL: Twilio error when calling {phone_number}")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": f"Twilio error: {str(e)}"}
         )
     except Exception as e:
-        logger.exception(f"TEST CALL: Error making test call to {phone_number}")
+        logger.exception(
+            f"TEST CALL: Error making test call to {phone_number}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": f"Test call failed: {str(e)}"}
@@ -1841,6 +1845,7 @@ async def test_call_endpoint(
 
 # moved to app/routers/realtime.py
 # WebSocket endpoint moved to app/routers/realtime.py
+
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(
