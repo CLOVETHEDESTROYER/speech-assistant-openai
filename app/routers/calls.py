@@ -241,7 +241,7 @@ async def make_calendar_call_scenario(
 # WEBHOOK ENDPOINTS - Moved from main.py for modular architecture
 # =============================================================================
 
-from twilio.twiml import VoiceResponse, Connect, Gather
+from twilio.twiml.voice_response import VoiceResponse, Connect, Gather
 from fastapi.responses import Response
 from twilio.request_validator import RequestValidator
 
