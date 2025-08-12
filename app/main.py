@@ -1093,11 +1093,7 @@ async def send_session_update(openai_ws, scenario):
                 "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
                 "voice": scenario["voice_config"]["voice"],
                 "modalities": ["text", "audio"],
-                "temperature": 0.8,
-                "audio_format": {
-                    "type": "mulaw",
-                    "sample_rate": 8000
-                }
+                "temperature": 0.8
             }
         }
 
