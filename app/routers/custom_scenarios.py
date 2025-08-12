@@ -3,7 +3,7 @@ import time
 import threading
 from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Body
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response as FastAPIResponse
 from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db import get_db
@@ -267,28 +267,31 @@ async def handle_custom_incoming_call(
         # Connect to WebSocket for realtime conversation
         connect = Connect()
 
-        # Use the correct host from the request
-        host = request.headers.get('host', 'localhost')
+        # Get the correct host - use the host header from the request
+        host = request.headers.get('host', 'localhost:5050')
+        
+        # For production, ensure we're using the right protocol and host
         if 'localhost' in host or '127.0.0.1' in host:
-            # Development
-            stream_url = f"wss://{host}/ws/{scenario_id}"
+            # Development - might be HTTP
+            stream_url = f"ws://{host}/ws/{scenario_id}"
         else:
-            # Production - ensure secure websocket
+            # Production - use secure WebSocket
             stream_url = f"wss://{host}/ws/{scenario_id}"
 
         stream = Stream(url=stream_url)
         connect.append(stream)
         response.append(connect)
 
-        return response
+        # Return proper TwiML XML response
+        return FastAPIResponse(content=str(response), media_type="application/xml")
 
     except Exception as e:
-        # Return error TwiML
+        # Return error TwiML as XML
         from twilio.twiml.voice_response import VoiceResponse, Say
         response = VoiceResponse()
         response.say(
             "We're sorry, an application error occurred. Please try again later.")
-        return response
+        return FastAPIResponse(content=str(response), media_type="application/xml")
 
 
 @router.get("/custom-scenarios/{scenario_id}", response_model=Dict)
