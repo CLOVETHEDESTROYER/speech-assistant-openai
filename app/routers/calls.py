@@ -236,3 +236,91 @@ async def make_calendar_call_scenario(
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": f"An error occurred with the phone service: {str(e)}"})
     except Exception as e:
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": f"An error occurred: {str(e)}"})
+
+# =============================================================================
+# WEBHOOK ENDPOINTS - Moved from main.py for modular architecture
+# =============================================================================
+
+from twilio.twiml import VoiceResponse, Connect, Gather
+from fastapi.responses import Response
+from twilio.request_validator import RequestValidator
+
+@router.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
+@rate_limit("2/minute")
+async def handle_outgoing_call(
+    request: Request,
+    scenario: str,
+    db: Session = Depends(get_db)
+):
+    """Handle outgoing call webhooks from Twilio - Uses signature validation instead of user auth"""
+    if not DEVELOPMENT_MODE and not config.TWILIO_AUTH_TOKEN:
+        raise HTTPException(status_code=500, detail="Twilio signature validation not configured")
+
+    if config.TWILIO_AUTH_TOKEN:
+        validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+        twilio_signature = request.headers.get("X-Twilio-Signature", "")
+        request_url = str(request.url)
+        form_data = await request.form()
+        params = dict(form_data)
+        if not validator.validate(request_url, params, twilio_signature):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        form_data = await request.form()
+
+    try:
+        params = dict(request.query_params)
+        direction = params.get("direction", "outbound")
+        user_name = params.get("user_name", "")
+        
+        if scenario not in SCENARIOS:
+            raise HTTPException(status_code=400, detail="Invalid scenario")
+
+        selected_scenario = SCENARIOS[scenario].copy()
+        selected_scenario["direction"] = direction
+        if user_name:
+            selected_scenario["user_name"] = user_name
+
+        host = request.url.hostname
+        ws_url = f"wss://{host}/media-stream/{scenario}?direction={direction}&user_name={user_name}"
+        
+        response = VoiceResponse()
+        response.pause(length=0.1)
+        connect = Connect()
+        connect.stream(url=ws_url)
+        response.append(connect)
+        gather = Gather(action="/handle-user-input", method="POST", input="speech", timeout=60)
+        response.append(gather)
+        
+        return Response(content=str(response), media_type="application/xml")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="An error occurred while processing the outgoing call.")
+
+@router.post("/call-end-webhook")
+async def handle_call_end(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Handle call end and record duration"""
+    try:
+        if config.TWILIO_AUTH_TOKEN:
+            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+            twilio_signature = request.headers.get("X-Twilio-Signature", "")
+            request_url = str(request.url)
+            body = await request.body()
+            if not validator.validate(request_url, body.decode(), twilio_signature):
+                raise HTTPException(status_code=401, detail="Invalid signature")
+
+        data = await request.json()
+        call_sid = data.get("CallSid")
+        call_duration = data.get("CallDuration", 0)
+
+        conversation = db.query(Conversation).filter(Conversation.call_sid == call_sid).first()
+        if conversation:
+            from app.services.usage_service import UsageService
+            UsageService.record_call_duration(conversation.user_id, call_duration, db)
+            conversation.status = "completed"
+            db.commit()
+
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
