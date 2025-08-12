@@ -19,6 +19,7 @@ from app.routes.onboarding import router as onboarding_router
 from app.routers import twilio_transcripts, twilio_webhooks, calls, realtime, transcription
 from app.routers.validation import router as validation_router
 from app.routers.testing import router as testing_router
+from app.routers.custom_scenarios import router as custom_scenarios_router
 
 
 def create_app() -> FastAPI:
@@ -66,5 +67,6 @@ def create_app() -> FastAPI:
     app.include_router(transcription.router, tags=["transcription"])
     app.include_router(validation_router, tags=["validation"])
     app.include_router(testing_router, prefix="/testing", tags=["testing"])
+    app.include_router(custom_scenarios_router, tags=["custom-scenarios"])
 
     return app

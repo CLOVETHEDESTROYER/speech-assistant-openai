@@ -4,6 +4,34 @@
 
 This document provides comprehensive integration guidelines for the **Speech Assistant Mobile App** (iOS). The backend provides a complete consumer-focused API with enhanced trial management, usage tracking, duration limits, and subscription handling specifically designed for mobile entertainment users.
 
+**🚀 Production Status: LIVE** - The backend is now deployed and running on a Digital Ocean droplet with PostgreSQL database, ready for production mobile app integration.
+
+## 🚀 Production Deployment Status
+
+### **Current Backend Status**
+
+- **Environment**: Production (Digital Ocean Droplet)
+- **Database**: PostgreSQL with full schema migration
+- **API Base URL**: `https://your-domain.com` (replace with actual domain)
+- **Status**: ✅ Live and operational
+- **Security**: Full implementation with rate limiting, CORS protection, and authentication
+
+### **Production Features**
+
+- **Rate Limiting**: Implemented for all endpoints
+- **CORS Protection**: Restricted to authorized domains
+- **Authentication**: JWT-based with secure token management
+- **Database**: PostgreSQL with Alembic migrations
+- **Monitoring**: Systemd service with automatic restarts
+- **Logging**: Comprehensive logging for debugging and monitoring
+
+### **Mobile App Integration Notes**
+
+- **Development**: Use localhost:5050 for testing
+- **Production**: Use your production domain for live app
+- **Environment Switching**: Implement environment-based URL switching in your iOS app
+- **Testing**: All endpoints tested and working in production
+
 ## App Architecture
 
 ### **Consumer Mobile App Features**
@@ -19,6 +47,7 @@ This document provides comprehensive integration guidelines for the **Speech Ass
 - **Easy Setup**: No complex onboarding - just sign up and start calling
 - **Shared Infrastructure**: Uses system phone numbers (no individual provisioning needed)
 - **App Store Integration**: Complete payment processing through App Store
+- **Production Ready**: Full security implementation, rate limiting, and error handling
 
 ---
 
@@ -1411,7 +1440,7 @@ struct APIConfig {
     )
 
     static let production = APIConfig(
-        baseURL: "https://api.speechassistant.com",
+        baseURL: "https://your-domain.com", // Replace with your actual domain
         environment: .production
     )
 
@@ -1427,6 +1456,81 @@ struct APIConfig {
 // Usage
 let config = APIConfig.development // Switch for production
 ```
+
+### **Environment Switching for Mobile App**
+
+#### **Development Environment**
+
+- **Base URL**: `http://localhost:5050` (when testing with local backend)
+- **Features**: Full debugging, testing endpoints available, no rate limits
+- **Database**: Local SQLite for development
+- **Use Case**: Development, testing, debugging
+
+#### **Production Environment**
+
+- **Base URL**: `https://your-actual-domain.com` (your Digital Ocean droplet)
+- **Features**: Rate limiting, production security, PostgreSQL database
+- **Database**: Production PostgreSQL with full data
+- **Use Case**: Live app, real users, production data
+
+#### **Implementation in iOS App**
+
+```swift
+class EnvironmentManager: ObservableObject {
+    @Published var currentEnvironment: Environment = .development
+
+    enum Environment: String, CaseIterable {
+        case development = "Development"
+        case production = "Production"
+
+        var baseURL: String {
+            switch self {
+            case .development:
+                return "http://localhost:5050"
+            case .production:
+                return "https://your-domain.com" // Replace with actual domain
+            }
+        }
+
+        var displayName: String {
+            return self.rawValue
+        }
+    }
+
+    func switchEnvironment(_ environment: Environment) {
+        currentEnvironment = environment
+        // Save to UserDefaults or other persistent storage
+        UserDefaults.standard.set(environment.rawValue, forKey: "selected_environment")
+    }
+
+    func loadSavedEnvironment() {
+        if let saved = UserDefaults.standard.string(forKey: "selected_environment"),
+           let environment = Environment(rawValue: saved) {
+            currentEnvironment = environment
+        }
+    }
+}
+
+// Usage in your app
+@StateObject private var environmentManager = EnvironmentManager()
+
+// In your API calls
+let baseURL = environmentManager.currentEnvironment.baseURL
+```
+
+#### **Build Configuration**
+
+You can also use Xcode build configurations to automatically switch environments:
+
+```swift
+#if DEBUG
+let baseURL = "http://localhost:5050"
+#else
+let baseURL = "https://your-domain.com"
+#endif
+```
+
+**Important**: Remember to replace `https://your-domain.com` with your actual production domain or IP address.
 
 ---
 
@@ -1458,6 +1562,60 @@ curl -X POST http://localhost:5050/mobile/make-call \
   -H "X-App-Type: mobile" \
   -d '{"phone_number":"+1234567890","scenario":"default"}'
 ```
+
+### **Development Testing Endpoints**
+
+**⚠️ IMPORTANT: These endpoints are for development only and bypass rate limits**
+
+For development and testing purposes, the backend includes special endpoints that bypass normal rate limiting and usage checks:
+
+```bash
+# Test endpoint that bypasses rate limits (development only)
+curl -X POST http://localhost:5050/test/bypass-rate-limit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"endpoint": "/mobile/make-call", "data": {"phone_number": "+1234567890", "scenario": "default"}}'
+
+# Test endpoint for immediate call testing (development only)
+curl -X POST http://localhost:5050/test/test-call \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"phone_number": "+1234567890", "scenario": "default"}'
+```
+
+**Note**: These testing endpoints are automatically disabled in production mode and should only be used during development.
+
+## 📋 Current Backend Status & Recent Changes
+
+### **✅ What's Working & Ready**
+
+- **Core Mobile API**: All endpoints fully functional
+- **Authentication System**: JWT-based auth with mobile app support
+- **Usage Tracking**: Complete trial and subscription management
+- **Call Management**: Twilio integration working
+- **Database**: PostgreSQL with full schema migration
+- **Security**: Rate limiting, CORS, authentication implemented
+- **Production Deployment**: Live on Digital Ocean droplet
+
+### **❌ What Was Removed**
+
+- **Random Calling Feature**: The AI-generated random call system was removed from this version
+- **Background Scheduling**: Automated calling throughout the day feature removed
+- **AI Persona Generation**: Dynamic prompt generation for random calls removed
+
+### **🔧 What Was Fixed**
+
+- **Database Migrations**: Resolved Alembic migration issues on production
+- **Environment Loading**: Fixed environment variable loading in production
+- **Service Management**: Proper systemd service configuration
+- **Dependencies**: Resolved Python package compatibility issues
+
+### **📱 Mobile App Impact**
+
+- **No Changes Required**: All mobile app endpoints remain the same
+- **Same API Structure**: No breaking changes to existing mobile integration
+- **Production Ready**: Backend is now stable and ready for mobile app deployment
+- **Testing Available**: Use development endpoints for testing, production for live app
 
 ## 🎉 Enhanced Mobile Features Summary
 
