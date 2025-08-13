@@ -270,12 +270,23 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
         ).first()
 
         if custom_scenario:
-            # Convert custom scenario to standard format
+            # Convert custom scenario to standard format with proper voice mapping
+            from app.constants import VOICES
+
+            # Map voice_type to actual OpenAI voice, with fallback to alloy
+            mapped_voice = VOICES.get(
+                custom_scenario.voice_type, custom_scenario.voice_type)
+            # If still not a valid OpenAI voice, fallback to alloy
+            valid_voices = ["alloy", "ash", "ballad",
+                            "coral", "echo", "sage", "shimmer", "verse"]
+            if mapped_voice not in valid_voices:
+                mapped_voice = "alloy"
+
             scenario_data = {
                 "persona": custom_scenario.persona,
                 "prompt": custom_scenario.prompt,
                 "voice_config": {
-                    "voice": custom_scenario.voice_type,
+                    "voice": mapped_voice,
                     "temperature": custom_scenario.temperature
                 }
             }
