@@ -251,12 +251,14 @@ async def handle_custom_incoming_call(
             if custom_scenario:
                 # Add to global SCENARIOS with safe voice mapping
                 # Map voice_type to actual OpenAI voice, with fallback to alloy
-                mapped_voice = VOICES.get(custom_scenario.voice_type, custom_scenario.voice_type)
+                mapped_voice = VOICES.get(
+                    custom_scenario.voice_type, custom_scenario.voice_type)
                 # If still not a valid OpenAI voice, fallback to alloy
-                valid_voices = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]
+                valid_voices = ["alloy", "ash", "ballad",
+                                "coral", "echo", "sage", "shimmer", "verse"]
                 if mapped_voice not in valid_voices:
                     mapped_voice = "alloy"
-                
+
                 SCENARIOS[scenario_id] = {
                     "persona": custom_scenario.persona,
                     "prompt": custom_scenario.prompt,
