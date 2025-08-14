@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models import User, UsageLimits, AppType, SubscriptionTier
+from app.models import User, UsageLimits, AppType, SubscriptionTier, SubscriptionStatus
 from datetime import datetime, date, timedelta
 import logging
 from typing import Dict, Optional, Tuple
@@ -27,7 +27,7 @@ class UsageService:
                 return existing
 
             # Set trial limits based on app type
-            trial_calls = 3 if app_type == AppType.MOBILE_CONSUMER else 4
+            trial_calls = 1 if app_type == AppType.MOBILE_CONSUMER else 5
             trial_end = datetime.utcnow() + timedelta(days=7)  # 7-day trial for both
 
             # Determine subscription tier
@@ -81,15 +81,27 @@ class UsageService:
                         "app_type": usage.app_type.value
                     }
                 else:
-                    return False, "trial_exhausted", {
-                        "message": "Trial calls exhausted. Upgrade to Basic ($4.99/week) for 5 calls per week!",
-                        "upgrade_options": [
-                            {"plan": "basic", "price": "$4.99", "calls": "5/week",
-                                "product_id": "speech_assistant_basic_weekly"},
-                            {"plan": "premium", "price": "$25.00", "calls": "30/month",
-                                "product_id": "speech_assistant_premium_monthly"}
-                        ]
-                    }
+                    # Context-aware upgrade messages based on app type
+                    if usage.app_type == AppType.MOBILE_CONSUMER:
+                        return False, "trial_exhausted", {
+                            "message": "Your free call is used up! 🎉 Ready for unlimited fun? Upgrade to Basic for just $4.99/week and get 5 calls per week!",
+                            "upgrade_options": [
+                                {"plan": "basic", "price": "$4.99", "calls": "5/week",
+                                    "product_id": "speech_assistant_basic_weekly"},
+                                {"plan": "premium", "price": "$25.00", "calls": "30/month",
+                                    "product_id": "speech_assistant_premium_monthly"}
+                            ]
+                        }
+                    else:
+                        return False, "trial_exhausted", {
+                            "message": "Your 5 free trial calls have been used. Upgrade to Business Basic ($49.99/month) for 20 calls per week to continue using our service.",
+                            "upgrade_options": [
+                                {"plan": "business_basic", "price": "$49.99", "calls": "20/week",
+                                    "product_id": "speech_assistant_business_basic"},
+                                {"plan": "business_professional", "price": "$99.00", "calls": "unlimited",
+                                    "product_id": "speech_assistant_business_pro"}
+                            ]
+                        }
 
             # Check subscription status
             if usage.is_subscribed and usage.subscription_end_date > datetime.utcnow():
@@ -150,16 +162,27 @@ class UsageService:
                         "weekly_limit": usage.weekly_call_limit
                     }
 
-            # No active trial or subscription
-            return False, "upgrade_required", {
-                "message": "Please upgrade to continue making calls",
-                "upgrade_options": [
-                    {"plan": "basic", "price": "$4.99", "calls": "5/week",
-                        "product_id": "speech_assistant_basic_weekly"},
-                    {"plan": "premium", "price": "$25.00", "calls": "30/month",
-                        "product_id": "speech_assistant_premium_monthly"}
-                ]
-            }
+            # No active trial or subscription - context-aware messaging
+            if usage.app_type == AppType.MOBILE_CONSUMER:
+                return False, "upgrade_required", {
+                    "message": "Want to keep the fun going? 🎮 Upgrade to start making calls again!",
+                    "upgrade_options": [
+                        {"plan": "basic", "price": "$4.99", "calls": "5/week",
+                            "product_id": "speech_assistant_basic_weekly"},
+                        {"plan": "premium", "price": "$25.00", "calls": "30/month",
+                            "product_id": "speech_assistant_premium_monthly"}
+                    ]
+                }
+            else:
+                return False, "upgrade_required", {
+                    "message": "Please upgrade to a Business plan to continue making calls for your organization.",
+                    "upgrade_options": [
+                        {"plan": "business_basic", "price": "$49.99", "calls": "20/week",
+                            "product_id": "speech_assistant_business_basic"},
+                        {"plan": "business_professional", "price": "$99.00", "calls": "unlimited",
+                            "product_id": "speech_assistant_business_pro"}
+                    ]
+                }
 
         except Exception as e:
             logger.error(f"Error checking call permissions: {str(e)}")

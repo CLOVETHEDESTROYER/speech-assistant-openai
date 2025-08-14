@@ -224,7 +224,7 @@ async def make_custom_call(
 
 
 @router.api_route("/incoming-custom-call/{scenario_id}", methods=["GET", "POST"])
-@rate_limit("10/minute")
+@rate_limit("1/minute")
 async def handle_custom_incoming_call(
     request: Request,
     scenario_id: str,

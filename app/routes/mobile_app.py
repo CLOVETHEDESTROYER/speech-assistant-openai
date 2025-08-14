@@ -14,6 +14,7 @@ from datetime import datetime
 from twilio.rest import Client
 from app import config
 from app.utils.url_helpers import clean_and_validate_url
+from app.limiter import rate_limit
 
 # Development mode check
 DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
@@ -72,7 +73,9 @@ class UsageStatsResponse(BaseModel):
 
 
 @router.get("/usage-stats", response_model=UsageStatsResponse)
+@rate_limit("3/minute")
 async def get_mobile_usage_stats(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -138,6 +141,7 @@ async def check_mobile_call_permission(
 
 
 @router.post("/make-call")
+@rate_limit("2/minute")
 async def make_mobile_call(
     request: Request,
     call_request: MobileCallRequest,
@@ -168,7 +172,8 @@ async def make_mobile_call(
         else:
             # Development mode - no limits
             duration_limit = 300  # 5 minutes for dev testing
-            logger.info(f"🧪 DEV MODE: Skipping usage limits for user {current_user.id}")
+            logger.info(
+                f"🧪 DEV MODE: Skipping usage limits for user {current_user.id}")
 
         # Store call info in Conversation before making the call
         from app.models import Conversation
@@ -254,7 +259,9 @@ async def make_mobile_call(
 
 
 @router.post("/upgrade-subscription")
+@rate_limit("3/minute")
 async def upgrade_mobile_subscription(
+    request: Request,
     upgrade_request: SubscriptionUpgradeRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -338,7 +345,9 @@ async def upgrade_mobile_subscription(
 
 
 @router.post("/purchase-subscription")
+@rate_limit("3/minute")
 async def purchase_subscription(
+    request: Request,
     purchase_request: AppStorePurchaseRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -450,7 +459,8 @@ async def get_mobile_pricing():
 
 
 @router.get("/scenarios")
-async def get_mobile_scenarios():
+@rate_limit("5/minute")
+async def get_mobile_scenarios(request: Request):
     """Get available scenarios for mobile app (enhanced entertainment list)"""
     return {
         "scenarios": [
@@ -668,6 +678,7 @@ async def get_mobile_call_history(
 
 
 @router.post("/app-store/webhook")
+@rate_limit("10/minute")
 async def handle_app_store_webhook(
     request: Request,
     webhook_data: AppStoreWebhookRequest,
