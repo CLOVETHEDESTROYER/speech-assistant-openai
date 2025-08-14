@@ -61,12 +61,12 @@ def create_app() -> FastAPI:
     app.include_router(mobile_router, tags=["mobile"])
     app.include_router(onboarding_router, tags=["onboarding"])
     app.include_router(twilio_transcripts.router, tags=["twilio"])
-    app.include_router(twilio_webhooks.router, tags=["twilio"])
-    app.include_router(calls.router, tags=["calls"])
+    # app.include_router(twilio_webhooks.router, tags=["twilio"])  # DISABLED: Duplicates in main.py
+    # app.include_router(calls.router, tags=["calls"])  # DISABLED: Duplicates in main.py
     app.include_router(realtime.router, tags=["realtime"])
     app.include_router(transcription.router, tags=["transcription"])
     app.include_router(validation_router, tags=["validation"])
     app.include_router(testing_router, prefix="/testing", tags=["testing"])
-    app.include_router(custom_scenarios_router, tags=["custom-scenarios"])
+    # app.include_router(custom_scenarios_router, tags=["custom-scenarios"])  # DISABLED: Duplicates in main.py
 
     return app
