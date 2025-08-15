@@ -834,12 +834,18 @@ func checkCallPermission() async throws -> CallPermission {
 
 ### **1. Available Scenarios**
 
+The Speech Assistant offers a comprehensive collection of scenarios designed for various use cases, from entertainment to emotional support. All scenarios are available to mobile users, giving you flexibility in your frontend to display and categorize them as needed.
+
+#### **Complete Scenarios List**
+
 ```swift
 struct Scenario: Codable, Identifiable {
     let id: String
     let name: String
     let description: String
     let icon: String
+    let category: String  // New field for frontend categorization
+    let is_family_friendly: Bool  // New field for content filtering
 }
 
 struct ScenariosResponse: Codable {
@@ -854,6 +860,132 @@ func getAvailableScenarios() async throws -> [Scenario] {
     let (data, _) = try await URLSession.shared.data(for: request)
     let response = try JSONDecoder().decode(ScenariosResponse.self, from: data)
     return response.scenarios
+}
+```
+
+#### **All Available Scenarios by Category**
+
+**🎭 Entertainment & Fun**
+
+- `default` - Friendly Chat (casual conversation) - **Voice**: `alloy` (Female)
+- `celebrity` - Celebrity Interview (chat with virtual celebrity) - **Voice**: `alloy` (Female)
+- `comedian` - Stand-up Comedian (funny jokes and comedy) - **Voice**: `ash` (Male)
+- `storyteller` - Storyteller (engaging stories and tales) - **Voice**: `alloy` (Female)
+- `yacht_party` - Yacht Party Host (exclusive party planning) - **Voice**: `ash` (Male)
+- `instigator` - Drama Starter (gossip and drama) - **Voice**: `ash` (Male)
+
+**💼 Professional & Business**
+
+- `sales_pitch` - Sales Professional (persuasive sales calls) - **Voice**: `echo` (Male)
+- `customer_service` - Customer Service Rep (helpful support) - **Voice**: `coral` (Female)
+- `real_estate` - Aggressive Real Estate Agent (pushy property deals) - **Voice**: `echo` (Male)
+
+**🏥 Emergency & Crisis**
+
+- `sister_emergency` - Sister Emergency (family crisis support) - **Voice**: `coral` (Female)
+- `mother_emergency` - Mother Emergency (elderly parent care) - **Voice**: `sage` (Female)
+
+**💕 Romantic & Relationships**
+
+- `caring_partner` - Caring Partner (daily relationship check-in) - **Voice**: `alloy` (Female)
+- `surprise_date_planner` - Surprise Date Planner (romantic planning) - **Voice**: `ash` (Male)
+- `long_distance_love` - Long Distance Love (relationship support) - **Voice**: `coral` (Female)
+
+**👨‍👩‍👧‍👦 Family & Friendship**
+
+- `supportive_bestie` - Supportive Best Friend (emotional support) - **Voice**: `coral` (Female)
+- `encouraging_parent` - Encouraging Parent (parental guidance) - **Voice**: `alloy` (Female)
+- `caring_sibling` - Caring Sibling (sibling support) - **Voice**: `echo` (Male)
+
+**🚀 Motivational & Wellness**
+
+- `therapist` - Life Coach (supportive conversation) - **Voice**: `coral` (Female)
+- `motivational_coach` - Motivational Coach (goal achievement) - **Voice**: `ash` (Male)
+- `wellness_checkin` - Wellness Check-in (mental health support) - **Voice**: `sage` (Female)
+
+**🎉 Celebration & Gratitude**
+
+- `celebration_caller` - Celebration Caller (success celebration) - **Voice**: `shimmer` (Female)
+- `birthday_wishes` - Birthday Wishes (birthday celebrations) - **Voice**: `shimmer` (Female)
+- `gratitude_caller` - Gratitude Caller (appreciation expression) - **Voice**: `verse` (Male)
+
+#### **Frontend Categorization Suggestions**
+
+```swift
+enum ScenarioCategory: String, CaseIterable {
+    case entertainment = "Entertainment"
+    case professional = "Professional"
+    case emergency = "Emergency"
+    case romantic = "Romantic"
+    case family = "Family & Friends"
+    case motivational = "Motivational"
+    case celebration = "Celebration"
+
+    var icon: String {
+        switch self {
+        case .entertainment: return "🎭"
+        case .professional: return "💼"
+        case .emergency: return "🏥"
+        case .romantic: return "💕"
+        case .family: return "👨‍👩‍👧‍👦"
+        case .motivational: return "🚀"
+        case .celebration: return "🎉"
+        }
+    }
+
+    var scenarios: [String] {
+        switch self {
+        case .entertainment:
+            return ["default", "celebrity", "comedian", "storyteller", "yacht_party", "instigator"]
+        case .professional:
+            return ["sales_pitch", "customer_service", "real_estate"]
+        case .emergency:
+            return ["sister_emergency", "mother_emergency"]
+        case .romantic:
+            return ["caring_partner", "surprise_date_planner", "long_distance_love"]
+        case .family:
+            return ["supportive_bestie", "encouraging_parent", "caring_sibling"]
+        case .motivational:
+            return ["therapist", "motivational_coach", "wellness_checkin"]
+        case .celebration:
+            return ["celebration_caller", "birthday_wishes", "gratitude_caller"]
+        }
+    }
+}
+```
+
+#### **Family-Friendly Content Filtering**
+
+For App Store compliance and family-friendly content, you can filter scenarios:
+
+```swift
+extension Scenario {
+    var isFamilyFriendly: Bool {
+        // Scenarios that are safe for all audiences
+        let familyFriendlyScenarios = [
+            "default", "celebrity", "comedian", "storyteller",
+            "customer_service", "caring_partner", "surprise_date_planner",
+            "long_distance_love", "supportive_bestie", "encouraging_parent",
+            "caring_sibling", "therapist", "motivational_coach",
+            "wellness_checkin", "celebration_caller", "birthday_wishes",
+            "gratitude_caller"
+        ]
+        return familyFriendlyScenarios.contains(id)
+    }
+
+    var isRomantic: Bool {
+        let romanticScenarios = [
+            "caring_partner", "surprise_date_planner", "long_distance_love"
+        ]
+        return romanticScenarios.contains(id)
+    }
+
+    var isProfessional: Bool {
+        let professionalScenarios = [
+            "sales_pitch", "customer_service", "real_estate"
+        ]
+        return professionalScenarios.contains(id)
+    }
 }
 ```
 
@@ -1334,6 +1466,557 @@ struct UsageStatsView: View {
 
 ---
 
+## Voice Configuration & Options
+
+### **Available Voice Types with Gender & Accent Classification**
+
+The Speech Assistant uses OpenAI's actual text-to-speech voices. Here's the complete classification with gender, accent, and personality characteristics:
+
+#### **Complete Voice Classification System**
+
+```swift
+enum VoiceType: String, CaseIterable {
+    case alloy = "alloy"
+    case ash = "ash"
+    case ballad = "ballad"
+    case coral = "coral"
+    case echo = "echo"
+    case sage = "sage"
+    case shimmer = "shimmer"
+    case verse = "verse"
+
+    var displayName: String {
+        switch self {
+        case .alloy: return "Alloy"
+        case .ash: return "Ash"
+        case .ballad: return "Ballad"
+        case .coral: return "Coral"
+        case .echo: return "Echo"
+        case .sage: return "Sage"
+        case .shimmer: return "Shimmer"
+        case .verse: return "Verse"
+        }
+    }
+
+    var gender: VoiceGender {
+        switch self {
+        case .alloy, .coral, .sage, .shimmer:
+            return .female
+        case .ash, .ballad, .echo, .verse:
+            return .male
+        }
+    }
+
+    var accent: VoiceAccent {
+        switch self {
+        case .ballad:
+            return .british
+        case .alloy, .ash, .coral, .echo, .sage, .shimmer, .verse:
+            return .american
+        }
+    }
+
+    var personality: VoicePersonality {
+        switch self {
+        case .alloy: return .warm_engaging
+        case .ash: return .energetic_upbeat
+        case .ballad: return .professional_neutral
+        case .coral: return .gentle_supportive
+        case .echo: return .professional_neutral
+        case .sage: return .gentle_supportive
+        case .shimmer: return .energetic_upbeat
+        case .verse: return .warm_engaging
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .alloy: return "Warm and engaging female voice"
+        case .ash: return "Energetic and upbeat male voice"
+        case .ballad: return "Professional British male voice"
+        case .coral: return "Gentle and supportive female voice"
+        case .echo: return "Clear and professional male voice"
+        case .sage: return "Calm and wise female voice"
+        case .shimmer: return "Excited and enthusiastic female voice"
+        case .verse: return "Warm and engaging male voice"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .alloy: return "😊"
+        case .ash: return "🎉"
+        case .ballad: return "🇬🇧"
+        case .coral: return "🤗"
+        case .echo: return "💼"
+        case .sage: return "🧘‍♀️"
+        case .shimmer: return "✨"
+        case .verse: return "😊"
+        }
+    }
+}
+
+enum VoiceGender: String, CaseIterable {
+    case male = "male"
+    case female = "female"
+
+    var displayName: String {
+        switch self {
+        case .male: return "Male"
+        case .female: return "Female"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .male: return "👨"
+        case .female: return "👩"
+        }
+    }
+}
+
+enum VoiceAccent: String, CaseIterable {
+    case american = "american"
+    case british = "british"
+
+    var displayName: String {
+        switch self {
+        case .american: return "American"
+        case .british: return "British"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .american: return "🇺🇸"
+        case .british: return "🇬🇧"
+        }
+    }
+}
+
+enum VoicePersonality: String, CaseIterable {
+    case warm_engaging = "warm_engaging"
+    case energetic_upbeat = "energetic_upbeat"
+    case gentle_supportive = "gentle_supportive"
+    case professional_neutral = "professional_neutral"
+
+    var displayName: String {
+        switch self {
+        case .warm_engaging: return "Warm & Engaging"
+        case .energetic_upbeat: return "Energetic & Upbeat"
+        case .gentle_supportive: return "Gentle & Supportive"
+        case .professional_neutral: return "Professional & Neutral"
+        }
+    }
+}
+```
+
+#### **Voice Configuration Details**
+
+Each scenario includes specific voice configuration with temperature settings that control voice variation:
+
+```swift
+struct VoiceConfig: Codable {
+    let voice: String
+    let temperature: Double
+
+    var temperatureDescription: String {
+        switch temperature {
+        case 0.0...0.3: return "Very Consistent"
+        case 0.4...0.6: return "Consistent"
+        case 0.7...0.8: return "Moderate Variation"
+        case 0.9...1.0: return "High Variation"
+        default: return "Unknown"
+        }
+    }
+}
+```
+
+#### **Enhanced Voice Selection UI with Filtering**
+
+```swift
+struct EnhancedVoiceSelectionView: View {
+    @Binding var selectedVoice: VoiceType
+    @State private var selectedGender: VoiceGender?
+    @State private var selectedAccent: VoiceAccent?
+    @State private var selectedPersonality: VoicePersonality?
+
+    let scenario: Scenario
+
+    var filteredVoices: [VoiceType] {
+        var voices = VoiceType.allCases
+
+        if let gender = selectedGender {
+            voices = voices.filter { $0.gender == gender }
+        }
+
+        if let accent = selectedAccent {
+            voices = voices.filter { $0.accent == accent }
+        }
+
+        if let personality = selectedPersonality {
+            voices = voices.filter { $0.personality == personality }
+        }
+
+        return voices
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Voice Selection")
+                .font(.headline)
+
+            Text("Scenario: \(scenario.name)")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            // Filter Controls
+            VStack(spacing: 12) {
+                // Gender Filter
+                HStack {
+                    Text("Gender:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    HStack(spacing: 8) {
+                        ForEach(VoiceGender.allCases, id: \.self) { gender in
+                            FilterChip(
+                                title: "\(gender.emoji) \(gender.displayName)",
+                                isSelected: selectedGender == gender,
+                                action: {
+                                    if selectedGender == gender {
+                                        selectedGender = nil
+                                    } else {
+                                        selectedGender = gender
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Accent Filter
+                HStack {
+                    Text("Accent:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    HStack(spacing: 8) {
+                        ForEach(VoiceAccent.allCases, id: \.self) { accent in
+                            FilterChip(
+                                title: "\(accent.emoji) \(accent.displayName)",
+                                isSelected: selectedAccent == accent,
+                                action: {
+                                    if selectedAccent == accent {
+                                        selectedAccent = nil
+                                    } else {
+                                        selectedAccent = accent
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Personality Filter
+                HStack {
+                    Text("Personality:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    HStack(spacing: 8) {
+                        ForEach(VoicePersonality.allCases, id: \.self) { personality in
+                            FilterChip(
+                                title: personality.displayName,
+                                isSelected: selectedPersonality == personality,
+                                action: {
+                                    if selectedPersonality == personality {
+                                        selectedPersonality = nil
+                                    } else {
+                                        selectedPersonality = personality
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+
+            // Clear Filters Button
+            if selectedGender != nil || selectedAccent != nil || selectedPersonality != nil {
+                Button("Clear All Filters") {
+                    selectedGender = nil
+                    selectedAccent = nil
+                    selectedPersonality = nil
+                }
+                .foregroundColor(.blue)
+                .font(.caption)
+            }
+
+            // Voice Grid
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+                ForEach(filteredVoices, id: \.self) { voice in
+                    EnhancedVoiceOptionCard(
+                        voice: voice,
+                        isSelected: selectedVoice == voice,
+                        isRecommended: voice == scenario.recommendedVoice
+                    ) {
+                        selectedVoice = voice
+                    }
+                }
+            }
+
+            if filteredVoices.isEmpty {
+                Text("No voices match your current filters")
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+        }
+        .padding()
+    }
+}
+
+struct FilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isSelected ? Color.blue : Color(.systemGray5))
+                .foregroundColor(isSelected ? .white : .primary)
+                .cornerRadius(16)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct EnhancedVoiceOptionCard: View {
+    let voice: VoiceType
+    let isSelected: Bool
+    let isRecommended: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Text(voice.emoji)
+                    .font(.title)
+
+                Text(voice.displayName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+
+                // Gender and Accent badges
+                HStack(spacing: 4) {
+                    Text(voice.gender.emoji)
+                        .font(.caption2)
+
+                    Text(voice.accent.emoji)
+                        .font(.caption2)
+                }
+
+                Text(voice.personality.displayName)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if isRecommended {
+                    Text("Recommended")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(isSelected ? Color.blue.opacity(0.1) : Color(.systemGray6))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+```
+
+#### **Voice Filtering Utilities**
+
+```swift
+extension VoiceType {
+    static func filterByGender(_ gender: VoiceGender) -> [VoiceType] {
+        return allCases.filter { $0.gender == gender }
+    }
+
+    static func filterByAccent(_ accent: VoiceAccent) -> [VoiceType] {
+        return allCases.filter { $0.accent == accent }
+    }
+
+    static func filterByPersonality(_ personality: VoicePersonality) -> [VoiceType] {
+        return allCases.filter { $0.personality == personality }
+    }
+
+    static func getVoicesForScenario(_ scenario: Scenario) -> [VoiceType] {
+        // Return voices that match the scenario's recommended characteristics
+        switch scenario.category {
+        case "romantic", "family":
+            return filterByPersonality(.warm_engaging)
+        case "entertainment", "celebration":
+            return filterByPersonality(.energetic_upbeat)
+        case "motivational", "wellness":
+            return filterByPersonality(.gentle_supportive)
+        case "professional", "business":
+            return filterByPersonality(.professional_neutral)
+        default:
+            return allCases
+        }
+    }
+}
+```
+
+### **Voice Customization Options**
+
+#### **Temperature Settings**
+
+The temperature parameter controls how much variation the AI voice has:
+
+- **0.0 - 0.3**: Very consistent, predictable voice (good for professional scenarios)
+- **0.4 - 0.6**: Consistent with slight variation (good for family/relationship scenarios)
+- **0.7 - 0.8**: Moderate variation (good for entertainment scenarios)
+- **0.9 - 1.0**: High variation (good for dramatic/emotional scenarios)
+
+#### **Voice Personality Matching**
+
+```swift
+struct VoicePersonalityMatcher {
+    static func getOptimalVoice(for emotion: Emotion, context: ScenarioContext) -> VoiceType {
+        switch emotion {
+        case .excited, .happy:
+            return .ash // Energetic male
+        case .calm, .supportive:
+            return .coral // Gentle female
+        case .professional, .business:
+            return .echo // Professional male
+        case .romantic, .caring:
+            return .alloy // Warm female
+        case .worried, .concerned:
+            return .coral // Gentle female
+        case .aggressive, .direct:
+            return .echo // Professional male
+        case .wise, .experienced:
+            return .sage // Wise female
+        }
+    }
+
+    enum Emotion {
+        case excited, happy, calm, supportive, professional, business
+        case romantic, caring, worried, concerned, aggressive, direct, wise, experienced
+    }
+
+    enum ScenarioContext {
+        case entertainment, business, emergency, romantic, family, motivational, celebration
+    }
+}
+```
+
+#### **Custom Scenario Voice Selection**
+
+For custom scenarios, users can now filter voices by:
+
+1. **Gender**: Male or Female voices
+2. **Accent**: American or British accents
+3. **Personality**: Warm, Energetic, Gentle, or Professional
+4. **Combination**: Mix and match filters for perfect voice selection
+
+This enhanced system makes it much easier for users to find the perfect voice for their custom scenarios while maintaining the professional quality of the app.
+
+### **Quick Voice Filtering Reference**
+
+#### **Filter Combinations for Common Use Cases**
+
+```swift
+// Get all female voices
+let femaleVoices = VoiceType.filterByGender(.female)
+// Result: [alloy, coral, sage, shimmer]
+
+// Get all male voices
+let maleVoices = VoiceType.filterByGender(.male)
+// Result: [ash, ballad, echo, verse]
+
+// Get all British voices
+let britishVoices = VoiceType.filterByAccent(.british)
+// Result: [ballad]
+
+// Get all American voices
+let americanVoices = VoiceType.filterByAccent(.american)
+// Result: [alloy, ash, coral, echo, sage, shimmer, verse]
+
+// Get warm and engaging voices
+let warmVoices = VoiceType.filterByPersonality(.warm_engaging)
+// Result: [alloy, verse]
+
+// Get energetic voices
+let energeticVoices = VoiceType.filterByPersonality(.energetic_upbeat)
+// Result: [ash, shimmer]
+
+// Get professional voices
+let professionalVoices = VoiceType.filterByPersonality(.professional_neutral)
+// Result: [ballad, echo]
+
+// Get gentle voices
+let gentleVoices = VoiceType.filterByPersonality(.gentle_supportive)
+// Result: [coral, sage]
+```
+
+#### **Advanced Filtering Examples**
+
+```swift
+// Get female American voices
+let femaleAmericanVoices = VoiceType.allCases.filter {
+    $0.gender == .female && $0.accent == .american
+}
+// Result: [alloy, coral, sage, shimmer]
+
+// Get male voices with warm personality
+let warmMaleVoices = VoiceType.allCases.filter {
+    $0.gender == .male && $0.personality == .warm_engaging
+}
+// Result: [verse]
+
+// Get voices suitable for romantic scenarios
+let romanticVoices = VoiceType.allCases.filter { voice in
+    voice.personality == .warm_engaging ||
+    voice.personality == .gentle_supportive
+}
+// Result: [alloy, coral, sage, verse]
+
+// Get voices suitable for professional scenarios
+let professionalScenarioVoices = VoiceType.allCases.filter { voice in
+    voice.personality == .professional_neutral
+}
+// Result: [ballad, echo]
+```
+
+#### **Voice Selection Best Practices**
+
+1. **For Romantic Scenarios**: Use `alloy` (warm female) or `verse` (warm male)
+2. **For Professional Calls**: Use `echo` (professional male) or `ballad` (British professional male)
+3. **For Entertainment**: Use `ash` (energetic male) or `shimmer` (energetic female)
+4. **For Support/Wellness**: Use `coral` (gentle female) or `sage` (wise female)
+5. **For Family Scenarios**: Use `alloy` (warm female) or `coral` (gentle female)
+
 ## Additional Features
 
 ### **1. Call History**
@@ -1395,6 +2078,247 @@ func scheduleCall(phoneNumber: String, scenario: String, scheduledTime: Date) as
 ```
 
 ---
+
+## App Store Compliance & Content Moderation
+
+### **Content Safety Guidelines**
+
+To ensure your app meets App Store guidelines and maintains a family-friendly environment, consider these content moderation strategies:
+
+#### **Scenario Content Filtering**
+
+```swift
+struct ContentModerator {
+    static let inappropriateKeywords = [
+        "hate", "violence", "explicit", "inappropriate", "offensive"
+    ]
+
+    static func isScenarioAppropriate(for age: UserAge, scenario: Scenario) -> Bool {
+        switch age {
+        case .allAges:
+            return scenario.isFamilyFriendly
+        case .teenPlus:
+            return scenario.isFamilyFriendly || scenario.isRomantic
+        case .adult:
+            return true // All scenarios allowed for adults
+        }
+    }
+
+    enum UserAge: String, CaseIterable {
+        case allAges = "4+"
+        case teenPlus = "12+"
+        case adult = "17+"
+
+        var displayName: String {
+            switch self {
+            case .allAges: return "All Ages (4+)"
+            case .teenPlus: return "Teen & Up (12+)"
+            case .adult: return "Adult (17+)"
+            }
+        }
+    }
+}
+```
+
+#### **Age-Appropriate Scenario Display**
+
+```swift
+struct AgeAppropriateScenarioView: View {
+    @State private var selectedAge: ContentModerator.UserAge = .allAges
+    @State private var scenarios: [Scenario] = []
+
+    var filteredScenarios: [Scenario] {
+        scenarios.filter { scenario in
+            ContentModerator.isScenarioAppropriate(for: selectedAge, scenario: scenario)
+        }
+    }
+
+    var body: some View {
+        VStack {
+            Picker("Age Rating", selection: $selectedAge) {
+                ForEach(ContentModerator.UserAge.allCases, id: \.self) { age in
+                    Text(age.displayName).tag(age)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding()
+
+            List(filteredScenarios) { scenario in
+                ScenarioRow(scenario: scenario)
+            }
+        }
+        .navigationTitle("Scenarios")
+    }
+}
+```
+
+#### **Content Warning System**
+
+```swift
+struct ContentWarningView: View {
+    let scenario: Scenario
+    @State private var showingWarning = false
+
+    var body: some View {
+        VStack {
+            if scenario.requiresContentWarning {
+                Button("⚠️ Content Warning") {
+                    showingWarning = true
+                }
+                .foregroundColor(.orange)
+            }
+
+            // Scenario content
+        }
+        .alert("Content Warning", isPresented: $showingWarning) {
+            Button("Continue") { }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(scenario.contentWarningMessage ?? "This scenario may contain content not suitable for all audiences.")
+        }
+    }
+}
+
+extension Scenario {
+    var requiresContentWarning: Bool {
+        // Scenarios that might need content warnings
+        let warningScenarios = [
+            "instigator", "real_estate", "sister_emergency", "mother_emergency"
+        ]
+        return warningScenarios.contains(id)
+    }
+
+    var contentWarningMessage: String? {
+        switch id {
+        case "instigator":
+            return "This scenario involves gossip and drama that may not be suitable for all audiences."
+        case "real_estate":
+            return "This scenario involves aggressive sales tactics that may be intense."
+        case "sister_emergency", "mother_emergency":
+            return "This scenario involves emergency situations that may be distressing."
+        default:
+            return nil
+        }
+    }
+}
+```
+
+### **App Store Review Guidelines Compliance**
+
+#### **Content Rating Considerations**
+
+- **4+ Rating**: Focus on family-friendly scenarios (default, celebrity, comedian, storyteller, customer_service, caring_partner, supportive_bestie, encouraging_parent, caring_sibling, therapist, motivational_coach, wellness_checkin, celebration_caller, birthday_wishes, gratitude_caller)
+- **12+ Rating**: Include romantic scenarios (caring_partner, surprise_date_planner, long_distance_love)
+- **17+ Rating**: Include all scenarios including emergency and business scenarios
+
+#### **User-Generated Content Safety**
+
+```swift
+struct UserContentSafety {
+    static func validateUserInput(_ input: String) -> ValidationResult {
+        let inappropriateContent = checkForInappropriateContent(input)
+        let spamContent = checkForSpamContent(input)
+
+        if inappropriateContent {
+            return .rejected(reason: "Content contains inappropriate material")
+        } else if spamContent {
+            return .rejected(reason: "Content appears to be spam")
+        } else {
+            return .approved
+        }
+    }
+
+    enum ValidationResult {
+        case approved
+        case rejected(reason: String)
+    }
+
+    private static func checkForInappropriateContent(_ input: String) -> Bool {
+        // Implement content filtering logic
+        return false
+    }
+
+    private static func checkForSpamContent(_ input: String) -> Bool {
+        // Implement spam detection logic
+        return false
+    }
+}
+```
+
+#### **Reporting and Moderation System**
+
+```swift
+struct ContentReport {
+    let id: UUID
+    let scenarioId: String
+    let reporterId: String
+    let reason: ReportReason
+    let description: String
+    let timestamp: Date
+    let status: ReportStatus
+
+    enum ReportReason: String, CaseIterable {
+        case inappropriate = "inappropriate"
+        case offensive = "offensive"
+        case spam = "spam"
+        case other = "other"
+
+        var displayName: String {
+            switch self {
+            case .inappropriate: return "Inappropriate Content"
+            case .offensive: return "Offensive Language"
+            case .spam: return "Spam or Misleading"
+            case .other: return "Other"
+            }
+        }
+    }
+
+    enum ReportStatus: String {
+        case pending = "pending"
+        case reviewed = "reviewed"
+        case resolved = "resolved"
+        case dismissed = "dismissed"
+    }
+}
+
+struct ReportContentView: View {
+    @State private var selectedReason: ContentReport.ReportReason = .inappropriate
+    @State private var description = ""
+    let scenario: Scenario
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Report Reason") {
+                    Picker("Reason", selection: $selectedReason) {
+                        ForEach(ContentReport.ReportReason.allCases, id: \.self) { reason in
+                            Text(reason.displayName).tag(reason)
+                        }
+                    }
+                }
+
+                Section("Additional Details") {
+                    TextField("Describe the issue...", text: $description, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+
+                Section {
+                    Button("Submit Report") {
+                        submitReport()
+                    }
+                    .disabled(description.isEmpty)
+                }
+            }
+            .navigationTitle("Report Content")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func submitReport() {
+        // Implement report submission
+    }
+}
+```
 
 ## Best Practices
 
@@ -1660,3 +2584,84 @@ curl -X POST http://localhost:5050/test/test-call \
 - **App Store Compliant**: Full integration with Apple's payment system
 
 This comprehensive guide provides everything your iOS development team needs to integrate with the enhanced Speech Assistant backend API. The mobile app now supports a complete entertainment-focused experience with flexible pricing tiers, accurate usage tracking, and seamless App Store integration.
+
+---
+
+## 📋 Complete Scenarios Reference
+
+### **All Available Scenarios with Details**
+
+| ID                      | Name                   | Category      | Voice ID  | Gender | Accent   | Temperature | Family Friendly | Description                   |
+| ----------------------- | ---------------------- | ------------- | --------- | ------ | -------- | ----------- | --------------- | ----------------------------- |
+| `default`               | Friendly Chat          | Entertainment | `alloy`   | Female | American | 0.7         | ✅              | Casual, friendly conversation |
+| `celebrity`             | Celebrity Interview    | Entertainment | `alloy`   | Female | American | 0.7         | ✅              | Chat with a virtual celebrity |
+| `comedian`              | Stand-up Comedian      | Entertainment | `ash`     | Male   | American | 0.8         | ✅              | Funny jokes and comedy bits   |
+| `storyteller`           | Storyteller            | Entertainment | `alloy`   | Female | American | 0.7         | ✅              | Engaging stories and tales    |
+| `yacht_party`           | Yacht Party Host       | Entertainment | `ash`     | Male   | American | 0.8         | ⚠️              | Exclusive party planning      |
+| `instigator`            | Drama Starter          | Entertainment | `ash`     | Male   | American | 0.9         | ⚠️              | Gossip and drama creation     |
+| `sales_pitch`           | Sales Professional     | Professional  | `echo`    | Male   | American | 0.7         | ✅              | Persuasive sales calls        |
+| `customer_service`      | Customer Service Rep   | Professional  | `coral`   | Female | American | 0.6         | ✅              | Helpful support calls         |
+| `real_estate`           | Real Estate Agent      | Professional  | `echo`    | Male   | American | 0.7         | ⚠️              | Pushy property deals          |
+| `sister_emergency`      | Sister Emergency       | Emergency     | `coral`   | Female | American | 0.8         | ⚠️              | Family crisis support         |
+| `mother_emergency`      | Mother Emergency       | Emergency     | `sage`    | Female | American | 0.6         | ⚠️              | Elderly parent care           |
+| `caring_partner`        | Caring Partner         | Romantic      | `alloy`   | Female | American | 0.7         | ✅              | Daily relationship check-in   |
+| `surprise_date_planner` | Surprise Date Planner  | Romantic      | `ash`     | Male   | American | 0.8         | ✅              | Romantic date planning        |
+| `long_distance_love`    | Long Distance Love     | Romantic      | `coral`   | Female | American | 0.6         | ✅              | Relationship support          |
+| `supportive_bestie`     | Supportive Best Friend | Family        | `coral`   | Female | American | 0.6         | ✅              | Emotional support             |
+| `encouraging_parent`    | Encouraging Parent     | Family        | `alloy`   | Female | American | 0.5         | ✅              | Parental guidance             |
+| `caring_sibling`        | Caring Sibling         | Family        | `echo`    | Male   | American | 0.6         | ✅              | Sibling support               |
+| `therapist`             | Life Coach             | Motivational  | `coral`   | Female | American | 0.6         | ✅              | Supportive conversation       |
+| `motivational_coach`    | Motivational Coach     | Motivational  | `ash`     | Male   | American | 0.8         | ✅              | Goal achievement              |
+| `wellness_checkin`      | Wellness Check-in      | Motivational  | `sage`    | Female | American | 0.5         | ✅              | Mental health support         |
+| `celebration_caller`    | Celebration Caller     | Celebration   | `shimmer` | Female | American | 0.9         | ✅              | Success celebration           |
+| `birthday_wishes`       | Birthday Wishes        | Celebration   | `shimmer` | Female | American | 0.9         | ✅              | Birthday celebrations         |
+| `gratitude_caller`      | Gratitude Caller       | Celebration   | `verse`   | Male   | American | 0.6         | ✅              | Appreciation expression       |
+
+### **Voice ID Reference**
+
+| Voice ID  | Gender | Accent   | Personality            | Best For                                 |
+| --------- | ------ | -------- | ---------------------- | ---------------------------------------- |
+| `alloy`   | Female | American | Warm & Engaging        | Romantic, family, friendly scenarios     |
+| `ash`     | Male   | American | Energetic & Upbeat     | Entertainment, celebration, motivational |
+| `ballad`  | Male   | British  | Professional & Neutral | Professional, business scenarios         |
+| `coral`   | Female | American | Gentle & Supportive    | Support, wellness, caring scenarios      |
+| `echo`    | Male   | American | Professional & Neutral | Business, professional, formal scenarios |
+| `sage`    | Female | American | Gentle & Supportive    | Wellness, wisdom, calming scenarios      |
+| `shimmer` | Female | American | Energetic & Upbeat     | Celebration, excitement, fun scenarios   |
+| `verse`   | Male   | American | Warm & Engaging        | Romantic, friendly, warm scenarios       |
+
+### **Legend**
+
+- ✅ **Family Friendly**: Safe for all audiences (4+ rating)
+- ⚠️ **Content Warning**: May need age restrictions or warnings
+- **Voice ID**: Actual OpenAI voice identifier
+- **Gender**: Male or Female voice
+- **Accent**: American or British accent
+- **Temperature**: Controls voice variation (0.0-1.0 scale)
+
+### **Recommended App Store Ratings**
+
+- **4+ Rating**: Use only family-friendly scenarios
+- **12+ Rating**: Include romantic scenarios
+- **17+ Rating**: Include all scenarios with appropriate warnings
+
+### **Frontend Implementation Notes**
+
+1. **Category Grouping**: Group scenarios by category for better user experience
+2. **Age Filtering**: Implement age-appropriate content filtering
+3. **Content Warnings**: Show warnings for scenarios that need them
+4. **Voice Selection**: Allow users to customize voices within scenarios using the enhanced voice selection UI
+5. **Voice Filtering**: Implement gender, accent, and personality filtering for custom scenarios
+6. **Reporting System**: Implement content reporting for moderation
+
+### **Custom Scenario Voice Selection**
+
+When users create custom scenarios, they can now:
+
+- **Filter by Gender**: Choose between male and female voices
+- **Filter by Accent**: Select American or British accents
+- **Filter by Personality**: Match voice characteristics to scenario mood
+- **Combine Filters**: Mix and match for perfect voice selection
+- **Preview Voices**: Test different voice combinations before finalizing
+
+This comprehensive scenarios reference gives your iOS development team complete visibility into all available content, helping you build a user-friendly interface that complies with App Store guidelines while maximizing user engagement and providing powerful voice customization options.

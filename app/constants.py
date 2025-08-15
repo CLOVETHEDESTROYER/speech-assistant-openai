@@ -1,12 +1,27 @@
-# Voice configurations
+# In app/constants.py - make it identical to your app_config.py VOICES
 VOICES = {
-    "aggressive_male": "ash",    # Deep, authoritative male voice
-    "concerned_female": "coral",    # Warm, empathetic female voice
-    "elderly_female": "shimmer",  # Gentle, mature female voice
-    "professional_neutral": "alloy",    # Neutral, professional voice
-    "gentle_supportive": "echo",        # Soft-spoken, gentle voice
-    "warm_engaging": "ballad",    # Warm, engaging storyteller voice
-    "deep_authoritative": "sage",  # Deep, commanding voice
-    "energetic_upbeat": "verse",   # Lively, energetic voice
-    "clear_optimistic": "shimmer"  # Clear, optimistic voice
+    # Female voices
+    "warm_engaging_female": "alloy",       # Female, American, Warm & Engaging
+    "gentle_supportive_female": "coral",   # Female, American, Gentle & Supportive
+    # Female, American, Gentle & Supportive (Wise)
+    "elderly_female": "sage",
+    "energetic_upbeat_female": "shimmer",  # Female, American, Energetic & Upbeat
+    "concerned_female": "coral",           # Female, American, Gentle & Supportive
+
+    # Male voices
+    "aggressive_male": "ash",              # Male, American, Energetic & Upbeat
+    "professional_neutral_male": "echo",   # Male, American, Professional & Neutral
+    "professional_british_male": "ballad",  # Male, British, Professional & Neutral
+    "warm_male": "verse",                  # Male, American, Warm & Engaging
+
+    # Legacy mappings for backward compatibility
+    "deep_authoritative": "echo",          # Male, American, Professional
+    "clear_optimistic": "shimmer",         # Female, American, Energetic
+
+    # Clean aliases without gender suffixes (for backward compatibility)
+    "warm_engaging": "alloy",
+    "gentle_supportive": "coral",
+    "energetic_upbeat": "shimmer",
+    "professional_neutral": "echo",
+    "professional_british": "ballad",
 }
