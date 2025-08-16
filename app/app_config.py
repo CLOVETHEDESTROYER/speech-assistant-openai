@@ -114,7 +114,7 @@ SCENARIOS = {
         ),
         "voice_config": {
             "voice": VOICES["energetic_upbeat"],
-            "temperature": 0.8  # Higher temperature for more dynamic expression
+            "temperature": 1.0  # Higher temperature for more dynamic expression
         }
     },
     "instigator": {
@@ -132,7 +132,7 @@ SCENARIOS = {
         ),
         "voice_config": {
             "voice": VOICES["energetic_upbeat"],
-            "temperature": 0.9  # High temperature for dramatic expression
+            "temperature": 1.0  # High temperature for dramatic expression
         }
     },
     "sales_pitch": {
@@ -205,7 +205,7 @@ SCENARIOS = {
         ),
         "voice_config": {
             "voice": VOICES["energetic_upbeat"],
-            "temperature": 0.8
+            "temperature": 1.0  # For maximum creativity in date ideas
         }
     },
 
@@ -259,7 +259,7 @@ SCENARIOS = {
         ),
         "voice_config": {
             "voice": VOICES["warm_engaging"],
-            "temperature": 0.5
+            "temperature": 0.6
         }
     },
 
@@ -313,7 +313,7 @@ SCENARIOS = {
         ),
         "voice_config": {
             "voice": VOICES["gentle_supportive"],
-            "temperature": 0.5
+            "temperature": 0.6
         }
     },
 
