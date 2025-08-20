@@ -62,12 +62,14 @@ async def google_callback(
             decrypted = decrypt_string(state)
         except Exception:
             logger.error("Failed to decrypt state parameter")
-            raise HTTPException(status_code=400, detail="Invalid state parameter")
+            raise HTTPException(
+                status_code=400, detail="Invalid state parameter")
 
         state_parts = decrypted.split(":")
         if len(state_parts) < 3:
             logger.error(f"Invalid state parameter structure: {decrypted}")
-            raise HTTPException(status_code=400, detail="Invalid state parameter")
+            raise HTTPException(
+                status_code=400, detail="Invalid state parameter")
 
         user_id = state_parts[1]
         logger.info(
@@ -93,7 +95,8 @@ async def google_callback(
         if existing_creds:
             # Update existing credentials
             existing_creds.token = encrypt_string(credentials.token)
-            existing_creds.refresh_token = encrypt_string(credentials.refresh_token)
+            existing_creds.refresh_token = encrypt_string(
+                credentials.refresh_token)
             existing_creds.token_expiry = credentials.expiry
             existing_creds.updated_at = datetime.utcnow()
             logger.info(
@@ -459,7 +462,7 @@ async def find_available_slots(
     return {"free_slots": formatted_slots}
 
 
-@router.api_route("/incoming-calendar-call", methods=["GET", "POST"])
+@router.api_route("/incoming-calendar-call", methods=["GET", "POST"], operation_id="google_calendar_incoming_call")
 @rate_limit("1/minute")
 async def handle_incoming_calendar_call(
     request: Request,

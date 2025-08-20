@@ -20,6 +20,7 @@ from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from datetime import timedelta
 from app.limiter import rate_limit
 from app.captcha import verify_captcha
+from pydantic import BaseModel, EmailStr
 
 
 router = APIRouter()
@@ -54,6 +55,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 def create_refresh_token():
     return str(uuid.uuid4())
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RegistrationWithOnboardingRequest(BaseModel):
+    email: EmailStr
+    password: str
+    session_id: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -107,6 +125,88 @@ async def register(request: Request, user: UserCreate, db: Session = Depends(get
     db.commit()
 
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
+@router.post("/register-with-onboarding", response_model=TokenResponse)
+@rate_limit("5/minute")
+async def register_with_onboarding(
+    request: Request, 
+    user_data: RegistrationWithOnboardingRequest, 
+    db: Session = Depends(get_db), 
+    captcha: bool = Depends(verify_captcha)
+):
+    """Register user with completed onboarding data"""
+    # Check if email already exists
+    db_user = db.query(User).filter(User.email == user_data.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Validate onboarding session
+    try:
+        from app.services.anonymous_onboarding_service import AnonymousOnboardingService
+        anonymous_service = AnonymousOnboardingService()
+        
+        # Get and validate onboarding session
+        session = await anonymous_service.get_session(user_data.session_id, db)
+        if not session:
+            raise HTTPException(status_code=400, detail="Invalid or expired onboarding session")
+        
+        if not session.is_completed:
+            raise HTTPException(status_code=400, detail="Onboarding not completed")
+            
+    except Exception as e:
+        logger.error(f"Error validating onboarding session: {e}")
+        raise HTTPException(status_code=400, detail="Invalid onboarding session")
+
+    # Create user account
+    hashed_password = get_password_hash(user_data.password)
+    new_user = User(email=user_data.email, hashed_password=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    # Link onboarding session to user
+    try:
+        await anonymous_service.link_to_user(user_data.session_id, new_user.id, db)
+    except Exception as e:
+        logger.error(f"Failed to link onboarding session: {e}")
+        # Don't fail registration if linking fails
+
+    # Initialize onboarding for new user
+    try:
+        from app.services.onboarding_service import OnboardingService
+        onboarding_service = OnboardingService()
+        await onboarding_service.initialize_user_onboarding(new_user.id, db)
+    except Exception as e:
+        logger.error(f"Failed to initialize onboarding for user {new_user.id}: {e}")
+
+    # Initialize usage limits based on app type
+    try:
+        from app.services.usage_service import UsageService
+        from app.models import AppType
+
+        # Detect app type from request
+        app_type = UsageService.detect_app_type_from_request(request)
+        UsageService.initialize_user_usage(new_user.id, app_type, db)
+
+    except Exception as e:
+        logger.error(f"Failed to initialize usage limits for user {new_user.id}: {e}")
+
+    # Create tokens
+    access_token = create_access_token(
+        data={"sub": new_user.email, "user_id": new_user.id})
+    refresh_token = create_refresh_token()
+
+    token_entry = Token(user_id=new_user.id, access_token=access_token,
+                        token_type="bearer", refresh_token=refresh_token)
+    db.add(token_entry)
+    db.commit()
+
+    return {
+        "access_token": access_token, 
+        "refresh_token": refresh_token, 
+        "token_type": "bearer"
+    }
 
 
 def authenticate_user(db: Session, email: str, password: str):

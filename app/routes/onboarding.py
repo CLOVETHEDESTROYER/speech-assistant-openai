@@ -4,6 +4,7 @@ from app.db import get_db
 from app.auth import get_current_user
 from app.models import User, ProviderCredentials
 from app.services.onboarding_service import OnboardingService
+from app.services.anonymous_onboarding_service import AnonymousOnboardingService
 from pydantic import BaseModel
 import logging
 from app.utils.crypto import encrypt_string, decrypt_string
@@ -18,9 +19,122 @@ class StepCompletionRequest(BaseModel):
     step: str
 
 
-# Initialize service
-onboarding_service = OnboardingService()
+class AnonymousOnboardingRequest(BaseModel):
+    user_name: str
 
+
+class ScenarioSelectionRequest(BaseModel):
+    scenario_id: str
+
+
+class RegistrationWithOnboardingRequest(BaseModel):
+    session_id: str
+    email: str
+    password: str
+
+
+# Initialize services
+onboarding_service = OnboardingService()
+anonymous_onboarding_service = AnonymousOnboardingService()
+
+
+# ============================================================================
+# ANONYMOUS ONBOARDING ENDPOINTS (No authentication required)
+# ============================================================================
+
+@router.post("/start")
+async def start_onboarding(db: Session = Depends(get_db)):
+    """Start onboarding for anonymous user (no registration required)"""
+    try:
+        session = await anonymous_onboarding_service.create_session(db)
+        return {
+            "session_id": session.session_id,
+            "current_step": 1,
+            "total_steps": 3,
+            "expires_at": session.expires_at.isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error starting anonymous onboarding: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start onboarding")
+
+
+@router.post("/set-name")
+async def set_user_name(
+    session_id: str,
+    request: AnonymousOnboardingRequest,
+    db: Session = Depends(get_db)
+):
+    """Set user's preferred name during onboarding"""
+    try:
+        result = await anonymous_onboarding_service.set_user_name(
+            session_id, request.user_name, db
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error setting user name: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set user name")
+
+
+@router.post("/select-scenario")
+async def select_scenario(
+    session_id: str,
+    request: ScenarioSelectionRequest,
+    db: Session = Depends(get_db)
+):
+    """Select user's preferred scenario during onboarding"""
+    try:
+        result = await anonymous_onboarding_service.select_scenario(
+            session_id, request.scenario_id, db
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error selecting scenario: {e}")
+        raise HTTPException(status_code=500, detail="Failed to select scenario")
+
+
+@router.post("/complete")
+async def complete_onboarding(session_id: str, db: Session = Depends(get_db)):
+    """Complete onboarding and mark as ready for registration"""
+    try:
+        result = await anonymous_onboarding_service.complete_onboarding(session_id, db)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error completing onboarding: {e}")
+        raise HTTPException(status_code=500, detail="Failed to complete onboarding")
+
+
+@router.get("/session/{session_id}")
+async def get_onboarding_session(session_id: str, db: Session = Depends(get_db)):
+    """Get current onboarding session status"""
+    try:
+        session = await anonymous_onboarding_service.get_session(session_id, db)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found or expired")
+        
+        return {
+            "session_id": session.session_id,
+            "user_name": session.user_name,
+            "selected_scenario_id": session.selected_scenario_id,
+            "is_completed": session.is_completed,
+            "created_at": session.created_at.isoformat(),
+            "expires_at": session.expires_at.isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting onboarding session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get session")
+
+
+# ============================================================================
+# EXISTING ONBOARDING ENDPOINTS (Require authentication)
+# ============================================================================
 
 @router.get("/status")
 async def get_onboarding_status(
@@ -96,7 +210,7 @@ async def check_step_completion(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Check if a specific onboarding step has been completed"""
+    """Check if a specific onboarding step is completed"""
     try:
         valid_steps = ["phone_setup", "calendar", "scenarios", "welcome_call"]
         if step not in valid_steps:
@@ -118,46 +232,24 @@ async def get_provider_credentials(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    creds = db.query(ProviderCredentials).filter(
-        ProviderCredentials.user_id == current_user.id).first()
-
-    def mask(value: str | None):
-        if not value:
-            return None
-        v = decrypt_string(value)
-        return f"***{v[-4:]}" if len(v) >= 4 else "***"
-
-    return {
-        "openai_api_key": mask(creds.openai_api_key) if creds else None,
-        "twilio_account_sid": mask(creds.twilio_account_sid) if creds else None,
-        "twilio_auth_token": mask(creds.twilio_auth_token) if creds else None,
-        "twilio_phone_number": mask(creds.twilio_phone_number) if creds else None,
-        "twilio_vi_sid": mask(creds.twilio_vi_sid) if creds else None,
-    }
-
-
-@router.put("/me/providers")
-async def update_provider_credentials(
-    payload: dict,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    creds = db.query(ProviderCredentials).filter(
-        ProviderCredentials.user_id == current_user.id).first()
-    if not creds:
-        creds = ProviderCredentials(user_id=current_user.id)
-        db.add(creds)
-
-    for field in [
-        "openai_api_key",
-        "twilio_account_sid",
-        "twilio_auth_token",
-        "twilio_phone_number",
-        "twilio_vi_sid",
-    ]:
-        value = payload.get(field)
-        if value is not None and value != "":
-            setattr(creds, field, encrypt_string(value))
-
-    db.commit()
-    return {"status": "ok"}
+    """Get user's connected provider credentials"""
+    try:
+        credentials = db.query(ProviderCredentials).filter(
+            ProviderCredentials.user_id == current_user.id
+        ).all()
+        
+        return {
+            "credentials": [
+                {
+                    "id": cred.id,
+                    "provider": cred.provider,
+                    "is_connected": cred.is_connected,
+                    "connected_at": cred.connected_at.isoformat() if cred.connected_at else None
+                }
+                for cred in credentials
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error getting provider credentials: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to get provider credentials")

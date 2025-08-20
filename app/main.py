@@ -492,214 +492,214 @@ async def schedule_call(
 # Make Call Endpoint
 
 
-@app.get("/make-call/{phone_number}/{scenario}")
-@rate_limit("2/minute")
-async def make_call(
-    request: Request,
-    phone_number: str,
-    scenario: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    try:
-        # Check usage limits for business web app users (not in development mode)
-        if not DEVELOPMENT_MODE:
-            from app.services.usage_service import UsageService
-            from app.models import AppType, UsageLimits
-
-            # Initialize or get usage limits
-            usage_limits = db.query(UsageLimits).filter(
-                UsageLimits.user_id == current_user.id).first()
-            if not usage_limits:
-                # Auto-detect as web business if not found
-                app_type = UsageService.detect_app_type_from_request(request)
-                usage_limits = UsageService.initialize_user_usage(
-                    current_user.id, app_type, db)
-
-            # Check if user can make a call (only for business users)
-            if usage_limits.app_type == AppType.WEB_BUSINESS:
-                can_call, status_code, details = UsageService.can_make_call(
-                    current_user.id, db)
-
-                if not can_call:
-                    if status_code == "trial_calls_exhausted":
-                        raise HTTPException(
-                            status_code=402,  # Payment Required
-                            detail={
-                                "error": "trial_exhausted",
-                                "message": "Your 4 free trial calls have been used. Upgrade to Basic ($49.99/month) for 20 calls per week!",
-                                "upgrade_url": "/pricing",
-                                "pricing": details.get("pricing")
-                            }
-                        )
-                    elif status_code == "weekly_limit_reached":
-                        raise HTTPException(
-                            status_code=402,
-                            detail={
-                                "error": "weekly_limit_reached",
-                                "message": details.get("message"),
-                                "resets_on": details.get("resets_on"),
-                                "upgrade_url": "/pricing"
-                            }
-                        )
-                    else:
-                        raise HTTPException(status_code=400, detail=details.get(
-                            "message", "Cannot make call"))
-
-        # Check and fix database sequence if needed
-        try:
-            # Check if sequence is working
-            result = db.execute(
-                "SELECT nextval('conversations_id_seq')").scalar()
-            logger.info(f"Next conversation ID: {result}")
-        except Exception as e:
-            logger.error(f"Sequence error: {str(e)}")
-            # Reset sequence if needed
-            try:
-                db.execute(
-                    "SELECT setval('conversations_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM conversations))")
-                db.commit()
-                logger.info("Database sequence reset successfully")
-            except Exception as reset_error:
-                logger.error(f"Failed to reset sequence: {str(reset_error)}")
-
-        # Determine which phone number to use
-        from_number = None
-
-        if DEVELOPMENT_MODE:
-            # In development mode, always use system number
-            from_number = os.getenv('TWILIO_PHONE_NUMBER')
-            if not from_number:
-                raise HTTPException(
-                    status_code=400,
-                    detail="System phone number not configured for development mode. Please set TWILIO_PHONE_NUMBER in your environment."
-                )
-            logger.info(
-                f"Development mode: using system phone number: {from_number}")
-        else:
-            # Production mode: check for user-specific phone numbers first
-            user_phone_numbers = db.query(UserPhoneNumber).filter(
-                UserPhoneNumber.user_id == current_user.id,
-                UserPhoneNumber.is_active == True,
-                UserPhoneNumber.voice_capable == True
-            ).all()
-
-            if user_phone_numbers:
-                # User has provisioned phone numbers - use the first active one
-                from_number = user_phone_numbers[0].phone_number
-                logger.info(
-                    f"Using user's provisioned phone number: {from_number}")
-            else:
-                # Fallback to system-wide Twilio phone number for backward compatibility
-                from_number = os.getenv('TWILIO_PHONE_NUMBER')
-                if not from_number:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No phone number available. Please provision a phone number in Settings or configure TWILIO_PHONE_NUMBER."
-                    )
-                logger.info(
-                    f"Using system-wide phone number for backward compatibility: {from_number}")
-
-        # Build the media stream URL with user name and direction parameters
-        # Allow private hosts for development testing
-        base_url = clean_and_validate_url(
-            config.PUBLIC_URL, allow_private=True)
-        user_name = USER_CONFIG.get("name", "")
-        outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
-        logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
-
-        # Make the call
-        client = get_twilio_client()
-        call = client.calls.create(
-            to=phone_number,
-            from_=from_number,
-            url=outgoing_call_url,
-            record=True
-        )
-
-        # Create a conversation record in the database with the call_sid
-        try:
-            conversation = Conversation(
-                user_id=current_user.id,
-                scenario=scenario,
-                phone_number=phone_number,
-                direction="outbound",
-                status="in-progress",
-                call_sid=call.sid
-            )
-            db.add(conversation)
-            db.commit()
-            db.refresh(conversation)
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to create conversation: {str(e)}")
-            # Try to get the next available ID
-            try:
-                result = db.execute(
-                    "SELECT nextval('conversations_id_seq')").scalar()
-                logger.info(f"Next available ID: {result}")
-            except Exception as seq_error:
-                logger.error(f"Sequence error: {str(seq_error)}")
-            raise HTTPException(
-                status_code=500, detail="Database error creating conversation")
-
-        # Record the call in usage statistics (only for business users not in development mode)
-        if not DEVELOPMENT_MODE:
-            from app.services.usage_service import UsageService
-            from app.models import UsageLimits, AppType
-
-            usage_limits = db.query(UsageLimits).filter(
-                UsageLimits.user_id == current_user.id).first()
-            if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
-                UsageService.record_call(current_user.id, db)
-
-        # Return the call details
-        mode_message = "development mode" if DEVELOPMENT_MODE else ("using your provisioned number" if not DEVELOPMENT_MODE and db.query(
-            UserPhoneNumber).filter(UserPhoneNumber.user_id == current_user.id).first() else "using system number")
-
-        response_data = {
-            "status": "success",
-            "call_sid": call.sid,
-            "from_number": from_number,
-            "message": f"Call initiated successfully ({mode_message})"
-        }
-
-        # Add usage stats for business users
-        if not DEVELOPMENT_MODE:
-            from app.services.usage_service import UsageService
-            from app.models import UsageLimits, AppType
-
-            usage_limits = db.query(UsageLimits).filter(
-                UsageLimits.user_id == current_user.id).first()
-            if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
-                updated_stats = UsageService.get_usage_stats(
-                    current_user.id, db)
-                response_data["usage_stats"] = {
-                    "calls_remaining_this_week": (updated_stats.get("weekly_call_limit", 0) - updated_stats.get("calls_made_this_week", 0)) if updated_stats.get("weekly_call_limit") else "unlimited",
-                    "trial_calls_remaining": updated_stats.get("trial_calls_remaining", 0),
-                    "upgrade_recommended": updated_stats.get("upgrade_recommended", False)
-                }
-
-        return response_data
-
-    except HTTPException:
-        raise
-    except TwilioRestException as e:
-        logger.exception(
-            f"Twilio error when calling {phone_number} with scenario {scenario}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "detail": "An error occurred with the phone service. Please try again later."}
-        )
-    except Exception as e:
-        logger.exception(
-            f"Error making call to {phone_number} with scenario {scenario}")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": "An error occurred while processing the outgoing call. Please try again later."}
-        )
+# @app.get("/make-call/{phone_number}/{scenario}")
+# @rate_limit("2/minute")
+# async def make_call(
+#     request: Request,
+#     phone_number: str,
+#     scenario: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     try:
+#         # Check usage limits for business web app users (not in development mode)
+#         if not DEVELOPMENT_MODE:
+#             from app.services.usage_service import UsageService
+#             from app.models import AppType, UsageLimits
+#
+#             # Initialize or get usage limits
+#             usage_limits = db.query(UsageLimits).filter(
+#                 UsageLimits.user_id == current_user.id).first()
+#             if not usage_limits:
+#                 # Auto-detect as web business if not found
+#                 app_type = UsageService.detect_app_type_from_request(request)
+#                 usage_limits = UsageService.initialize_user_usage(
+#                     current_user.id, app_type, db)
+#
+#             # Check if user can make a call (only for business users)
+#             if usage_limits.app_type == AppType.WEB_BUSINESS:
+#                 can_call, status_code, details = UsageService.can_make_call(
+#                     current_user.id, db)
+#
+#                 if not can_call:
+#                     if status_code == "trial_calls_exhausted":
+#                         raise HTTPException(
+#                             status_code=402,  # Payment Required
+#                             detail={
+#                                 "error": "trial_exhausted",
+#                                 "message": "Your 4 free trial calls have been used. Upgrade to Basic ($49.99/month) for 20 calls per week!",
+#                                 "upgrade_url": "/pricing",
+#                                 "pricing": details.get("pricing")
+#                             }
+#                         )
+#                     elif status_code == "weekly_limit_reached":
+#                         raise HTTPException(
+#                             status_code=402,
+#                             detail={
+#                                 "error": "weekly_limit_reached",
+#                                 "message": details.get("message"),
+#                                 "resets_on": details.get("resets_on"),
+#                                 "upgrade_url": "/pricing"
+#                             }
+#                         )
+#                     else:
+#                         raise HTTPException(status_code=400, detail=details.get(
+#                             "message", "Cannot make call"))
+#
+#         # Check and fix database sequence if needed
+#         try:
+#             # Check if sequence is working
+#             result = db.execute(
+#                 "SELECT nextval('conversations_id_seq')").scalar()
+#             logger.info(f"Next conversation ID: {result}")
+#         except Exception as e:
+#             logger.error(f"Sequence error: {str(e)}")
+#             # Reset sequence if needed
+#             try:
+#                 db.execute(
+#                     "SELECT setval('conversations_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM conversations))")
+#                 db.commit()
+#                 logger.info("Database sequence reset successfully")
+#             except Exception as reset_error:
+#                 logger.error(f"Failed to reset sequence: {str(reset_error)}")
+#
+#         # Determine which phone number to use
+#         from_number = None
+#
+#         if DEVELOPMENT_MODE:
+#             # In development mode, always use system number
+#             from_number = os.getenv('TWILIO_PHONE_NUMBER')
+#             if not from_number:
+#                 raise HTTPException(
+#                     status_code=400,
+#                     detail="System phone number not configured for development mode. Please set TWILIO_PHONE_NUMBER in your environment."
+#                     )
+#             logger.info(
+#                 f"Development mode: using system phone number: {from_number}")
+#         else:
+#             # Production mode: check for user-specific phone numbers first
+#             user_phone_numbers = db.query(UserPhoneNumber).filter(
+#                 UserPhoneNumber.user_id == current_user.id,
+#                 UserPhoneNumber.is_active == True,
+#                 UserPhoneNumber.voice_capable == True
+#             ).all()
+#
+#             if user_phone_numbers:
+#                 # User has provisioned phone numbers - use the first active one
+#                 from_number = user_phone_numbers[0].phone_number
+#                 logger.info(
+#                     f"Using user's provisioned phone number: {from_number}")
+#             else:
+#                 # Fallback to system-wide Twilio phone number for backward compatibility
+#                 from_number = os.getenv('TWILIO_PHONE_NUMBER')
+#                 if if not from_number:
+#                     raise HTTPException(
+#                         status_code=400,
+#                         detail="No phone number available. Please provision a phone number in Settings or configure TWILIO_PHONE_NUMBER."
+#                     )
+#                 logger.info(
+#                     f"Using system-wide phone number for backward compatibility: {from_number}")
+#
+#         # Build the media stream URL with user name and direction parameters
+#         # Allow private hosts for development testing
+#         base_url = clean_and_validate_url(
+#             config.PUBLIC_URL, allow_private=True)
+#         user_name = USER_CONFIG.get("name", "")
+#         outgoing_call_url = f"{base_url}/outgoing-call/{scenario}?direction=outbound&user_name={user_name}"
+#         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
+#
+#         # Make the call
+#         client = get_twilio_client()
+#         call = client.calls.create(
+#             to=phone_number,
+#             from_=from_number,
+#             url=outgoing_call_url,
+#             record=True
+#         )
+#
+#         # Create a conversation record in the database with the call_sid
+#         try:
+#             conversation = Conversation(
+#                 user_id=current_user.id,
+#                 scenario=scenario,
+#                 phone_number=phone_number,
+#                 direction="outbound",
+#                 status="in-progress",
+#                 call_sid=call.sid
+#             )
+#             db.add(conversation)
+#             db.commit()
+#             db.refresh(conversation)
+#         except Exception as e:
+#             db.rollback()
+#             logger.error(f"Failed to create conversation: {str(e)}")
+#             # Try to get the next available ID
+#             try:
+#                 result = db.execute(
+#                     "SELECT nextval('concoming_id_seq')").scalar()
+#                 logger.info(f"Next available ID: {result}")
+#             except Exception as seq_error:
+#                 logger.error(f"Sequence error: {str(seq_error)}")
+#             raise HTTPException(
+#                 status_code=500, detail="Database error creating conversation")
+#
+#         # Record the call in usage statistics (only for business users not in development mode)
+#         if not DEVELOPMENT_MODE:
+#             from app.services.usage_service import UsageService
+#             from app.models import UsageLimits, AppType
+#
+#             usage_limits = db.query(UsageLimits).filter(
+#                 UsageLimits.user_id == current_user.id).first()
+#             if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
+#                 UsageService.record_call(current_user.id, db)
+#
+#         # Return the call details
+#         mode_message = "development mode" if DEVELOPMENT_MODE else ("using your provisioned number" if not DEVELOPMENT_MODE and db.query(
+#             UserPhoneNumber).filter(UserPhoneNumber.user_id == current_user.id).first() else "using system number")
+#
+#         response_data = {
+#             "status": "success",
+#             "call_sid": call.sid,
+#             "from_number": from_number,
+#             "message": f"Call initiated successfully ({mode_message})"
+#         }
+#
+#         # Add usage stats for business users
+#         if not DEVELOPMENT_MODE:
+#             from app.services.usage_service import UsageService
+#             from app.models import UsageLimits, AppType
+#
+#             usage_limits = db.query(UsageLimits).filter(
+#                 UsageLimits.user_id == current_user.id).first()
+#             if usage_limits and usage_limits.app_type == AppType.WEB_BUSINESS:
+#                 updated_stats = UsageService.get_usage_stats(
+#                     current_user.id, db)
+#                 response_data["usage_stats"] = {
+#                     "calls_remaining_this_week": (updated_stats.get("weekly_call_limit", 0) - updated_stats.get("calls_made_this_week", 0)) if updated_stats.get("weekly_call_limit") else "unlimited",
+#                     "trial_calls_remaining": updated_stats.get("trial_calls_remaining", 0),
+#                     "upgrade_recommended": updated_stats.get("upgrade_recommended", False)
+#                 }
+#
+#         return response_data
+#
+#     except HTTPException:
+#         raise
+#     except TwilioRestException as e:
+#         logger.exception(
+#             f"Twilio error when calling {phone_number} with scenario {scenario}")
+#         return JSONResponse(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             content={
+#                 "detail": "An error occurred with the phone service. Please try again later."}
+#         )
+#     except Exception as e:
+#         logger.exception(
+#             f"Error making call to {phone_number} with scenario {scenario}")
+#         return JSONResponse(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             content={
+#                 "detail": "An error occurred while processing the outgoing call. Please try again later."}
+#         )
 
 # Add a new endpoint for outgoing calls - COMMENTED OUT (duplicate in routers/calls.py)
 
@@ -1306,12 +1306,12 @@ async def print_routes():
         logger.info(f"Route: {route.path} -> {route.name}")
 
 
-@app.post("/incoming-call", response_class=Response)
-@rate_limit("1/minute")
-async def incoming_call(request: Request, scenario: str):
-    response = VoiceResponse()
-    response.say("Hello! This is your speech assistant powered by OpenAI.")
-    return Response(content=str(response), media_type="application/xml")
+# @app.post("/incoming-call", response_class=Response)
+# @rate_limit("1/minute")
+# async def incoming_call(request: Request, scenario: str):
+#     response = VoiceResponse()
+#     response.say("Hello! This is your speech assistant powered by OpenAI.")
+#     return Response(content=str(response), media_type="application/xml")
 
 
 async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=None):
@@ -1916,137 +1916,137 @@ async def link_transcript_to_conversation(db: Session, call_sid: str, transcript
 
 
 # moved to app/routers/twilio_webhooks.py
-@app.post("/recording-callback")
-async def handle_recording_callback(
-    request: Request,
-    db: Session = Depends(get_db)
-):
+# @app.post("/recording-callback")
+# async def handle_recording_callback(
+#     request: Request,
+#     db: Session = Depends(get_db)
+# ):
     try:
-        # Validate Twilio webhook signature using centralized validator
-        from app.utils.twilio_validation import TwilioWebhookValidator
-        validator = TwilioWebhookValidator()
+        #         # Validate Twilio webhook signature using centralized validator
+        #         from app.utils.twilio_validation import TwilioWebhookValidator
+        #         validator = TwilioWebhookValidator()
+        #
+        #         try:
+        #             await validator.validate_webhook(request, webhook_type="form")
+        #             form_data = await request.form()
+        #         except HTTPException as e:
+        #             logger.error(
+        #                 f"Twilio webhook signature validation failed: {e.detail}")
+        #             raise e
+        #
+        #         # Log the raw request for debugging
+        #         form_data_dict = dict(form_data)
+        #         # Sanitize form data for logging
+        #         logger.info(
+        #             f"Recording callback received with form data: {safe_log_request_data(form_data_dict)}")
+        #
+        #         recording_sid = form_data.get('RecordingSid')
+        #         call_sid = form_data.get('CallSid')
+        #
+        #         if not recording_sid:
+        #             logger.error("No RecordingSid provided in form data")
+        #             return {"status": "error", "message": "No RecordingSid provided"}
+        #
+        #         if not call_sid:
+        #             logger.error("No CallSid provided in form data")
+        #             return {"status": "error", "message": "No CallSid provided"}
+        #
+        #         if config.USE_TWILIO_VOICE_INTELLIGENCE:
+        #             logger.info(
+        #                 f"Using Twilio Voice Intelligence for recording {recording_sid}")
+        #
+        #             # Log the configuration for debugging
+        #             logger.info(
+        #                 f"Twilio Voice Intelligence SID: {config.TWILIO_VOICE_INTELLIGENCE_SID}")
+        #             logger.info(
+        #                 f"PII Redaction Enabled: {config.ENABLE_PII_REDACTION}")
+        #
+        #             try:
+        #                 # Create a transcript using Twilio Voice Intelligence
+        #                 transcript = get_twilio_client().intelligence.v2.transcripts.create(
+        #                     service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
+        #                     channel={
+        #                         "media_properties": {
+        #                             "source_sid": recording_sid
+        #                         }
+        #                     },
+        #                     redaction=config.ENABLE_PII_REDACTION
+        #                 )
+        #
+        #                 logger.info(f"Transcript created with SID: {transcript.sid}")
+        #
+        #                 # Start background task to link transcript with retries
+        #                 background_tasks = BackgroundTasks()
+        #                 background_tasks.add_task(
+        #                     link_transcript_to_conversation,
+        #                     db=db,
+        #                     call_sid=call_sid,
+        #                     transcript_sid=transcript.sid
+        #                 )
+        #
+        #                 return {
+        #                     "status": "success",
+        #                     "transcript_sid": transcript.sid,
+        #                     "message": "Transcript creation initiated, linking in progress"
+        #                 }
+        #
+        #             except TwilioAuthError as e:
+        #                 logger.error(f"Twilio authentication error: {e.message}", extra={
+        #                     "details": e.details})
+        #                 return {
+        #                     "status": "error",
+        #                     "message": "Authentication error with Twilio service",
+        #                     "code": "auth_error"
+        #                 }
+        #             except TwilioResourceError as e:
+        #                 logger.error(f"Twilio resource error: {e.message}", extra={
+        #                     "details": e.details})
+        #                 return {
+        #                     "status": "error",
+        #                     "message": "Resource not found or invalid",
+        #                     "code": "resource_error"
+        #                 }
+        #             except TwilioRateLimitError as e:
+        #                 logger.error(f"Twilio rate limit exceeded: {e.message}", extra={
+        #                     "details": e.details})
+        #                 return {
+        #                     "status": "error",
+        #                     "message": "Rate limit exceeded, please try again later",
+        #                     "code": "rate_limit"
+        #                 }
+        #             except TwilioApiError as e:
+        #                 logger.error(f"Twilio API error: {e.message}", extra={
+        #                     "details": e.details})
+        #                 return {
+        #                     "status": "error",
+        #                     "message": "Error communicating with Twilio service",
+        #                     "code": "unknown_error"
+        #                 }
+        #             except Exception as e:
+        #                 logger.error(
+        #                     f"Unexpected error creating transcript: {str(e)}", exc_info=True)
+        #                 return {
+        #                     "status": "error",
+        #                     "message": "An unexpected error occurred",
+        #                     "code": "unknown_error"
+        #                 }
+        #
+        #         else:
+        #             # Your existing OpenAI Whisper implementation
+        #             pass
+        #
+        #     except SQLAlchemyError as e:
+        #         logger.error(
+        #             f"Database error in recording callback: {str(e)}", exc_info=True)
+        #         if db.is_active:
+        #             db.is_active:
+        #             db.rollback()
+        #         return {"status": "error", "message": "Database error", "code": "db_error"}
+        #     except Exception as e:
+        #         logger.error(f"Error in recording callback: {str(e)}", exc_info=True)
+        #         return {"status": "error", "message": "An unexpected error occurred", "code": "unknown_error"}
 
-        try:
-            await validator.validate_webhook(request, webhook_type="form")
-            form_data = await request.form()
-        except HTTPException as e:
-            logger.error(
-                f"Twilio webhook signature validation failed: {e.detail}")
-            raise e
-
-        # Log the raw request for debugging
-        form_data_dict = dict(form_data)
-        # Sanitize form data for logging
-        logger.info(
-            f"Recording callback received with form data: {safe_log_request_data(form_data_dict)}")
-
-        recording_sid = form_data.get('RecordingSid')
-        call_sid = form_data.get('CallSid')
-
-        if not recording_sid:
-            logger.error("No RecordingSid provided in form data")
-            return {"status": "error", "message": "No RecordingSid provided"}
-
-        if not call_sid:
-            logger.error("No CallSid provided in form data")
-            return {"status": "error", "message": "No CallSid provided"}
-
-        if config.USE_TWILIO_VOICE_INTELLIGENCE:
-            logger.info(
-                f"Using Twilio Voice Intelligence for recording {recording_sid}")
-
-            # Log the configuration for debugging
-            logger.info(
-                f"Twilio Voice Intelligence SID: {config.TWILIO_VOICE_INTELLIGENCE_SID}")
-            logger.info(
-                f"PII Redaction Enabled: {config.ENABLE_PII_REDACTION}")
-
-            try:
-                # Create a transcript using Twilio Voice Intelligence
-                transcript = get_twilio_client().intelligence.v2.transcripts.create(
-                    service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
-                    channel={
-                        "media_properties": {
-                            "source_sid": recording_sid
-                        }
-                    },
-                    redaction=config.ENABLE_PII_REDACTION
-                )
-
-                logger.info(f"Transcript created with SID: {transcript.sid}")
-
-                # Start background task to link transcript with retries
-                background_tasks = BackgroundTasks()
-                background_tasks.add_task(
-                    link_transcript_to_conversation,
-                    db=db,
-                    call_sid=call_sid,
-                    transcript_sid=transcript.sid
-                )
-
-                return {
-                    "status": "success",
-                    "transcript_sid": transcript.sid,
-                    "message": "Transcript creation initiated, linking in progress"
-                }
-
-            except TwilioAuthError as e:
-                logger.error(f"Twilio authentication error: {e.message}", extra={
-                    "details": e.details})
-                return {
-                    "status": "error",
-                    "message": "Authentication error with Twilio service",
-                    "code": "auth_error"
-                }
-            except TwilioResourceError as e:
-                logger.error(f"Twilio resource error: {e.message}", extra={
-                    "details": e.details})
-                return {
-                    "status": "error",
-                    "message": "Resource not found or invalid",
-                    "code": "resource_error"
-                }
-            except TwilioRateLimitError as e:
-                logger.error(f"Twilio rate limit exceeded: {e.message}", extra={
-                    "details": e.details})
-                return {
-                    "status": "error",
-                    "message": "Rate limit exceeded, please try again later",
-                    "code": "rate_limit"
-                }
-            except TwilioApiError as e:
-                logger.error(f"Twilio API error: {e.message}", extra={
-                    "details": e.details})
-                return {
-                    "status": "error",
-                    "message": "Error communicating with Twilio service",
-                    "code": "api_error"
-                }
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error creating transcript: {str(e)}", exc_info=True)
-                return {
-                    "status": "error",
-                    "message": "An unexpected error occurred",
-                    "code": "unknown_error"
-                }
-
-        else:
-            # Your existing OpenAI Whisper implementation
-            pass
-
-    except SQLAlchemyError as e:
-        logger.error(
-            f"Database error in recording callback: {str(e)}", exc_info=True)
-        if db.is_active:
-            db.rollback()
-        return {"status": "error", "message": "Database error", "code": "db_error"}
-    except Exception as e:
-        logger.error(f"Error in recording callback: {str(e)}", exc_info=True)
-        return {"status": "error", "message": "An unexpected error occurred", "code": "unknown_error"}
-
-
-# moved to app/routers/twilio_transcripts.py
+        # moved to app/routers/twilio_transcripts.py
         raise HTTPException(
             status_code=500,
             detail=f"An unexpected error occurred: {str(e)}"
@@ -2137,49 +2137,49 @@ async def handle_recording_callback(
         )
 
 
-@app.delete("/twilio-transcripts/{transcript_sid}")
-@with_twilio_retry(max_retries=3)
-async def delete_twilio_transcript(transcript_sid: str):
-    try:
-        # First check if the transcript exists
-        try:
-            get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
-        except Exception as e:
-            raise TwilioResourceError(
-                f"Transcript not found: {transcript_sid}",
-                details={"original_exception": str(e)}
-            )
-
-        # Delete the transcript
-        get_twilio_client().intelligence.v2.transcripts(transcript_sid).delete()
-
-        return {"status": "success", "message": "Transcript deleted"}
-
-    except TwilioResourceError as e:
-        logger.error(f"Resource error: {e.message}")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Transcript not found: {transcript_sid}"
-        )
-    except TwilioAuthError as e:
-        logger.error(f"Authentication error: {e.message}")
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication error with Twilio service"
-        )
-    except TwilioApiError as e:
-        logger.error(f"Twilio API error: {e.message}", extra={
-            "details": e.details})
-        raise HTTPException(
-            status_code=500,
-            detail="Error communicating with Twilio service"
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error deleting transcript: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="An unexpected error occurred"
-        )
+# @app.delete("/twilio-transcripts/{transcript_sid}")
+# @with_twilio_retry(max_retries=3)
+# async def delete_twilio_transcript(transcript_sid: str):
+#     try:
+#         # First check if the transcript exists
+#         try:
+#             get_twilio_client().intelligence.v2.transcripts(transcript_sid).fetch()
+#         except Exception as e:
+#             raise TwilioResourceError(
+#                 f"Transcript not found: {transcript_sid}",
+#                 details={"original_exception": str(e)}
+#             )
+#
+#         # Delete the transcript
+#         get_twilio_client().intelligence.v2.transcripts(transcript_sid).delete()
+#
+#         return {"status": "success", "message": "Transcript deleted"}
+#
+#     except TwilioResourceError as e:
+#         logger.error(f"Resource error: {e.message}")
+#         return HTTPException(
+#             status_code=404,
+#             detail=f"Transcript not found: {transcript_sid}"
+#         )
+#     except TwilioAuthError as e:
+#         logger.error(f"Authentication error: {e.message}")
+#         raise HTTPException(
+#             status_code=401,
+#             detail="Authentication error with Twilio service"
+#         )
+#     except TwilioApiError as e:
+#         logger.error(f"Twilio API error: {e.message}", extra={
+#             "details": e.details})
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Error communicating with Twilio service"
+#         )
+#     except Exception as e:
+#         logger.error(f"Unexpected error deleting transcript: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail="An unexpected error occurred"
+#         )
 
 
 # This endpoint has been moved to app/routers/twilio_transcripts.py
@@ -2289,164 +2289,164 @@ async def get_stored_transcript(
         )
 
 
-@app.get("/custom-scenarios/{scenario_id}", response_model=Dict)
-async def get_custom_scenario(
-    scenario_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get a specific custom scenario by ID."""
-    try:
-        # Query the specific custom scenario
-        db_scenario = db.query(CustomScenario).filter(
-            CustomScenario.scenario_id == scenario_id,
-            CustomScenario.user_id == current_user.id
-        ).first()
-
-        # If not found in database, check the in-memory dictionary
-        if not db_scenario:
-            if scenario_id in CUSTOM_SCENARIOS:
-                # Make sure it belongs to this user (may not be possible to validate for in-memory scenarios)
-                return {
-                    "id": None,
-                    "scenario_id": scenario_id,
-                    "persona": CUSTOM_SCENARIOS[scenario_id].get("persona", ""),
-                    "prompt": CUSTOM_SCENARIOS[scenario_id].get("prompt", ""),
-                    "voice_type": "unknown",  # In-memory might not store this
-                    "temperature": CUSTOM_SCENARIOS[scenario_id].get("voice_config", {}).get("temperature", 0.7),
-                    "created_at": None
-                }
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Custom scenario not found"
-                )
-
-        # Convert to dictionary for the response
-        return {
-            "id": db_scenario.id,
-            "scenario_id": db_scenario.scenario_id,
-            "persona": db_scenario.persona,
-            "prompt": db_scenario.prompt,
-            "voice_type": db_scenario.voice_type,
-            "temperature": db_scenario.temperature,
-            "created_at": db_scenario.created_at.isoformat() if db_scenario.created_at else None
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error retrieving custom scenario: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while retrieving the custom scenario. Please try again later."
-        )
-
-
-@app.delete("/custom-scenarios/{scenario_id}", response_model=Dict)
-async def delete_custom_scenario(
-    scenario_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Delete a specific custom scenario by ID."""
-    try:
-        # Query the specific custom scenario
-        db_scenario = db.query(CustomScenario).filter(
-            CustomScenario.scenario_id == scenario_id,
-            CustomScenario.user_id == current_user.id
-        ).first()
-
-        if not db_scenario:
-            # Check if it exists in the in-memory dictionary
-            if scenario_id in CUSTOM_SCENARIOS:
-                # Remove from in-memory dictionary
-                del CUSTOM_SCENARIOS[scenario_id]
-                return {"message": "Custom scenario deleted successfully"}
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Custom scenario not found"
-                )
-
-        # Delete from database
-        db.delete(db_scenario)
-        db.commit()
-
-        # Also remove from in-memory dictionary if it exists there
-        if scenario_id in CUSTOM_SCENARIOS:
-            del CUSTOM_SCENARIOS[scenario_id]
-
-        return {"message": "Custom scenario deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error deleting custom scenario: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the custom scenario. Please try again later."
-        )
+# @app.get("/custom-scenarios/{scenario_id}", response_model=Dict)
+# async def get_custom_scenario(
+#     scenario_id: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get a specific custom scenario by ID."""
+#     try:
+#         # Query the specific custom scenario
+#         db_scenario = db.query(CustomScenario).filter(
+#             CustomScenario.scenario_id == scenario_id,
+#             CustomScenario.user_id == current_user.id
+#         ).first()
+#
+#         # If not found in database, check the in-memory dictionary
+#         if not db_scenario:
+#             if scenario_id in CUSTOM_SCENARIOS:
+#                 # Make sure it belongs to this user (may not be possible to validate for in-memory scenarios)
+#                 return {
+#                     "id": None,
+#                     "scenario_id": scenario_id,
+#                     "persona": CUSTOM_SCENARIOS[scenario_id].get("persona", ""),
+#                     "prompt": CUSTOM_SCENARIOS[scenario_id].get("prompt", ""),
+#                     "voice_type": "unknown",  # In-memory might not store this
+#                     "temperature": CUSTOM_SCENARIOS[scenario_id].get("voice_config", {}).get("temperature", 0.7),
+#                     "created_at": None
+#                 }
+#             else:
+#                 raise HTTPException(
+#                     status_code=404,
+#                     detail="Custom scenario not found"
+#                 )
+#
+#         # Convert to dictionary for the response
+#         return {
+#             "id": db_scenario.id,
+#             "scenario_id": db_scenario.scenario_id,
+#             "persona": db_scenario.persona,
+#             "prompt": db_scenario.prompt,
+#             "voice_type": db_scenario.voice_type,
+#             "temperature": db_scenario.temperature,
+#             "created_at": db_scenario.created_at.isoformat() if db_scenario.created_at else None
+#         }
+#
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.exception(f"Error retrieving custom scenario: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An error occurred while retrieving the custom scenario. Please try again later."
+#         )
 
 
-@app.put("/custom-scenarios/{scenario_id}", response_model=Dict)
-async def update_custom_scenario(
-    scenario_id: str,
-    persona: str = Body(..., min_length=10, max_length=5000),
-    prompt: str = Body(..., min_length=10, max_length=5000),
-    voice_type: str = Body(...),
-    temperature: float = Body(0.7, ge=0.0, le=1.0),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Update a specific custom scenario by ID."""
-    try:
-        if voice_type not in VOICES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
-            )
+# @app.delete("/custom-scenarios/{scenario_id}", response_model=Dict)
+# async def delete_custom_scenario(
+#     scenario_id: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Delete a specific custom scenario by ID."""
+#     try:
+#         # Query the specific custom scenario
+#         db_scenario = db.query(CustomScenario).filter(
+#             CustomScenario.scenario_id == scenario_id,
+#             CustomScenario.user_id == current_user.id
+#         ).first()
+#
+#         if not db_scenario_id:
+#             # Check if it exists in the in-memory dictionary
+#             if scenario_id in CUSTOM_SCENARIOS:
+#                 # Remove from in-memory dictionary
+#                 del CUSTOM_SCENARIOS[scenario_id]
+#                 return {"message": "Custom scenario deleted successfully"}
+#             else:
+#                 raise HTTPException(
+#                     status_code=404,
+#                     detail="Custom scenario not found"
+#                 )
+#
+#         # Delete from database
+#         db.delete(db_scenario)
+#         db.commit()
+#
+#         # Also remove from in-memory dictionary if it exists there
+#         if scenario_id in CUSTOM_SCENARIOS:
+#             del CUSTOM_SCENARIOS[scenario_id]
+#
+#         return {"message": "Custom scenario deleted successfully"}
+#
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.exception(f"Error deleting custom scenario: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An error occurred while deleting the custom scenario. Please try again later."
+#             )
 
-        # Query the specific custom scenario
-        db_scenario = db.query(CustomScenario).filter(
-            CustomScenario.scenario_id == scenario_id,
-            CustomScenario.user_id == current_user.id
-        ).first()
 
-        if not db_scenario:
-            raise HTTPException(
-                status_code=404,
-                detail="Custom scenario not found"
-            )
-
-        # Update database entry
-        db_scenario.persona = persona
-        db_scenario.prompt = prompt
-        db_scenario.voice_type = voice_type
-        db_scenario.temperature = temperature
-        db.commit()
-
-        # Update in-memory dictionary if it exists there
-        if scenario_id in CUSTOM_SCENARIOS:
-            CUSTOM_SCENARIOS[scenario_id] = {
-                "persona": persona,
-                "prompt": prompt,
-                "voice_config": {
-                    "voice": VOICES[voice_type],
-                    "temperature": temperature
-                }
-            }
-
-        return {"message": "Custom scenario updated successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error updating custom scenario: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while updating the custom scenario. Please try again later."
-        )
+# @app.put("/custom-scenarios/{scenario_id}", response_model=Dict)
+# async def update_custom_scenario(
+#     scenario_id: str,
+#     persona: str = Body(..., min_length=10, max_length=5000),
+#     prompt: str = Body(..., min_length=10, max_length=5000),
+#     voice_type: str = Body(...),
+#     temperature: float = Body(0.7, ge=0.0, le=1.0),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Update a specific custom scenario by ID."""
+#     try:
+#         if voice_type not in VOICES:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
+#             )
+#
+#         # Query the specific custom scenario
+#         db_scenario = db.query(CustomScenario).filter(
+#             CustomScenario.scenario_id == scenario_id,
+#             CustomScenario.user_id == current_user.id
+#             )
+#
+#         if not db_scenario:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail="Custom scenario not found"
+#             )
+#
+#         # Update database entry
+#         db_scenario.persona = persona
+#         db_scenario.prompt = prompt
+#         db_scenario.voice_type = voice_type
+#         db_scenario.temperature = temperature
+#         db.commit()
+#
+#         # Update in-memory dictionary if it exists there
+#         if scenario_id in CUSTOM_SCENARIOS:
+#             CUSTOM_SCENARIOS[scenario_id] = {
+#                 "persona": persona,
+#                 "prompt": prompt,
+#                 "voice_config": {
+#                     "voice": VOICES[voice_type],
+#                     "temperature": temperature
+#                 }
+#             }
+#
+#         return {"message": "Custom scenario updated successfully"}
+#
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.exception(f"Error updating custom scenario: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An error occurred while updating the custom scenario. Please try again later."
+#             )
 
 
 @app.get("/test-db-connection")
@@ -3761,246 +3761,240 @@ async def handle_user_input(
 
 
 # moved to app/routers/twilio_webhooks.py
-@app.post("/twilio-callback")
-async def handle_twilio_callback(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """Handle Twilio status callbacks for call status updates"""
-    try:
-        # Verify Twilio signature (skip in development or if token not set)
-        request_url = str(request.url)
-        form_data = await request.form()
-        if config.TWILIO_AUTH_TOKEN:
-            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-            twilio_signature = request.headers.get("X-Twilio-Signature", "")
-            params = dict(form_data)
-            if not validator.validate(request_url, params, twilio_signature):
-                logger.warning("Invalid Twilio signature on status callback")
-                return {"status": "error", "message": "Invalid signature"}
-        else:
-            logger.warning(
-                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for status callback")
-        call_sid = form_data.get("CallSid")
-        call_status = form_data.get("CallStatus")
-
-        logger.info(
-            f"Received Twilio callback for call {sanitize_text(str(call_sid))} with status {sanitize_text(str(call_status))}")
-
-        if not call_sid:
-            return {"status": "error", "message": "No CallSid provided"}
-
-        # Update conversation record if it exists
-        conversation = db.query(Conversation).filter(
-            Conversation.call_sid == call_sid
-        ).first()
-
-        if conversation:
-            # Map Twilio status to our status
-            status_map = {
-                "completed": "completed",
-                "busy": "failed",
-                "failed": "failed",
-                "no-answer": "failed",
-                "canceled": "canceled"
-            }
-
-            conversation.status = status_map.get(call_status, call_status)
-            db.commit()
-            logger.info(
-                f"Updated conversation {conversation.id} status to {conversation.status}")
-
-            # Check for recording if the call was completed
-            if call_status == "completed":
-                recording_sid = form_data.get("RecordingSid")
-                if recording_sid:
-                    conversation.recording_sid = recording_sid
-                    db.commit()
-                    logger.info(
-                        f"Updated conversation {conversation.id} with recording {recording_sid}")
-
-        return {"status": "success", "call_sid": call_sid, "call_status": call_status}
-    except Exception as e:
-        logger.error(
-            f"Error handling Twilio callback: {str(e)}", exc_info=True)
-        return {"status": "error", "message": str(e)}
+# @app.post("/twilio-callback")
+# async def handle_twilio_callback(
+#     request: Request,
+#     db: Session = Depends(get_db)
+# ):
+#     """Handle Twilio status callbacks for call status updates"""
+#     try:
+#         # Verify Twilio signature (skip in development or if token not set)
+#         request_url = str(request.url)
+#         form_data = await request.form()
+#         if config.TWILIO_AUTH_TOKEN:
+#             validator = RequestValidator(config.TWilio_signature, "")
+#             params = dict(form_data)
+#             if not validator.validate(request_url, params, twilio_signature):
+#                 logger.warning("Invalid Twilio signature on status callback")
+#                 return {"status": "error", "message": "Invalid signature"}
+#         else:
+#             logger.warning(
+#                 "TWILIO_AUTH_TOKEN not configured; skipping signature validation for status callback")
+#         call_sid = form_data.get("CallSid")
+#         call_status = form_data.get("CallStatus")
+#
+#         logger.info(
+#             f"Received Twilio callback for call {sanitize_text(str(call_sid))} with status {sanitize_text(str(call_status))}")
+#
+#         if not call_sid:
+#             return {"status": "error", "message": "No CallSid provided"}
+#
+#         # Update conversation record if it exists
+#         conversation = db.query(Conversation).filter(
+#             Conversation.call_sid == call_sid
+#         ).first()
+#
+#         # Map Twilio status to our status
+#         status_map = {
+#             "completed": "completed",
+#             "busy": "failed",
+#             "failed": "failed",
+#             "no-answer": "failed",
+#             "canceled": "canceled"
+#         }
+#
+#         conversation.status = status_map.get(call_status, call_status)
+#         db.commit()
+#         logger.info(
+#             f"Updated conversation {conversation.id} status to {conversation.status}")
+#
+#         # Check for recording if the call was completed
+#         if call_status == "completed":
+#             recording_sid = form_data.get("RecordingSid")
+#             if call_sid:
+#                 conversation.recording_sid = recording_sid
+#                 db.commit()
+#                 logger.info(
+#                     f"Updated conversation {conversation.id} with recording {recording_sid}")
+#
+#         return {"status": "success", "call_sid": call_sid, "call_status": call_status}
+#     except Exception as e:
+#         logger.error(
+#             f"Error handling Twilio callback: {str(e)}", exc_info=True)
+#         return {"status": "error", "message": str(e)}
 
 
-@app.get("/make-calendar-call-scenario/{phone_number}")
-@rate_limit("2/minute")
-async def make_calendar_call_scenario(
-    request: Request,
-    phone_number: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Make a calendar call using the standard scenario approach that's known to work well.
-    This creates a temporary scenario with calendar data and uses the standard call flow.
-    """
-    try:
-        # Validate phone number format
-        if not phone_number.startswith('+'):
-            phone_number = f"+{phone_number}"
-
-        logger.info(
-            f"Initiating calendar call (scenario approach) to {phone_number} for user {current_user.email}")
-
-        # Check if user has Google Calendar connected
-        credentials = db.query(GoogleCalendarCredentials).filter(
-            GoogleCalendarCredentials.user_id == current_user.id
-        ).first()
-
-        if not credentials:
-            raise HTTPException(
-                status_code=401, detail="Google Calendar not connected")
-
-        # Prepare calendar service
-        calendar_service = GoogleCalendarService()
-        service = calendar_service.get_calendar_service({
-            "token": decrypt_string(credentials.token),
-            "refresh_token": decrypt_string(credentials.refresh_token),
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
-            "expiry": credentials.token_expiry.isoformat()
-        })
-
-        # Get upcoming events
-        time_min = datetime.datetime.utcnow()
-        events = await calendar_service.get_upcoming_events(
-            service,
-            max_results=5,
-            time_min=time_min
-        )
-
-        # Format events for the AI context
-        events_context = ""
-        if events:
-            events_context = "Here are the user's upcoming calendar events:\\n"
-            for event in events:
-                if 'dateTime' in event.get('start', {}):
-                    start_time = event['start']['dateTime']
-                    end_time = event['end']['dateTime']
-                else:
-                    # All-day event
-                    start_time = event.get('start', {}).get('date', '')
-                    end_time = event.get('end', {}).get('date', '')
-
-                events_context += (
-                    f"- {event.get('summary', 'No title')} from {start_time} to {end_time}\\n"
-                )
-        else:
-            events_context = "The user has no upcoming events on their calendar."
-
-        # Find next available slots
-        start_date = datetime.datetime.utcnow()
-        end_date = start_date + timedelta(days=7)
-        free_slots = await calendar_service.find_free_slots(
-            service,
-            start_date,
-            end_date,
-            min_duration_minutes=30,
-            max_results=3,
-            working_hours=(9, 17)
-        )
-
-        slots_context = ""
-        if free_slots:
-            slots_context = "Here are some available time slots in the user's calendar:\\n"
-            for start, end in free_slots:
-                slots_context += f"- {start.strftime('%A, %B %d at %I:%M %p')} to {end.strftime('%I:%M %p')}\\n"
-        else:
-            slots_context = "The user has no free time slots in the next week."
-
-        # Create a temporary scenario key (not in the SCENARIOS dict)
-        temp_scenario_key = f"calendar_{current_user.id}_{int(time.time())}"
-
-        # Create the scenario
-        calendar_scenario = {
-            "persona": "Calendar Assistant",
-            "prompt": (
-                f"You are a helpful calendar assistant handling a phone call. "
-                f"You have access to the caller's Google Calendar. Be conversational and friendly. "
-                f"\\n\\n{events_context}\\n\\n{slots_context}\\n\\n"
-                f"You can provide information about upcoming events, check availability, "
-                f"and suggest free time slots. If the caller asks about scheduling an event, "
-                f"collect the necessary details like date, time, duration, and purpose. "
-                f"Remain connected and responsive during silences. "
-                f"Offer to help with any other calendar-related questions they might have."
-            ),
-            "voice_config": {
-                # Changed from 'nova' to 'alloy' which is supported by the GPT-4o Realtime API
-                "voice": "alloy",
-                "temperature": 0.7
-            }
-        }
-
-        # Temporarily add to SCENARIOS
-        SCENARIOS[temp_scenario_key] = calendar_scenario
-
-        # Build the media stream URL
-        # Allow private hosts for development testing
-        base_url = clean_and_validate_url(
-            config.PUBLIC_URL, allow_private=True)
-        user_name = current_user.email
-        outgoing_call_url = f"{base_url}/outgoing-call/{temp_scenario_key}?direction=outbound&user_name={user_name}"
-        logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
-
-        # Make the call
-        client = get_twilio_client()
-        call = client.calls.create(
-            to=phone_number,
-            from_=config.TWILIO_PHONE_NUMBER,
-            url=outgoing_call_url,
-            record=True
-        )
-
-        # Create a conversation record
-        conversation = Conversation(
-            user_id=current_user.id,
-            scenario="calendar",
-            phone_number=phone_number,
-            direction="outbound",
-            status="in-progress",
-            call_sid=call.sid
-        )
-        db.add(conversation)
-        db.commit()
-
-        # Schedule removal of temporary scenario
-        def remove_temp_scenario():
-            try:
-                if temp_scenario_key in SCENARIOS:
-                    del SCENARIOS[temp_scenario_key]
-                    logger.info(
-                        f"Removed temporary scenario {temp_scenario_key}")
-            except Exception as e:
-                logger.error(f"Error removing temp scenario: {e}")
-
-        # Run cleanup after 1 hour
-        threading.Timer(3600, remove_temp_scenario).start()
-
-        return {
-            "status": "success",
-            "call_sid": call.sid,
-            "message": "Calendar call initiated using scenario approach",
-            "scenario_key": temp_scenario_key
-        }
-
-    except TwilioRestException as e:
-        logger.exception(f"Twilio error when calling {phone_number}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "detail": f"An error occurred with the phone service: {str(e)}"}
-        )
-    except Exception as e:
-        logger.exception(f"Error making calendar call to {phone_number}")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": f"An error occurred: {str(e)}"}
-        )
+# @app.get("/make-calendar-call-scenario/{phone_number}")
+# @rate_limit("2/minute")
+# async def make_calendar_call_scenario(
+#     request: Request,
+#     phone_number: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Make a calendar call using the standard scenario approach that's known to work well.
+#     This creates a temporary scenario with calendar data and uses the standard call flow.
+#     """
+#     try:
+#         # Validate phone number format
+#         if not phone_number.startswith('+'):
+#             phone_number = f"+{phone_number}"
+#
+#         logger.info(
+#             f"Initiating calendar call (scenario approach) to {phone_number} for user {current_user.email}")
+#
+#         # Check if user has Google Calendar connected
+#         credentials = db.query(GoogleCalendarCredentials).filter(
+#             GoogleCalendarCredentials.user_id == current_user.id
+#         ).first()
+#
+#         # Prepare calendar service
+#         calendar_service = GoogleCalendarService()
+#         service = calendar_service.get_calendar_service({
+#             "token": decrypt_string(credentials.token),
+#             "refresh_token": decrypt_string(credentials.refresh_token),
+#             "token_uri": "https://oauth2.googleapis.com/token",
+#             "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+#             "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+#             "expiry": credentials.token_expiry.isoformat()
+#         })
+#
+#         # Get upcoming events
+#         time_min = datetime.datetime.utcnow()
+#         events = await calendar_service.get_upcoming_events(
+#             service,
+#             max_results=5,
+#             time_min=time_min
+#         )
+#
+#         # Format events for the AI context
+#         events_context = ""
+#         if events:
+#             events_context = "Here are the user's upcoming calendar events:\\n"
+#             for event in events:
+#                 if 'dateTime' in event.get('start', {}):
+#                     start_time = event['start']['dateTime']
+#                     end_time = event['end']['dateTime']
+#                 else:
+#                     # All-day event
+#                     start_time = event.get('start', {}).get('date', 'start')
+#                     end_time = event.get('end', {}).get('date', 'end')
+#
+#                 events_context += (
+#                     f"- {event.get('summary', 'No title')} from {start_time} to {end_time}\\n"
+#                 )
+#         else:
+#             events_context = "The user has no upcoming events on their calendar."
+#
+#         # Find next available slots
+#         start_date = datetime.datetime.utcnow()
+#         end_date = start_date + timedelta(days=7)
+#         free_slots = await calendar_service.find_free_slots(
+#             service,
+#             start_date,
+#             end_date,
+#             min_duration_minutes=30,
+#             max_results=3,
+#             working_hours=(9, 17)
+#         )
+#
+#         slots_context = ""
+#         if free_slots:
+#             slots_context = "Here are some available time slots in the user's calendar:\\n"
+#             for start, end in free_slots:
+#                 slots_context += f"- {start.strftime('%A, %B %d at %I:%M %p')} to {end.strftime('%I:%M %p')}\\n"
+#         else:
+#             slots_context = "The user has no free time slots in the next week."
+#
+#         # Create a temporary scenario key (not in the SCENARIOS dict)
+#         temp_scenario_key = f"calendar_{current_user.id}_{int(time.time())}"
+#
+#         # Create the scenario
+#         calendar_scenario = {
+#             "persona": "Calendar Assistant",
+#             "prompt": (
+#                 f"You are a helpful calendar assistant handling a phone call. "
+#                 f"You have access to the caller's Google Calendar. Be conversational and friendly. "
+#                 f"\\n\\n{events_context}\\n\\n{slots_context}\\n\\n"
+#                 f"You can provide information about upcoming events, check availability, "
+#                 f"and suggest free time slots. If the caller asks about scheduling an event, "
+#                 f"collect the necessary details like date, time, duration, and purpose. "
+#                 f"Remain connected and responsive during silences. "
+#                 f"Offer to help with any other calendar-related questions they might have."
+#             ),
+#             "voice_config": {
+#                 # Changed from 'nova' to 'alloy' which is supported by the GPT-4o Realtime API
+#                 "voice": "alloy",
+#                 "temperature": 0.7
+#             }
+#         }
+#
+#         # Temporarily add to SCENARIOS
+#         SCENARIOS[temp_scenario_key] = calendar_scenario
+#
+#         # Build the media stream URL
+#         # Allow private hosts for development testing
+#         base_url = clean_and_validate_url(
+#             config.PUBLIC_URL, allow_private=True)
+#         user_name = current_user.email
+#         outgoing_call_url = f"{base_url}/outgoing-call/{temp_scenario_key}?direction=outbound&user_name={user_name}"
+#         logger.info(f"Outgoing call URL with parameters: {outgoing_call_url}")
+#
+#         # Make the call
+#         client = get_twilio_client()
+#         call = client.calls.create(
+#             to=phone_number,
+#             from_=phone_number,
+#             url=outgoing_call_url,
+#             record=True
+#         )
+#
+#         # Create a conversation record
+#         conversation = Conversation(
+#             user_id=current_user.id,
+#             scenario="calendar",
+#             phone_number=phone_number,
+#             direction="outbound",
+#             status="in-progress",
+#             call_sid=call.sid
+#         )
+#         db.add(conversation)
+#         db.commit()
+#
+#         # Schedule removal of temporary scenario
+#         def remove_temp_scenario():
+#             try:
+#                 if temp_scenario_key in SCENARIOS:
+#                     del SCENARIOS[temp_scenario_key]
+#                     logger.info(
+#                         f"Removed temporary scenario {temp_scenario_key}")
+#             except Exception as e:
+#                 logger.error(f"Error removing temp scenario: {e}")
+#
+#         # Run cleanup after 1 hour
+#         threading.Timer(3600, remove_temp_scenario).start()
+#
+#         return {
+#             "status": "success",
+#             "call_sid": call.sid,
+#             "message": "Calendar call initiated using scenario approach",
+#             "scenario_key": temp_scenario_key
+#         }
+#
+#     except TwilioRestException as e:
+#         logger.exception(f"Twilio error when calling {phone_number}")
+#         return JSONResponse(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             content={
+#                 "detail": f"An error occurred with the phone service: {str(e)}"}
+#         )
+#     except Exception as e:
+#         logger.exception(f"Error making calendar call to {phone_number}")
+#         return JSONResponse(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             content={"detail": f"An error occurred: {str(e)}"}
+#         )
 
 # Add this function at the end of the file
 
@@ -4418,159 +4412,160 @@ async def receive_from_twilio_calendar(ws_manager, openai_ws, shared_state, user
 
 
 # NEW STORED TWILIO TRANSCRIPTS ENDPOINTS - EXACT TWILIO API FORMAT
-@app.get("/stored-twilio-transcripts")
-async def get_stored_twilio_transcripts(
-    page_size: int = Query(10, le=100),
-    page_token: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Return stored transcripts in EXACT same format as Twilio API"""
-    try:
-        query = db.query(StoredTwilioTranscript).filter(
-            StoredTwilioTranscript.user_id == current_user.id
-        ).order_by(StoredTwilioTranscript.date_created.desc())
-
-        skip = int(page_token) if page_token else 0
-        transcripts = query.offset(skip).limit(page_size).all()
-
-        # Return in EXACT same format as Twilio API
-        return {
-            "transcripts": [
-                {
-                    "sid": t.transcript_sid,
-                    "status": t.status,
-                    "date_created": t.date_created,
-                    "date_updated": t.date_updated,
-                    "duration": t.duration,
-                    "language_code": t.language_code,
-                    "sentences": t.sentences  # This is the critical part!
-                }
-                for t in transcripts
-            ]
-        }
-    except Exception as e:
-        logger.error(f"Error retrieving stored Twilio transcripts: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error retrieving stored transcripts"
-        )
-
-
-@app.get("/stored-twilio-transcripts/{transcript_sid}")
-async def get_stored_twilio_transcript_detail(
-    transcript_sid: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Return stored transcript detail in EXACT same format as Twilio API"""
-    try:
-        transcript = db.query(StoredTwilioTranscript).filter(
-            StoredTwilioTranscript.transcript_sid == transcript_sid,
-            StoredTwilioTranscript.user_id == current_user.id
-        ).first()
-
-        if not transcript:
-            raise HTTPException(status_code=404, detail="Transcript not found")
-
-        # Return in EXACT same format as Twilio detail API
-        return {
-            "sid": transcript.transcript_sid,
-            "status": transcript.status,
-            "date_created": transcript.date_created,
-            "date_updated": transcript.date_updated,
-            "duration": transcript.duration,
-            "language_code": transcript.language_code,
-            "sentences": transcript.sentences  # Full Twilio sentences array
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            f"Error retrieving stored Twilio transcript detail: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error retrieving transcript detail"
-        )
+# @app.get("/stored-twilio-transcripts")
+# async def get_stored_twilio_transcripts(
+#     page_size: int = Query(10, le=100),
+#     page_token: Optional[str] = Query(None),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Return stored transcripts in EXACT same format as Twilio API"""
+#     try:
+#         query = db.query(StoredTwilioTranscript).filter(
+#             StoredTwilioTranscript.user_id == current_user.id
+#         ).order_by(StoredTwilioTranscript.date_created.desc())
+#
+#         skip = int(page_token) if page_token else 0
+#         transcripts = query.offset(skip).limit(page_size).all()
+#
+#         # Return in EXACT same format as Twilio API
+#         return {
+#             "transcripts": [
+#                 {
+#                     "sid": t.transcript_sid,
+#                     "status": t.status,
+#                     "date_created": t.date_created,
+#                     "date_updated": t.date_updated,
+#                     "duration": t.duration,
+#                     "language_code": t.language_code,
+#                     "sentences": t.sentences  # This is the critical part!
+#                 }
+#                 for t in transcripts
+#             ]
+#         }
+#     except Exception as e:
+#         logger.error(f"Error retrieving stored Twilio transcripts: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Error retrieving stored transcripts"
+#         )
 
 
-@app.post("/store-transcript/{transcript_sid}")
-async def store_transcript_from_twilio(
-    transcript_sid: str,
-    call_sid: Optional[str] = Body(None),
-    scenario_name: str = Body("Voice Call"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Fetch transcript from Twilio and store in our database"""
-    try:
-        # Check if already stored
-        existing = db.query(StoredTwilioTranscript).filter(
-            StoredTwilioTranscript.transcript_sid == transcript_sid
-        ).first()
+# @app.get("/stored-twilio-transcripts/{transcript_sid}")
+# async def get_stored_twilio_transcript_detail(
+#     transcript_sid: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Return stored transcript detail in EXACT same format as Twilio API"""
+#     try:
+#         transcript = db.query(StoredTwilioTranscript).filter(
+#             StoredTwilioTranscript.transcript_sid == transcript_sid,
+#             current_user.id
+#         ).first()
+#
+#         if not transcript:
+#             raise HTTPException(status_code=404, detail="Transcript not found")
+#
+#         # Return in EXACT same format as Twilio detail API
+#         return {
+#             "sid": transcript.transcript_sid,
+#             "status": transcript.status,
+#             "date_created": transcript.date_created,
+#             "date_updated": transcript.date_updated,
+#             "duration": transcript.duration,
+#             "language_code": transcript.language_code,
+#             "sentences": transcript.sentences  # Full Twilio sentences array
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(
+#             f"Error retrieving stored Twilio transcript detail: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Error retrieving transcript detail"
+#         )
 
-        if existing:
-            return {"status": "already_stored", "transcript_sid": transcript_sid}
 
-        # Fetch from Twilio
-        from app.services.twilio_client import get_twilio_client
-        twilio_client = get_twilio_client()
-        transcript = twilio_client.intelligence.v2.transcripts(
-            transcript_sid).fetch()
-
-        # Fetch sentences
-        sentences = twilio_client.intelligence.v2.transcripts(
-            transcript_sid).sentences.list()
-
-        # Sort sentences by start time
-        sorted_sentences = sorted(
-            sentences, key=lambda s: getattr(s, "start_time", 0))
-
-        # Helper function for decimal conversion
-        def decimal_to_float(obj):
-            from decimal import Decimal
-            if isinstance(obj, Decimal):
-                return float(obj)
-            return obj
-
-        # Format sentences in Twilio format
-        formatted_sentences = [
-            {
-                "text": getattr(s, "transcript", "No text available"),
-                "speaker": getattr(s, "media_channel", 0),
-                "start_time": decimal_to_float(getattr(s, "start_time", 0)),
-                "end_time": decimal_to_float(getattr(s, "end_time", 0)),
-                "confidence": decimal_to_float(getattr(s, "confidence", 0.0))
-            }
-            for s in sorted_sentences
-        ]
-
-        # Store in our database with exact Twilio format
-        stored_transcript = StoredTwilioTranscript(
-            user_id=current_user.id,
-            transcript_sid=transcript.sid,
-            status=transcript.status,
-            date_created=transcript.date_created.isoformat() if transcript.date_created else None,
-            date_updated=transcript.date_updated.isoformat() if transcript.date_updated else None,
-            duration=decimal_to_float(
-                transcript.duration) if transcript.duration else 0,
-            language_code=transcript.language_code or "en-US",
-            sentences=formatted_sentences,  # Store formatted Twilio sentences
-            call_sid=call_sid,
-            scenario_name=scenario_name
-        )
-
-        db.add(stored_transcript)
-        db.commit()
-
-        logger.info(
-            f"Successfully stored transcript {transcript_sid} for user {current_user.id}")
-        return {"status": "stored", "transcript_sid": transcript_sid}
-
-    except Exception as e:
-        logger.error(f"Failed to store transcript {transcript_sid}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to store transcript: {str(e)}")
+# @app.post("/store-transcript/{transcript_sid}")
+# async def store_transcript_from_twilio(
+#     transcript_sid: str,
+#     call_sid: Optional[str] = Body(None),
+#     scenario_name: str = Body("Voice Call"),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Fetch transcript from Twilio and store in our database"""
+#     try:
+#         # Check if already stored
+#         existing = db.query(StoredTwilioTranscript).filter(
+#             StoredTwilioTranscript.transcript_sid == transcript_sid
+#         ).first()
+#
+#         if existing:
+#             return {"status": "already_stored", "transcript_sid": transcript_sid}
+#
+#         # Fetch from Twilio
+#         from app.services.twilio_client import get_twilio_client
+#         twilio_client = get_twilio_client()
+#         transcript = twilio_client.intelligence.v2.transcripts(
+#             transcript_sid).fetch()
+#
+#         # Fetch sentences
+#         sentences = twilio_client.intelligence.v2.transcripts(
+#             transcript_sid).sentences.list()
+#
+#         # Sort sentences by start time
+#         sorted_sentences = sorted(
+#             sentences, key=lambda s: getattr(s, "start_time", 0))
+#
+#         # Helper function for decimal conversion
+#         def decimal_to_float(obj):
+#             from decimal import Decimal
+#             if isinstance(obj, Decimal):
+#                 return float(obj)
+#                 return float(obj)
+#             return obj
+#
+#         # Format sentences in Twilio format
+#         formatted_sentences = [
+#             {
+#                 "text": getattr(s, "transcript", "No text available"),
+#                 "speaker": getattr(s, "media_channel", 0),
+#                 "start_time": decimal_to_float(getattr(s, "start_time", 0)),
+#                 "end_time": decimal_to_float(getattr(s, "end_time", 0)),
+#                 "confidence": decimal_to_float(getattr(s, "confidence", 0.0))
+#             }
+#             for s in sorted_sentences
+#         ]
+#
+#         # Store in our database with exact Twilio format
+#         stored_transcript = StoredTwilioTranscript(
+#             user_id=current_user.id,
+#             transcript_sid=transcript.sid,
+#             status=transcript.status,
+#             date_created=transcript.date_created.isoformat() if transcript.date_created else None,
+#             date_updated=transcript.date_updated.isoformat() if transcript.date_updated else None,
+#             duration=decimal_to_float(
+#                 transcript.duration) if transcript.duration else 0,
+#             language_code=transcript.language_code or "en-US",
+#             sentences=formatted_sentences,  # Store formatted Twilio sentences
+#             call_sid=call_sid,
+#             scenario_name=scenario_name
+#         )
+#
+#         db.add(stored_transcript)
+#         db.commit()
+#
+#         logger.info(
+#             f"Successfully stored transcript {transcript_sid} for user {current_user.id}")
+#         return {"status": "stored", "transcript_sid": transcript_sid}
+#
+#     except Exception as e:
+#         logger.error(f"Failed to store transcript {transcript_sid}: {e}")
+#         raise HTTPException(
+#             status_code=500, detail=f"Failed to store transcript: {str(e)}")
 
 
 async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_assistant_item=None, *args, **kwargs):
@@ -4597,59 +4592,59 @@ async def handle_speech_started_event(websocket, openai_ws, stream_sid, last_ass
         return False
 
 
-@app.post("/call-end-webhook")
-async def handle_call_end(
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """Handle call end and record duration"""
-    try:
-        # Verify Twilio signature (skip in development or if token not set)
-        if config.TWILIO_AUTH_TOKEN:
-            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-            twilio_signature = request.headers.get("X-Twilio-Signature", "")
-            request_url = str(request.url)
-            # For JSON callbacks, we need to get the raw body for validation
-            body = await request.body()
-            if not validator.validate(request_url, body.decode(), twilio_signature):
-                logger.warning("Invalid Twilio signature on call end webhook")
-                raise HTTPException(
-                    status_code=401, detail="Invalid signature")
-        else:
-            logger.warning(
-                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for call end webhook")
-
-        data = await request.json()
-        call_sid = data.get("CallSid")
-        call_duration = data.get("CallDuration", 0)
-
-        logger.info(
-            f"Call ended: {call_sid}, duration: {call_duration} seconds")
-
-        # Find conversation and update duration
-        conversation = db.query(Conversation).filter(
-            Conversation.call_sid == call_sid
-        ).first()
-
-        if conversation:
-            # Update usage with actual duration
-            from app.services.usage_service import UsageService
-            UsageService.record_call_duration(
-                conversation.user_id, call_duration, db
-            )
-
-            # Update conversation status
-            conversation.status = "completed"
-            db.commit()
-
-            logger.info(
-                f"Updated call duration for user {conversation.user_id}: {call_duration}s")
-
-        return {"status": "success"}
-
-    except Exception as e:
-        logger.error(f"Error in call end webhook: {str(e)}")
-        return {"status": "error", "message": str(e)}
+# @app.post("/call-end-webhook")
+# async def handle_call_end(
+#     request: Request,
+#     db: Session = Depends(get_db)
+# ):
+#     """Handle call end and record duration"""
+#     try:
+#         # Verify Twilio signature (skip in development or if token not set)
+#         if config.TWILIO_AUTH_TOKEN:
+#             validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+#             twilio_signature = request.headers.get("X-Twilio-Signature", "")
+#             request_url = str(request.url)
+#             # For JSON callbacks, we need to validate
+#             body = await request.body()
+#             if not validator.validate(request_url, body.decode(), twilio_signature):
+#                 logger.warning("Invalid Twilio signature on call end webhook")
+#                 raise HTTPException(
+#                     status_code=401, detail="Invalid signature")
+#         else:
+#             logger.warning(
+#                 "TWILIO_AUTH_TOKEN not configured; skipping signature validation for call end webhook")
+#
+#         data = await request.json()
+#         call_sid = data.get("CallSid")
+#         call_duration = data.get("CallDuration", 0)
+#
+#         logger.info(
+#             f"Call ended: {call_sid}, duration: {call_duration} seconds")
+#
+#         # Find conversation and update duration
+#         conversation = db.query(Conversation).filter(
+#             Conversation.call_sid == call_sid
+#         ).first()
+#
+#         if conversation:
+#             # Update usage with actual duration
+#             from app.services.usage_service import UsageService
+#             UsageService.record_call_duration(
+#                 conversation.user_id, call_duration, db
+#             )
+#
+#             # Update conversation status
+#             conversation.status = "completed"
+#             db.commit()
+#
+#             logger.info(
+#                 f"Updated call duration for user {conversation.user_id}: {call_duration}s")
+#
+#         return {"status": "success"}
+#
+#     except Exception as e:
+#         logger.error(f"Error in call end webhook: {str(e)}")
+#         return {"status": "error", "message": str(e)}
 
 
 # Add new API endpoints for VAD configuration management

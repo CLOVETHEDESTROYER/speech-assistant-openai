@@ -282,13 +282,13 @@ async def make_mobile_custom_call(
         if not is_development_mode():
             usage_limits = db.query(UsageLimits).filter(
                 UsageLimits.user_id == current_user.id).first()
-            
+
             if not usage_limits or not usage_limits.is_subscribed:
                 raise HTTPException(
                     status_code=402,
                     detail="Custom scenarios require premium subscription. Please upgrade to access this feature."
                 )
-            
+
             # Check and reset limits if needed (7-day/30-day cycles)
             UsageService.check_and_reset_limits(current_user.id, db)
 

@@ -37,6 +37,29 @@ class SubscriptionStatus(enum.Enum):
     PENDING = "pending"
 
 
+class AnonymousOnboardingSession(Base):
+    __tablename__ = "anonymous_onboarding_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, unique=True, index=True, nullable=False)
+
+    # Onboarding data collected before registration
+    user_name = Column(String, nullable=True)
+    selected_scenario_id = Column(String, nullable=True)
+
+    # Session metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Sessions expire after 24 hours
+    expires_at = Column(DateTime, nullable=False)
+    is_completed = Column(Boolean, default=False)
+
+    # When user registers, this gets linked to their account
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Relationship (optional, only after registration)
+    user = relationship("User", back_populates="anonymous_onboarding_session")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -60,6 +83,8 @@ class User(Base):
         "UsageLimits", back_populates="user", uselist=False)
     provider_credentials = relationship(
         "ProviderCredentials", back_populates="user", uselist=False)
+    anonymous_onboarding_session = relationship(
+        "AnonymousOnboardingSession", back_populates="user", uselist=False)
 
 
 class CallSchedule(Base):
