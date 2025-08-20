@@ -20,6 +20,11 @@ from app.limiter import rate_limit
 DEVELOPMENT_MODE = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
 
 
+def is_development_mode():
+    """Check if we're in development mode at runtime"""
+    return os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
+
+
 def create_error_response(error_type: str, message: str, upgrade_options: list = None):
     """Create consistent error responses"""
     return {
@@ -39,6 +44,11 @@ router = APIRouter(prefix="/mobile", tags=["mobile"])
 class MobileCallRequest(BaseModel):
     phone_number: str
     scenario: str = "default"
+
+
+class MobileCustomCallRequest(BaseModel):
+    phone_number: str
+    scenario_id: str  # Custom scenario ID
 
 
 class SubscriptionUpgradeRequest(BaseModel):
@@ -258,6 +268,142 @@ async def make_mobile_call(
         raise HTTPException(status_code=500, detail="Unable to initiate call")
 
 
+@router.post("/make-custom-call")
+@rate_limit("2/minute")
+async def make_mobile_custom_call(
+    request: Request,
+    call_request: MobileCustomCallRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Make a custom call using a custom scenario - Premium feature only"""
+    try:
+        # Check if user has premium subscription (custom scenarios are premium-only)
+        if not is_development_mode():
+            usage_limits = db.query(UsageLimits).filter(
+                UsageLimits.user_id == current_user.id).first()
+            
+            if not usage_limits or not usage_limits.is_subscribed:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Custom scenarios require premium subscription. Please upgrade to access this feature."
+                )
+            
+            # Check and reset limits if needed (7-day/30-day cycles)
+            UsageService.check_and_reset_limits(current_user.id, db)
+
+            # Check if user can make a call
+            can_call, status_code, details = UsageService.can_make_call(
+                current_user.id, db)
+
+            if not can_call:
+                error_response = create_error_response(
+                    status_code,
+                    details.get("message", "Cannot make call"),
+                    details.get("upgrade_options", [])
+                )
+                raise HTTPException(status_code=402, detail=error_response)
+
+            # Get duration limit from permission check
+            duration_limit = details.get("duration_limit", 60)
+        else:
+            # Development mode - no limits
+            duration_limit = 300  # 5 minutes for dev testing
+            logger.info(
+                f"🧪 DEV MODE: Skipping usage limits for user {current_user.id}")
+
+        # Validate custom scenario exists and belongs to user
+        from app.models import CustomScenario
+        custom_scenario = db.query(CustomScenario).filter(
+            CustomScenario.scenario_id == call_request.scenario_id,
+            CustomScenario.user_id == current_user.id
+        ).first()
+
+        if not custom_scenario:
+            raise HTTPException(
+                status_code=404,
+                detail="Custom scenario not found or you don't have permission to use it"
+            )
+
+        # Store call info in Conversation before making the call
+        from app.models import Conversation
+        try:
+            conversation = Conversation(
+                user_id=current_user.id,
+                scenario=call_request.scenario_id,  # Use scenario_id for custom scenarios
+                phone_number=call_request.phone_number,
+                direction="outbound",
+                status="initiated",
+                call_sid=None,  # Will be set after call creation
+                duration_limit=duration_limit
+            )
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create conversation: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail="Database error creating conversation")
+
+        # Use system phone number for mobile users
+        from_number = os.getenv('TWILIO_PHONE_NUMBER')
+        if not from_number:
+            raise HTTPException(
+                status_code=500, detail="System phone number not configured")
+
+        # Create call with duration tracking
+        client = Client(
+            os.getenv('TWILIO_ACCOUNT_SID'),
+            os.getenv('TWILIO_AUTH_TOKEN')
+        )
+
+        # Use the same URL construction pattern as the regular endpoint
+        base_url = clean_and_validate_url(config.PUBLIC_URL)
+        webhook_url = f"{base_url}/incoming-custom-call/{call_request.scenario_id}"
+        status_callback_url = f"{base_url}/call-end-webhook"
+
+        call = client.calls.create(
+            to=call_request.phone_number,
+            from_=from_number,
+            url=webhook_url,
+            method='POST',
+            status_callback=status_callback_url,
+            status_callback_event=['completed']
+        )
+
+        # Update conversation with call SID
+        conversation.call_sid = call.sid
+        db.commit()
+
+        # Record the call start (duration will be recorded when call ends)
+        UsageService.record_call_start(current_user.id, db)
+
+        # Get updated stats
+        updated_stats = UsageService.get_usage_stats(current_user.id, db)
+
+        return {
+            "call_sid": call.sid,
+            "status": "initiated",
+            "duration_limit": duration_limit,
+            "scenario_id": call_request.scenario_id,
+            "scenario_name": custom_scenario.persona,
+            "usage_stats": {
+                "calls_remaining_this_week": updated_stats.get("calls_remaining_this_week", 0),
+                "calls_remaining_this_month": updated_stats.get("calls_remaining_this_month", 0),
+                "addon_calls_remaining": updated_stats.get("addon_calls_remaining", 0),
+                "upgrade_recommended": updated_stats.get("upgrade_recommended", False)
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error making mobile custom call: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Unable to initiate custom call")
+
+
 @router.post("/upgrade-subscription")
 @rate_limit("3/minute")
 async def upgrade_mobile_subscription(
@@ -461,7 +607,7 @@ async def get_mobile_pricing():
 @router.get("/scenarios")
 @rate_limit("5/minute")
 async def get_mobile_scenarios(request: Request):
-    """Get available scenarios for mobile app (enhanced entertainment list)"""
+    """Get available scenarios for mobile app (enhanced entertainment list with full scenario data)"""
     return {
         "scenarios": [
             {
@@ -470,7 +616,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Emergency exit with medical urgency",
                 "icon": "🏥",
                 "category": "emergency_exit",
-                "difficulty": "easy"
+                "difficulty": "easy",
+                "persona": "You are Dr. Sarah Mitchell, a concerned emergency room physician at City General Hospital. You speak with professional urgency but maintain a calm, authoritative tone. You're calling about a critical medical situation that requires immediate attention.",
+                "prompt": "You're calling about an urgent medical matter that requires the person to leave their current situation immediately. Be professional but urgent - explain there's been an emergency and they need to come to the hospital right away. Don't give specific medical details, just emphasize the urgency and need for immediate action. Keep the call brief and professional.",
+                "voice_config": {
+                    "voice": "coral",
+                    "temperature": 0.7
+                }
             },
             {
                 "id": "fake_boss",
@@ -478,7 +630,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Work emergency for quick escape",
                 "icon": "💼",
                 "category": "work_exit",
-                "difficulty": "medium"
+                "difficulty": "medium",
+                "persona": "You are Michael Chen, the senior project manager at TechCorp Solutions. You speak with authority and urgency, using business terminology and a no-nonsense tone. You're calling about a critical work emergency that requires immediate attention.",
+                "prompt": "You're calling about an urgent work crisis that requires the person to return to the office immediately. Be authoritative and urgent - explain there's been a major client issue, system failure, or urgent meeting that can't wait. Use business language and emphasize the professional consequences of not responding. Keep the call professional but urgent.",
+                "voice_config": {
+                    "voice": "echo",
+                    "temperature": 0.6
+                }
             },
             {
                 "id": "fake_tech_support",
@@ -486,7 +644,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Security breach emergency",
                 "icon": "🔒",
                 "category": "emergency_exit",
-                "difficulty": "medium"
+                "difficulty": "medium",
+                "persona": "You are Alex Rodriguez, a cybersecurity specialist from SecureNet Systems. You speak with technical authority and urgency, using security terminology and a serious, concerned tone. You're calling about a critical security incident.",
+                "prompt": "You're calling about a serious security breach or system compromise that requires immediate action. Be technical but urgent - explain there's been unauthorized access, suspicious activity, or a potential data breach. Use security terminology and emphasize the urgency of the situation. Keep the call professional and urgent.",
+                "voice_config": {
+                    "voice": "echo",
+                    "temperature": 0.6
+                }
             },
             {
                 "id": "fake_celebrity",
@@ -494,7 +658,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Chat with a famous person",
                 "icon": "🌟",
                 "category": "fun_interaction",
-                "difficulty": "hard"
+                "difficulty": "hard",
+                "persona": "You are Emma Thompson, a famous Hollywood actress known for your warm personality and engaging conversation style. You speak with enthusiasm and charm, using casual language and showing genuine interest in others. You're calling to connect with a fan.",
+                "prompt": "You're calling as a famous celebrity who wants to chat with a fan. Be warm, engaging, and genuinely interested in the person. Ask about their life, share positive energy, and make them feel special. Keep the conversation light, fun, and uplifting. Don't break character - stay in your celebrity persona throughout.",
+                "voice_config": {
+                    "voice": "alloy",
+                    "temperature": 0.8
+                }
             },
             {
                 "id": "fake_lottery_winner",
@@ -502,7 +672,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "You've won big!",
                 "icon": "💰",
                 "category": "fun_interaction",
-                "difficulty": "hard"
+                "difficulty": "hard",
+                "persona": "You are Jennifer Martinez, a lottery official from the State Lottery Commission. You speak with excitement and official authority, using formal language mixed with genuine enthusiasm. You're calling to deliver life-changing news.",
+                "prompt": "You're calling to inform someone they've won a major lottery prize. Be excited but professional - explain the win, the amount, and what happens next. Use official lottery terminology and emphasize the life-changing nature of the news. Keep the call exciting and official.",
+                "voice_config": {
+                    "voice": "shimmer",
+                    "temperature": 0.9
+                }
             },
             {
                 "id": "fake_restaurant_manager",
@@ -510,7 +686,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Special reservation confirmation",
                 "icon": "🍴",
                 "category": "social_exit",
-                "difficulty": "easy"
+                "difficulty": "easy",
+                "persona": "You are David Kim, the general manager of Le Grand Bistro, an upscale restaurant. You speak with professional hospitality, using polite language and a warm, accommodating tone. You're calling about a special reservation.",
+                "prompt": "You're calling to confirm a special reservation or VIP table at an upscale restaurant. Be polite and professional - explain the special arrangements, confirm details, and emphasize the exclusive nature of the reservation. Keep the call courteous and professional.",
+                "voice_config": {
+                    "voice": "echo",
+                    "temperature": 0.6
+                }
             },
             {
                 "id": "fake_dating_app_match",
@@ -518,7 +700,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Meet your new match",
                 "icon": "💕",
                 "category": "social_interaction",
-                "difficulty": "hard"
+                "difficulty": "hard",
+                "persona": "You are Sophia Rodriguez, a 28-year-old marketing professional who's excited about a new dating app match. You speak with enthusiasm and genuine interest, using casual, friendly language and showing curiosity about the other person. You're calling to connect with a potential romantic interest.",
+                "prompt": "You're calling as someone who matched with the person on a dating app and wants to get to know them better. Be genuinely interested, ask thoughtful questions, and show enthusiasm about the connection. Keep the conversation light, fun, and engaging. Don't be overly aggressive - be natural and curious.",
+                "voice_config": {
+                    "voice": "alloy",
+                    "temperature": 0.8
+                }
             },
             {
                 "id": "fake_old_friend",
@@ -526,7 +714,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Reconnect with someone from the past",
                 "icon": "👥",
                 "category": "social_interaction",
-                "difficulty": "medium"
+                "difficulty": "medium",
+                "persona": "You are James Wilson, an old friend from high school who's excited to reconnect. You speak with genuine warmth and nostalgia, using casual language and showing real interest in catching up. You're calling to reconnect after years apart.",
+                "prompt": "You're calling as an old friend who wants to reconnect and catch up. Be warm and nostalgic - mention shared memories, ask about their life now, and show genuine interest in reconnecting. Keep the conversation friendly and engaging. Don't force the connection - let it flow naturally.",
+                "voice_config": {
+                    "voice": "verse",
+                    "temperature": 0.7
+                }
             },
             {
                 "id": "fake_news_reporter",
@@ -534,7 +728,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Interview opportunity",
                 "icon": "📰",
                 "category": "social_interaction",
-                "difficulty": "medium"
+                "difficulty": "medium",
+                "persona": "You are Rachel Green, a news reporter from City News Network. You speak with professional enthusiasm and curiosity, using journalistic language and showing genuine interest in the story. You're calling about a potential news interview.",
+                "prompt": "You're calling as a news reporter who wants to interview the person about a story or event. Be professional but enthusiastic - explain the story angle, why they're the right person to interview, and what the interview would involve. Keep the call professional and engaging.",
+                "voice_config": {
+                    "voice": "coral",
+                    "temperature": 0.7
+                }
             },
             {
                 "id": "fake_car_accident",
@@ -542,7 +742,13 @@ async def get_mobile_scenarios(request: Request):
                 "description": "Minor accident drama",
                 "icon": "🚗",
                 "category": "emergency_exit",
-                "difficulty": "easy"
+                "difficulty": "easy",
+                "persona": "You are Officer Sarah Johnson, a police officer from the local police department. You speak with authority and concern, using official language and a serious, professional tone. You're calling about a traffic incident.",
+                "prompt": "You're calling about a minor traffic incident that requires the person's attention. Be professional and concerned - explain there's been an accident involving their vehicle, it's not serious but they need to come to the scene. Keep the call official but not overly alarming.",
+                "voice_config": {
+                    "voice": "echo",
+                    "temperature": 0.6
+                }
             }
         ],
         "categories": [

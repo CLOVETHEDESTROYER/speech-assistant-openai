@@ -701,198 +701,196 @@ async def make_call(
                 "detail": "An error occurred while processing the outgoing call. Please try again later."}
         )
 
-# Add a new endpoint for outgoing calls
+# Add a new endpoint for outgoing calls - COMMENTED OUT (duplicate in routers/calls.py)
+
+# @app.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
+# @rate_limit("2/minute")
+# async def handle_outgoing_call(
+#     request: Request,
+#     scenario: str,
+#     db: Session = Depends(get_db)
+# ):
+#     """Handle outgoing call webhooks from Twilio - Uses signature validation instead of user auth"""
+#     # Validate Twilio signature if configured
+#     if not IS_DEV and not config.TWILIO_AUTH_TOKEN:
+#         raise HTTPException(
+#             status_code=500, detail="Twilio signature validation not configured")
+#
+#     if config.TWILIO_AUTH_TOKEN:
+#         from twilio.request_validator import RequestValidator
+#         validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+#         twilio_signature = request.headers.get("X-Twilio-Signature", "")
+#         request_url = str(request.url)
+#
+#         # Get form data for validation
+#         form_data = await request.form()
+#         params = dict(form_data)
+#
+#         if not validator.validate(request_url, params, twilio_signature):
+#             logger.warning("Invalid Twilio signature on outgoing call webhook")
+#             raise HTTPException(status_code=401, detail="Invalid signature")
+#     else:
+#         form_data = await request.form()
+#
+#     logger.info(f"Outgoing call webhook received for scenario: {scenario}")
+#     try:
+#         # Extract direction and user_name from query parameters
+#         params = dict(request.query_params)
+#         direction = params.get("direction", "outbound")
+#         user_name = params.get("user_name", "")
+#         logger.info(f"Call direction: {direction}, User name: {user_name}")
+#
+#         if scenario not in SCENARIOS:
+#             logger.error(f"Invalid scenario: {scenario}")
+#             raise HTTPException(status_code=400, detail="Invalid scenario")
+#
+#         # Create a copy to avoid modifying the original
+#         selected_scenario = SCENARIOS[scenario].copy()
+#
+#         # Add direction and user_name to the scenario
+#         selected_scenario["direction"] = direction
+#         if user_name:
+#             selected_scenario["user_name"] = user_name
+#
+#         # Get the hostname for WebSocket connection
+#         host = request.url.hostname
+#         ws_url = f"wss://{host}/media-stream/{scenario}?direction={direction}&user_name={user_name}"
+#         logger.info(f"Setting up WebSocket connection at: {ws_url}")
+#
+#         # Add a brief pause and greeting to confirm telephony audio path
+#         response = VoiceResponse()
+#         response.pause(length=0.1)
+#         # response.say("Thanks for calling. Connecting you now.", voice="alice")  # Removed
+#
+#         # Set up the stream connection
+#         connect = Connect()
+#         connect.stream(url=ws_url)
+#         response.append(connect)
+#
+#         # Add a Gather verb to keep the connection open
+#         gather = Gather(action="/handle-user-input",
+#                         method="POST", input="speech", timeout=60)
+#         response.append(gather)
+#
+#         twiml = str(response)
+#         logger.info(f"Generated TwiML response: {twiml}")
+#
+#         return Response(content=twiml, media_type="application/xml")
+#     except Exception as e:
+#         logger.error(f"Error in handle_outgoing_call: {e}", exc_info=True)
+#         raise HTTPException(
+#             status_code=500,
+#             detail="An error occurred while processing the outgoing call. Please try again later."
+#         )
+
+# Webhook Endpoint for Incoming Calls - COMMENTED OUT (duplicate in routers/calls.py)
+
+# @app.api_route("/incoming-call/{scenario}", methods=["GET", "POST"])
+# @rate_limit("1/minute")
+# async def handle_incoming_call(request: Request, scenario: str):
+#     """Handle incoming calls from customers - No authentication required for business logic"""
+#     # Enhanced security for incoming calls
+#     try:
+#         # Validate Twilio signature if configured
+#         if config.TWILIO_AUTH_TOKEN:
+#             from twilio.request_validator import RequestValidator
+#             validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+#             twilio_signature = request.headers.get("X-Twilio-Signature", "")
+#             request_url = str(request.url)
+#
+#         # Get form data for validation
+#         form_data = await request.form()
+#         params = dict(form_data)
+#
+#         if not validator.validate(request_url, params, twilio_signature):
+#             logger.warning("Invalid Twilio signature on incoming call")
+#             raise HTTPException(
+#                 status_code=401, detail="Invalid signature")
+#     else:
+#         logger.warning(
+#             "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call")
+#         form_data = await request.form()
+#     except Exception as e:
+#         logger.error(f"Error validating incoming call: {e}")
+#         raise HTTPException(status_code=401, detail="Invalid request")
+#
+#     logger.info(f"Incoming call webhook received for scenario: {scenario}")
+#     try:
+#         if scenario not in SCENARIOS:
+#             logger.error(f"Invalid scenario: {scenario}")
+#             raise HTTPException(status_code=400, detail="Invalid scenario")
+#
+#         selected_scenario = SCENARIOS[scenario]
+#         response = VoiceResponse()
+#
+#         # Get the hostname for WebSocket connection
+#         host = request.url.hostname
+#         ws_url = f"wss://{host}/media-stream/{scenario}"
+#         logger.info(f"Setting up WebSocket connection at: {ws_url}")
+#
+#         # Add a greeting message
+#         # response.say(
+#         #    "Connecting you to our AI assistant, please wait a moment.")
+#
+#         # Add a pause to allow the server to initialize
+#         response.pause(length=0.1)
+#
+#         # Set up the stream connection
+#         connect = Connect()
+#         connect.stream(url=ws_url)
+#         response.append(connect)
+#
+#         # Add a Gather verb to keep the connection open
+#         gather = Gather(action="/handle-user-input",
+#                         method="POST", input="speech", timeout=60)
+#         response.append(gather)
+#
+#         twiml = str(response)
+#         logger.info(f"Generated TwiML response: {twiml}")
+#
+#         return Response(content=twiml, media_type="application/xml")
+#     except Exception as e:
+#         logger.error(f"Error in handle_incoming_call: {e}", exc_info=True)
+#         raise HTTPException(
+#             status_code=500,
+#             detail="An error occurred while processing the incoming call. Please try again later."
+#         )
 
 
-@app.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
-@rate_limit("2/minute")
-async def handle_outgoing_call(
-    request: Request,
-    scenario: str,
-    db: Session = Depends(get_db)
-):
-    """Handle outgoing call webhooks from Twilio - Uses signature validation instead of user auth"""
-    # Validate Twilio signature if configured
-    if not IS_DEV and not config.TWILIO_AUTH_TOKEN:
-        raise HTTPException(
-            status_code=500, detail="Twilio signature validation not configured")
-
-    if config.TWILIO_AUTH_TOKEN:
-        from twilio.request_validator import RequestValidator
-        validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-        twilio_signature = request.headers.get("X-Twilio-Signature", "")
-        request_url = str(request.url)
-
-        # Get form data for validation
-        form_data = await request.form()
-        params = dict(form_data)
-
-        if not validator.validate(request_url, params, twilio_signature):
-            logger.warning("Invalid Twilio signature on outgoing call webhook")
-            raise HTTPException(status_code=401, detail="Invalid signature")
-    else:
-        form_data = await request.form()
-
-    logger.info(f"Outgoing call webhook received for scenario: {scenario}")
-    try:
-        # Extract direction and user_name from query parameters
-        params = dict(request.query_params)
-        direction = params.get("direction", "outbound")
-        user_name = params.get("user_name", "")
-        logger.info(f"Call direction: {direction}, User name: {user_name}")
-
-        if scenario not in SCENARIOS:
-            logger.error(f"Invalid scenario: {scenario}")
-            raise HTTPException(status_code=400, detail="Invalid scenario")
-
-        # Create a copy to avoid modifying the original
-        selected_scenario = SCENARIOS[scenario].copy()
-
-        # Add direction and user_name to the scenario
-        selected_scenario["direction"] = direction
-        if user_name:
-            selected_scenario["user_name"] = user_name
-
-        # Get the hostname for WebSocket connection
-        host = request.url.hostname
-        ws_url = f"wss://{host}/media-stream/{scenario}?direction={direction}&user_name={user_name}"
-        logger.info(f"Setting up WebSocket connection at: {ws_url}")
-
-        # Add a brief pause and greeting to confirm telephony audio path
-        response = VoiceResponse()
-        response.pause(length=0.1)
-        # response.say("Thanks for calling. Connecting you now.", voice="alice")  # Removed
-
-        # Set up the stream connection
-        connect = Connect()
-        connect.stream(url=ws_url)
-        response.append(connect)
-
-        # Add a Gather verb to keep the connection open
-        gather = Gather(action="/handle-user-input",
-                        method="POST", input="speech", timeout=60)
-        response.append(gather)
-
-        twiml = str(response)
-        logger.info(f"Generated TwiML response: {twiml}")
-
-        return Response(content=twiml, media_type="application/xml")
-    except Exception as e:
-        logger.error(f"Error in handle_outgoing_call: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while processing the outgoing call. Please try again later."
-        )
-
-# Webhook Endpoint for Incoming Calls
-
-
-@app.api_route("/incoming-call/{scenario}", methods=["GET", "POST"])
-@rate_limit("1/minute")
-async def handle_incoming_call(request: Request, scenario: str):
-    """Handle incoming calls from customers - No authentication required for business logic"""
-    # Enhanced security for incoming calls
-    try:
-        # Validate Twilio signature if configured
-        if config.TWILIO_AUTH_TOKEN:
-            from twilio.request_validator import RequestValidator
-            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-            twilio_signature = request.headers.get("X-Twilio-Signature", "")
-            request_url = str(request.url)
-
-            # Get form data for validation
-            form_data = await request.form()
-            params = dict(form_data)
-
-            if not validator.validate(request_url, params, twilio_signature):
-                logger.warning("Invalid Twilio signature on incoming call")
-                raise HTTPException(
-                    status_code=401, detail="Invalid signature")
-        else:
-            logger.warning(
-                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call")
-            form_data = await request.form()
-    except Exception as e:
-        logger.error(f"Error validating incoming call: {e}")
-        raise HTTPException(status_code=401, detail="Invalid request")
-
-    logger.info(f"Incoming call webhook received for scenario: {scenario}")
-    try:
-        if scenario not in SCENARIOS:
-            logger.error(f"Invalid scenario: {scenario}")
-            raise HTTPException(status_code=400, detail="Invalid scenario")
-
-        selected_scenario = SCENARIOS[scenario]
-        response = VoiceResponse()
-
-        # Get the hostname for WebSocket connection
-        host = request.url.hostname
-        ws_url = f"wss://{host}/media-stream/{scenario}"
-        logger.info(f"Setting up WebSocket connection at: {ws_url}")
-
-        # Add a greeting message
-        # response.say(
-        #    "Connecting you to our AI assistant, please wait a moment.")
-
-        # Add a pause to allow the server to initialize
-        response.pause(length=0.1)
-
-        # Set up the stream connection
-        connect = Connect()
-        connect.stream(url=ws_url)
-        response.append(connect)
-
-        # Add a Gather verb to keep the connection open
-        gather = Gather(action="/handle-user-input",
-                        method="POST", input="speech", timeout=60)
-        response.append(gather)
-
-        twiml = str(response)
-        logger.info(f"Generated TwiML response: {twiml}")
-
-        return Response(content=twiml, media_type="application/xml")
-    except Exception as e:
-        logger.error(f"Error in handle_incoming_call: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while processing the incoming call. Please try again later."
-        )
-
-
-# Add a compatibility route for the old webhook URL format
-@app.api_route("/incoming-call-webhook/{scenario}", methods=["GET", "POST"])
-@rate_limit("1/minute")
-async def handle_incoming_call_webhook(request: Request, scenario: str):
-    """Handle incoming call webhooks from customers - No authentication required for business logic"""
-    # Enhanced security for incoming calls
-    try:
-        # Validate Twilio signature if configured
-        if config.TWILIO_AUTH_TOKEN:
-            from twilio.request_validator import RequestValidator
-            validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
-            twilio_signature = request.headers.get("X-Twilio-Signature", "")
-            request_url = str(request.url)
-
-            # Get form data for validation
-            form_data = await request.form()
-            params = dict(form_data)
-
-            if not validator.validate(request_url, params, twilio_signature):
-                logger.warning(
-                    "Invalid Twilio signature on incoming call webhook")
-                raise HTTPException(
-                    status_code=401, detail="Invalid signature")
-        else:
-            logger.warning(
-                "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call webhook")
-            form_data = await request.form()
-    except Exception as e:
-        logger.error(f"Error validating incoming call webhook: {e}")
-        raise HTTPException(status_code=401, detail="Invalid request")
-    """Compatibility route that redirects to the main incoming-call route."""
-    logger.info(
-        f"Received call on compatibility webhook route for scenario: {scenario}")
-    return await handle_incoming_call(request, scenario)
+# Add a compatibility route for the old webhook URL format - COMMENTED OUT (duplicate in routers/calls.py)
+# @app.api_route("/incoming-call-webhook/{scenario}", methods=["GET", "POST"])
+# @rate_limit("1/minute")
+# async def handle_incoming_call_webhook(request: Request, scenario: str):
+#     """Handle incoming call webhooks from customers - No authentication required for business logic"""
+#     # Enhanced security for incoming calls
+#     try:
+#         # Validate Twilio signature if configured
+#         if config.TWILIO_AUTH_TOKEN:
+#             from twilio.request_validator import RequestValidator
+#             validator = RequestValidator(config.TWILIO_AUTH_TOKEN)
+#             twilio_signature = request.headers.get("X-Twilio-Signature", "")
+#             request_url = str(request.url)
+#
+#             # Get form data for validation
+#             form_data = await request.form()
+#             params = dict(form_data)
+#
+#             if not validator.validate(request_url, params, twilio_signature):
+#                 logger.warning(
+#                     "Invalid Twilio signature on incoming call webhook")
+#                 raise HTTPException(
+#                     status_code=401, detail="Invalid signature")
+#         else:
+#             logger.warning(
+#                 "TWILIO_AUTH_TOKEN not configured; skipping signature validation for incoming call webhook")
+#             form_data = await request.form()
+#     except Exception as e:
+#         logger.error(f"Error validating incoming call webhook: {e}")
+#         raise HTTPException(status_code=401, detail="Invalid request")
+#     """Compatibility route that redirects to the main incoming-call route."""
+#     logger.info(
+#         f"Received call on compatibility webhook route for scenario: {scenario}")
+#     return await handle_incoming_call(request, scenario)
 
 # Placeholder for WebSocket Endpoint (Implement as Needed)
 
@@ -1585,197 +1583,197 @@ realtime_manager = OpenAIRealtimeManager(config.OPENAI_API_KEY)
 CUSTOM_SCENARIOS: Dict[str, dict] = {}
 
 
-@app.post("/realtime/custom-scenario", response_model=dict)
-@rate_limit("10/minute")
-async def create_custom_scenario(
-    request: Request,
-    persona: str = Body(..., min_length=10, max_length=5000),
-    prompt: str = Body(..., min_length=10, max_length=5000),
-    voice_type: str = Body(...),
-    temperature: float = Body(0.7, ge=0.0, le=1.0),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Create a custom scenario"""
-    try:
-        if voice_type not in VOICES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
-            )
+# @app.post("/realtime/custom-scenario", response_model=dict)
+# @rate_limit("10/minute")
+# async def create_custom_scenario(
+#     request: Request,
+#     persona: str = Body(..., min_length=10, max_length=5000),
+#     prompt: str = Body(..., min_length=10, max_length=5000),
+#     voice_type: str = Body(...),
+#     temperature: float = Body(0.7, ge=0.0, le=1.0),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Create a custom scenario"""
+#     try:
+#         if voice_type not in VOICES:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail=f"Voice type must be one of: {', '.join(VOICES.keys())}"
+#             )
 
-        # Check if user has reached the limit of 20 custom scenarios
-        user_scenarios_count = db.query(CustomScenario).filter(
-            CustomScenario.user_id == current_user.id
-        ).count()
+#         # Check if user has reached the limit of 20 custom scenarios
+#         user_scenarios_count = db.query(CustomScenario).filter(
+#             CustomScenario.user_id == current_user.id
+#         ).count()
 
-        if user_scenarios_count >= 20:
-            raise HTTPException(
-                status_code=400,
-                detail="You have reached the maximum limit of 20 custom scenarios. Please delete some scenarios before creating new ones."
-            )
+#         if user_scenarios_count >= 20:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="You have reached the maximum limit of 20 custom scenarios. Please delete some scenarios before creating new ones."
+#             )
 
-        # Create scenario in same format as SCENARIOS dictionary
-        custom_scenario = {
-            "persona": persona,
-            "prompt": prompt,
-            "voice_config": {
-                "voice": VOICES[voice_type],
-                "temperature": temperature
-            }
-        }
+#         # Create scenario in same format as SCENARIOS dictionary
+#         custom_scenario = {
+#             "persona": persona,
+#             "prompt": prompt,
+#             "voice_config": {
+#                 "voice": VOICES[voice_type],
+#                 "temperature": temperature
+#             }
+#         }
 
-        # Generate unique ID
-        scenario_id = f"custom_{current_user.id}_{int(time.time())}"
+#         # Generate unique ID
+#         scenario_id = f"custom_{current_user.id}_{int(time.time())}"
 
-        # Store in database
-        db_custom_scenario = CustomScenario(
-            scenario_id=scenario_id,
-            user_id=current_user.id,
-            persona=persona,
-            prompt=prompt,
-            voice_type=voice_type,
-            temperature=temperature
-        )
+#         # Store in database
+#         db_custom_scenario = CustomScenario(
+#             scenario_id=scenario_id,
+#             user_id=current_user.id,
+#             persona=persona,
+#             prompt=prompt,
+#             voice_type=voice_type,
+#             temperature=temperature
+#         )
 
-        db.add(db_custom_scenario)
-        db.commit()
-        db.refresh(db_custom_scenario)
+#         db.add(db_custom_scenario)
+#         db.commit()
+#         db.refresh(db_custom_scenario)
 
-        # Also store in memory for backward compatibility
-        CUSTOM_SCENARIOS[scenario_id] = custom_scenario
+#         # Also store in memory for backward compatibility
+#         CUSTOM_SCENARIOS[scenario_id] = custom_scenario
 
-        return {
-            "scenario_id": scenario_id,
-            "message": "Custom scenario created successfully"
-        }
+#         return {
+#             "scenario_id": scenario_id,
+#             "message": "Custom scenario created successfully"
+#         }
 
-    except Exception as e:
-        logger.error(f"Error creating custom scenario: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while creating the custom scenario. Please try again later."
-        )
-
-
-@app.get("/custom-scenarios", response_model=List[Dict])
-async def get_custom_scenarios(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get all custom scenarios for the current user."""
-    try:
-        # Query all custom scenarios for the current user
-        db_scenarios = db.query(CustomScenario).filter(
-            CustomScenario.user_id == current_user.id
-        ).order_by(CustomScenario.created_at.desc()).all()
-
-        # Convert to a list of dictionaries for the response
-        scenarios = []
-        for scenario in db_scenarios:
-            scenarios.append({
-                "id": scenario.id,
-                "scenario_id": scenario.scenario_id,
-                "persona": scenario.persona,
-                "prompt": scenario.prompt,
-                "voice_type": scenario.voice_type,
-                "temperature": scenario.temperature,
-                "created_at": scenario.created_at.isoformat() if scenario.created_at else None
-            })
-
-        return scenarios
-
-    except Exception as e:
-        logger.exception(f"Error retrieving custom scenarios: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while retrieving custom scenarios. Please try again later."
-        )
+#     except Exception as e:
+#         logger.error(f"Error creating custom scenario: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An error occurred while creating the custom scenario. Please try again later."
+#         )
 
 
-@app.get("/make-custom-call/{phone_number}/{scenario_id}")
-@rate_limit("2/minute")
-async def make_custom_call(
-    request: Request,
-    phone_number: str,
-    scenario_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    try:
-        # Get PUBLIC_URL the same way as the standard endpoint
-        host = os.getenv('PUBLIC_URL', '').strip()
-        logger.info(f"Using PUBLIC_URL from environment: {host}")
+# @app.get("/custom-scenarios", response_model=List[Dict])
+# async def get_custom_scenarios(
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Get all custom scenarios for the current user."""
+#     try:
+#         # Query all custom scenarios for the current user
+#         db_scenarios = db.query(CustomScenario).filter(
+#             CustomScenario.user_id == current_user.id
+#         ).order_by(CustomScenario.created_at.desc()).all()
 
-        if not host:
-            logger.error("PUBLIC_URL environment variable not set")
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Server configuration error"}
-            )
+#         # Convert to a list of dictionaries for the response
+#         scenarios = []
+#         for scenario in db_scenarios:
+#             scenarios.append({
+#                 "id": scenario.id,
+#                 "scenario_id": scenario.scenario_id,
+#                 "persona": scenario.persona,
+#                 "prompt": scenario.prompt,
+#                 "voice_type": scenario.voice_type,
+#                 "temperature": scenario.temperature,
+#                 "created_at": scenario.created_at.isoformat() if scenario.created_at else None
+#             })
 
-        # Check if phone number is valid
-        if not re.match(r'^\d{10}$', phone_number):
-            logger.error(f"Invalid phone number format: {phone_number}")
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "detail": "Invalid phone number format. Please provide a 10-digit number."}
-            )
+#         return scenarios
 
-        # Get Twilio phone number from environment
-        twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')
-        if not twilio_phone:
-            logger.error("TWILIO_PHONE_NUMBER not set")
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Server configuration error"}
-            )
+#     except Exception as e:
+#         logger.exception(f"Error retrieving custom scenarios: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="An error occurred while retrieving custom scenarios. Please try again later."
+#         )
 
-        # Check if scenario exists in database
-        db_scenario = db.query(CustomScenario).filter(
-            CustomScenario.scenario_id == scenario_id,
-            CustomScenario.user_id == current_user.id
-        ).first()
 
-        # If not in database, check in-memory dictionary for backward compatibility
-        if not db_scenario and scenario_id not in CUSTOM_SCENARIOS:
-            logger.error(f"Custom scenario not found: {scenario_id}")
-            return JSONResponse(
-                status_code=400,
-                content={"detail": "Custom scenario not found"}
-            )
+# @app.get("/make-custom-call/{phone_number}/{scenario_id}")
+# @rate_limit("2/minute")
+# async def make_custom_call(
+#     request: Request,
+#     phone_number: str,
+#     scenario_id: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     try:
+#         # Get PUBLIC_URL the same way as the standard endpoint
+#         host = os.getenv('PUBLIC_URL', '').strip()
+#         logger.info(f"Using PUBLIC_URL from environment: {host}")
 
-        # Ensure the URL has the https:// protocol
-        if not host.startswith('http://') and not host.startswith('https://'):
-            host = f"https://{host}"
+#         if not host:
+#             logger.error("PUBLIC_URL environment variable not set")
+#             return JSONResponse(
+#                 status_code=500,
+#                 content={"detail": "Server configuration error"}
+#             )
 
-        webhook_url = f"{host}/incoming-custom-call/{scenario_id}"
-        logger.info(f"Constructed webhook URL: {webhook_url}")
+#         # Check if phone number is valid
+#         if not re.match(r'^\d{10}$', phone_number):
+#             logger.error(f"Invalid phone number format: {phone_number}")
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={
+#                     "detail": "Invalid phone number format. Please provide a 10-digit number."}
+#             )
 
-        call = get_twilio_client().calls.create(
-            to=f"+1{phone_number}",
-            from_=twilio_phone,
-            url=webhook_url,
-            record=True
-        )
-        logger.info(
-            f"Custom call initiated to +1{phone_number}, call_sid: {call.sid}")
-        return {"status": "Custom call initiated", "call_sid": call.sid}
-    except TwilioRestException as e:
-        logger.error(f"Twilio error: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": "An error occurred with the phone service. Please try again later."}
-        )
-    except Exception as e:
-        logger.error(f"Error initiating custom call: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": "An error occurred while processing the outgoing call. Please try again later."}
-        )
+#         # Get Twilio phone number from environment
+#         twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')
+#         if not twilio_phone:
+#             logger.error("TWILIO_PHONE_NUMBER not set")
+#             return JSONResponse(
+#                 status_code=500,
+#                 content={"detail": "Server configuration error"}
+#             )
+
+#         # Check if scenario exists in database
+#         db_scenario = db.query(CustomScenario).filter(
+#             CustomScenario.scenario_id == scenario_id,
+#             CustomScenario.user_id == current_user.id
+#         ).first()
+
+#         # If not in database, check in-memory dictionary for backward compatibility
+#         if not db_scenario and scenario_id not in CUSTOM_SCENARIOS:
+#             logger.error(f"Custom scenario not found: {scenario_id}")
+#             return JSONResponse(
+#                 status_code=400,
+#                 content={"detail": "Custom scenario not found"}
+#             )
+
+#         # Ensure the URL has the https:// protocol
+#         if not host.startswith('http://') and not host.startswith('https://'):
+#             host = f"https://{host}"
+
+#         webhook_url = f"{host}/incoming-custom-call/{scenario_id}"
+#         logger.info(f"Constructed webhook URL: {webhook_url}")
+
+#         call = get_twilio_client().calls.create(
+#             to=f"+1{phone_number}",
+#             from_=twilio_phone,
+#             url=webhook_url,
+#             record=True
+#         )
+#         logger.info(
+#             f"Custom call initiated to +1{phone_number}, call_sid: {call.sid}")
+#         return {"status": "Custom call initiated", "call_sid": call.sid}
+#     except TwilioRestException as e:
+#         logger.error(f"Twilio error: {str(e)}", exc_info=True)
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "detail": "An error occurred with the phone service. Please try again later."}
+#         )
+#     except Exception as e:
+#         logger.error(f"Error initiating custom call: {str(e)}", exc_info=True)
+#         return JSONResponse(
+#             status_code=500,
+#             content={
+#                 "detail": "An error occurred while processing the outgoing call. Please try again later."}
+#         )
 
 
 # Custom scenarios endpoint moved to app/routers/custom_scenarios.py
