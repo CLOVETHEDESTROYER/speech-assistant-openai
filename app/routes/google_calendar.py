@@ -462,7 +462,7 @@ async def find_available_slots(
     return {"free_slots": formatted_slots}
 
 
-@router.api_route("/incoming-calendar-call", methods=["GET", "POST"], operation_id="google_calendar_incoming_call")
+@router.api_route("/incoming-calendar-call", methods=["GET", "POST"], operation_id="google_calendar_router_incoming_call")
 @rate_limit("1/minute")
 async def handle_incoming_calendar_call(
     request: Request,

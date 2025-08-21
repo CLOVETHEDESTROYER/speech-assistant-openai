@@ -245,7 +245,7 @@ async def make_calendar_call_scenario(
 # =============================================================================
 
 
-@router.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"])
+@router.api_route("/outgoing-call/{scenario}", methods=["GET", "POST"], operation_id="calls_router_handle_outgoing_call")
 @rate_limit("2/minute")
 async def handle_outgoing_call(
     request: Request,
