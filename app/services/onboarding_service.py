@@ -144,8 +144,8 @@ class OnboardingService:
                 f"Error getting onboarding status for user {user_id}: {e}")
             raise
 
-    async def complete_step(self, user_id: int, step: str, db: Session) -> Dict:
-        """Mark a specific onboarding step as completed"""
+    async def complete_step(self, user_id: int, step: str, db: Session, profile_data: Optional[Dict] = None) -> Dict:
+        """Mark a specific onboarding step as completed and optionally store profile data"""
         try:
             onboarding = db.query(UserOnboardingStatus).filter(
                 UserOnboardingStatus.user_id == user_id
@@ -159,6 +159,9 @@ class OnboardingService:
                 onboarding.phone_number_setup = True
             elif step == "calendar":
                 onboarding.calendar_connected = True
+                # If this step includes profile data, store it
+                if profile_data:
+                    await self.update_user_profile(user_id, profile_data, db)
             elif step == "scenarios":
                 onboarding.first_scenario_created = True
             elif step == "welcome_call":
@@ -166,12 +169,47 @@ class OnboardingService:
 
             db.commit()
 
-            # Return updated status
-            return await self.get_onboarding_status(user_id, db)
+            # Return updated status with timestamp
+            status = await self.get_onboarding_status(user_id, db)
+            status["timestamp"] = datetime.utcnow().isoformat()
+            return status
 
         except Exception as e:
             logger.error(
                 f"Error completing step {step} for user {user_id}: {e}")
+            db.rollback()
+            raise
+
+    async def update_user_profile(self, user_id: int, profile_data: Dict, db: Session) -> bool:
+        """Update user profile with data from mobile app onboarding"""
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise ValueError(f"User {user_id} not found")
+
+            # Update profile fields if provided
+            if 'name' in profile_data and profile_data['name']:
+                user.full_name = profile_data['name']
+                logger.info(f"Updated user {user_id} name to: {profile_data['name']}")
+
+            if 'preferred_voice' in profile_data and profile_data['preferred_voice']:
+                user.preferred_voice = profile_data['preferred_voice']
+                logger.info(f"Updated user {user_id} voice preference to: {profile_data['preferred_voice']}")
+
+            if 'notifications_enabled' in profile_data:
+                user.notifications_enabled = profile_data['notifications_enabled']
+                logger.info(f"Updated user {user_id} notifications to: {profile_data['notifications_enabled']}")
+
+            # Handle phone number if provided (this might be moved to phone_setup step later)
+            if 'phone_number' in profile_data and profile_data['phone_number']:
+                # For now, just log it - phone number setup is handled separately
+                logger.info(f"Phone number provided for user {user_id}: {profile_data['phone_number']}")
+
+            db.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating profile for user {user_id}: {e}")
             db.rollback()
             raise
 

@@ -79,6 +79,11 @@ class User(Base):
     # "email", "apple", "google"
     auth_provider = Column(String, default="email")
     email_verified = Column(Boolean, default=False)
+    
+    # User profile fields
+    full_name = Column(String, nullable=True)  # General name field
+    preferred_voice = Column(String, nullable=True)  # Voice preference for AI calls
+    notifications_enabled = Column(Boolean, default=True)  # Notification preferences
 
     call_schedules = relationship("CallSchedule", back_populates="user")
     tokens = relationship("Token", back_populates="user")

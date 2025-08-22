@@ -6,6 +6,7 @@ from app.models import User, ProviderCredentials
 from app.services.onboarding_service import OnboardingService
 from app.services.anonymous_onboarding_service import AnonymousOnboardingService
 from pydantic import BaseModel
+from typing import Optional, Dict, Any
 import logging
 from app.utils.crypto import encrypt_string, decrypt_string
 
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
 class StepCompletionRequest(BaseModel):
     step: str
+    data: Optional[Dict[str, Any]] = None
 
 
 class AnonymousOnboardingRequest(BaseModel):
@@ -38,6 +40,35 @@ onboarding_service = OnboardingService()
 anonymous_onboarding_service = AnonymousOnboardingService()
 
 
+# Onboarding step mappings and constants
+MOBILE_STEP_MAPPING = {
+    'welcome': 'phone_setup',
+    'profile': 'calendar',
+    'tutorial': 'scenarios',
+    'firstCall': 'welcome_call'
+}
+
+BACKEND_TO_MOBILE_MAPPING = {
+    'phone_setup': 'welcome',
+    'calendar': 'profile',
+    'scenarios': 'tutorial',
+    'welcome_call': 'firstCall',
+    'complete': 'complete'
+}
+
+MOBILE_STEP_PROGRESSION = {
+    'welcome': 'profile',
+    'profile': 'tutorial',
+    'tutorial': 'firstCall',
+    'firstCall': None  # No next step, onboarding complete
+}
+
+
+def get_next_mobile_step(current_step: str) -> Optional[str]:
+    """Get the next step in mobile app onboarding flow"""
+    return MOBILE_STEP_PROGRESSION.get(current_step)
+
+
 # ============================================================================
 # ANONYMOUS ONBOARDING ENDPOINTS (No authentication required)
 # ============================================================================
@@ -55,7 +86,8 @@ async def start_onboarding(db: Session = Depends(get_db)):
         }
     except Exception as e:
         logger.error(f"Error starting anonymous onboarding: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start onboarding")
+        raise HTTPException(
+            status_code=500, detail="Failed to start onboarding")
 
 
 @router.post("/set-name")
@@ -93,7 +125,8 @@ async def select_scenario(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error selecting scenario: {e}")
-        raise HTTPException(status_code=500, detail="Failed to select scenario")
+        raise HTTPException(
+            status_code=500, detail="Failed to select scenario")
 
 
 @router.post("/complete")
@@ -106,7 +139,8 @@ async def complete_onboarding(session_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error completing onboarding: {e}")
-        raise HTTPException(status_code=500, detail="Failed to complete onboarding")
+        raise HTTPException(
+            status_code=500, detail="Failed to complete onboarding")
 
 
 @router.get("/session/{session_id}")
@@ -115,8 +149,9 @@ async def get_onboarding_session(session_id: str, db: Session = Depends(get_db))
     try:
         session = await anonymous_onboarding_service.get_session(session_id, db)
         if not session:
-            raise HTTPException(status_code=404, detail="Session not found or expired")
-        
+            raise HTTPException(
+                status_code=404, detail="Session not found or expired")
+
         return {
             "session_id": session.session_id,
             "user_name": session.user_name,
@@ -174,13 +209,39 @@ async def complete_step(
 ):
     """Mark a specific onboarding step as completed"""
     try:
-        valid_steps = ["phone_setup", "calendar", "scenarios", "welcome_call"]
+        # Support both mobile app step names and backend step names
+        mobile_steps = list(MOBILE_STEP_MAPPING.keys())
+        backend_steps = list(MOBILE_STEP_MAPPING.values())
+        valid_steps = mobile_steps + backend_steps
+
         if request.step not in valid_steps:
             raise HTTPException(
                 status_code=400, detail=f"Invalid step. Must be one of: {valid_steps}")
 
-        status = await onboarding_service.complete_step(current_user.id, request.step, db)
-        return status
+        # Map mobile step to backend step if needed
+        internal_step = MOBILE_STEP_MAPPING.get(request.step, request.step)
+
+        # Process the step with any provided data
+        profile_data = None
+        if request.data:
+            logger.info(
+                f"Processing step {request.step} with data: {request.data}")
+            # Handle profile data from mobile app
+            if request.step == 'profile' and request.data:
+                profile_data = request.data
+                logger.info(
+                    f"User profile data: name={request.data.get('name')}, phone={request.data.get('phone_number')}, voice={request.data.get('preferred_voice')}")
+
+        status = await onboarding_service.complete_step(current_user.id, internal_step, db, profile_data)
+
+        # Return response in mobile app format
+        return {
+            "step": request.step,
+            "isCompleted": True,
+            "completedAt": status.get("timestamp", ""),
+            "nextStep": get_next_mobile_step(request.step),
+            "status": status
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -204,6 +265,45 @@ async def initialize_onboarding(
             status_code=500, detail="Failed to initialize onboarding")
 
 
+@router.get("/status")
+async def get_onboarding_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get onboarding status in mobile app format"""
+    try:
+        # Get backend onboarding status
+        backend_status = await onboarding_service.get_onboarding_status(current_user.id, db)
+
+        current_mobile_step = BACKEND_TO_MOBILE_MAPPING.get(
+            backend_status.get('currentStep'), 'welcome')
+
+        # Determine completed steps in mobile format
+        completed_steps = []
+        step_completion = {
+            'welcome': backend_status.get('phoneNumberSetup', False),
+            'profile': backend_status.get('calendarConnected', False),
+            'tutorial': backend_status.get('firstScenarioCreated', False),
+            'firstCall': backend_status.get('welcomeCallCompleted', False)
+        }
+
+        for step, is_completed in step_completion.items():
+            if is_completed:
+                completed_steps.append(step)
+
+        return {
+            "currentStep": current_mobile_step,
+            "completedSteps": completed_steps,
+            "isComplete": backend_status.get('isComplete', False),
+            "progress": len(completed_steps) / 4.0,  # 4 total steps
+            "nextStep": get_next_mobile_step(current_mobile_step) if not backend_status.get('isComplete') else None
+        }
+    except Exception as e:
+        logger.error(f"Error getting onboarding status: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to get onboarding status")
+
+
 @router.get("/check-step/{step}")
 async def check_step_completion(
     step: str,
@@ -212,12 +312,19 @@ async def check_step_completion(
 ):
     """Check if a specific onboarding step is completed"""
     try:
-        valid_steps = ["phone_setup", "calendar", "scenarios", "welcome_call"]
+        # Support both mobile app step names and backend step names
+        mobile_steps = list(MOBILE_STEP_MAPPING.keys())
+        backend_steps = list(MOBILE_STEP_MAPPING.values())
+        valid_steps = mobile_steps + backend_steps
+
         if step not in valid_steps:
             raise HTTPException(
                 status_code=400, detail=f"Invalid step. Must be one of: {valid_steps}")
 
-        is_completed = await onboarding_service.check_step_completion(current_user.id, step, db)
+        # Map mobile step to backend step if needed
+        internal_step = MOBILE_STEP_MAPPING.get(step, step)
+
+        is_completed = await onboarding_service.check_step_completion(current_user.id, internal_step, db)
         return {"step": step, "completed": is_completed}
     except HTTPException:
         raise
@@ -237,7 +344,7 @@ async def get_provider_credentials(
         credentials = db.query(ProviderCredentials).filter(
             ProviderCredentials.user_id == current_user.id
         ).all()
-        
+
         return {
             "credentials": [
                 {

@@ -9,7 +9,8 @@ from fastapi import HTTPException
 
 class GoogleCalendarService:
     def __init__(self):
-        self.scopes = ['https://www.googleapis.com/auth/calendar.events']
+        # Full calendar access for read/write
+        self.scopes = ['https://www.googleapis.com/auth/calendar']
         self.api_version = 'v3'
 
         # Validate environment variables
@@ -100,6 +101,23 @@ class GoogleCalendarService:
             The created event object from Google Calendar API
         """
         try:
+            # Log the incoming event details for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Creating calendar event with details: {event_details}")
+
+            # Test calendar permissions before attempting to create
+            try:
+                # Quick permission check - try to list events to verify access
+                test_result = service.events().list(calendarId='primary', maxResults=1).execute()
+                logger.info("Calendar read permissions confirmed")
+            except Exception as perm_error:
+                logger.error(f"Calendar permission error: {perm_error}")
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Calendar access denied: {str(perm_error)}"
+                )
             # Handle different possible key names for clarity
             summary = event_details.get(
                 "title", event_details.get("summary", "New Event"))
