@@ -65,9 +65,20 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    # Made nullable for Apple Sign In users
+    hashed_password = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
+
+    # Apple Sign In fields
+    apple_user_id = Column(String, unique=True, index=True, nullable=True)
+    # Email from Apple (may be private)
+    apple_email = Column(String, nullable=True)
+    # Full name from Apple (may be private)
+    apple_full_name = Column(String, nullable=True)
+    # "email", "apple", "google"
+    auth_provider = Column(String, default="email")
+    email_verified = Column(Boolean, default=False)
 
     call_schedules = relationship("CallSchedule", back_populates="user")
     tokens = relationship("Token", back_populates="user")
