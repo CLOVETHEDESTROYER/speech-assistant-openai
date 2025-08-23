@@ -171,21 +171,6 @@ async def get_onboarding_session(session_id: str, db: Session = Depends(get_db))
 # EXISTING ONBOARDING ENDPOINTS (Require authentication)
 # ============================================================================
 
-@router.get("/status")
-async def get_onboarding_status(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get current onboarding status for the user"""
-    try:
-        status = await onboarding_service.get_onboarding_status(current_user.id, db)
-        return status
-    except Exception as e:
-        logger.error(f"Error getting onboarding status: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to get onboarding status")
-
-
 @router.get("/next-action")
 async def get_next_action(
     current_user: User = Depends(get_current_user),
@@ -281,10 +266,10 @@ async def get_onboarding_status(
         # Determine completed steps in mobile format
         completed_steps = []
         step_completion = {
-            'welcome': backend_status.get('phoneNumberSetup', False),
-            'profile': backend_status.get('calendarConnected', False),
-            'tutorial': backend_status.get('firstScenarioCreated', False),
-            'firstCall': backend_status.get('welcomeCallCompleted', False)
+            'welcome': backend_status.get('steps', {}).get('phoneSetup', {}).get('completed', False),
+            'profile': backend_status.get('steps', {}).get('calendar', {}).get('completed', False),
+            'tutorial': backend_status.get('steps', {}).get('scenarios', {}).get('completed', False),
+            'firstCall': backend_status.get('steps', {}).get('welcomeCall', {}).get('completed', False)
         }
 
         for step, is_completed in step_completion.items():

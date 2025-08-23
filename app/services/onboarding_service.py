@@ -78,19 +78,8 @@ class OnboardingService:
             if scenarios_created > 0 and not onboarding.first_scenario_created:
                 onboarding.first_scenario_created = True
 
-            # Determine current step
-            if not onboarding.phone_number_setup:
-                onboarding.current_step = "phone_setup"
-            elif not onboarding.calendar_connected:
-                onboarding.current_step = "calendar"
-            elif not onboarding.first_scenario_created:
-                onboarding.current_step = "scenarios"
-            elif not onboarding.welcome_call_completed:
-                onboarding.current_step = "welcome_call"
-            else:
-                onboarding.current_step = "complete"
-                if not onboarding.completed_at:
-                    onboarding.completed_at = datetime.utcnow()
+            # Determine current step using centralized logic
+            self._update_current_step(onboarding)
 
             db.commit()
 
@@ -154,19 +143,32 @@ class OnboardingService:
             if not onboarding:
                 onboarding = await self.initialize_user_onboarding(user_id, db)
 
-            # Update the specific step
-            if step == "phone_setup":
+            # Update the specific step based on mobile flow mapping
+            # Mobile: welcome -> backend: phone_setup
+            # Mobile: profile -> backend: calendar  
+            # Mobile: tutorial -> backend: scenarios
+            # Mobile: firstCall -> backend: welcome_call
+            
+            if step == "phone_setup":  # mobile: welcome
                 onboarding.phone_number_setup = True
-            elif step == "calendar":
+                logger.info(f"User {user_id} completed welcome step")
+            elif step == "calendar":  # mobile: profile
                 onboarding.calendar_connected = True
                 # If this step includes profile data, store it
                 if profile_data:
                     await self.update_user_profile(user_id, profile_data, db)
-            elif step == "scenarios":
+                logger.info(f"User {user_id} completed profile step")
+            elif step == "scenarios":  # mobile: tutorial
                 onboarding.first_scenario_created = True
-            elif step == "welcome_call":
+                logger.info(f"User {user_id} completed tutorial step")
+            elif step == "welcome_call":  # mobile: firstCall
                 onboarding.welcome_call_completed = True
+                logger.info(f"User {user_id} completed firstCall step")
 
+            # After marking step complete, determine the next step
+            # This is critical for proper step progression
+            self._update_current_step(onboarding)
+            
             db.commit()
 
             # Return updated status with timestamp
@@ -179,6 +181,29 @@ class OnboardingService:
                 f"Error completing step {step} for user {user_id}: {e}")
             db.rollback()
             raise
+
+    def _update_current_step(self, onboarding: UserOnboardingStatus) -> None:
+        """Update the current step based on completion status - this determines step progression"""
+        # Mobile flow: welcome -> profile -> tutorial -> firstCall -> complete
+        # Backend mapping: phone_setup -> calendar -> scenarios -> welcome_call -> complete
+        
+        if not onboarding.phone_number_setup:
+            # User hasn't completed welcome yet
+            onboarding.current_step = "phone_setup"
+        elif not onboarding.calendar_connected:
+            # User completed welcome, now on profile
+            onboarding.current_step = "calendar"
+        elif not onboarding.first_scenario_created:
+            # User completed profile, now on tutorial
+            onboarding.current_step = "scenarios"
+        elif not onboarding.welcome_call_completed:
+            # User completed tutorial, now on firstCall
+            onboarding.current_step = "welcome_call"
+        else:
+            # All steps completed
+            onboarding.current_step = "complete"
+            if not onboarding.completed_at:
+                onboarding.completed_at = datetime.utcnow()
 
     async def update_user_profile(self, user_id: int, profile_data: Dict, db: Session) -> bool:
         """Update user profile with data from mobile app onboarding"""
