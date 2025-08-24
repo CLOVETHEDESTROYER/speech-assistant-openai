@@ -43,8 +43,19 @@ class AnonymousOnboardingSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, unique=True, index=True, nullable=False)
 
-    # Onboarding data collected before registration
-    user_name = Column(String, nullable=True)
+    # Mobile 4-step onboarding data collected before registration
+    user_name = Column(String, nullable=True)  # Step 2: Profile
+    phone_number = Column(String, nullable=True)  # Step 2: Profile
+    preferred_voice = Column(String, nullable=True)  # Step 2: Profile
+    notifications_enabled = Column(Boolean, default=True)  # Step 2: Profile
+    
+    # Step tracking for mobile flow
+    welcome_completed = Column(Boolean, default=False)  # Step 1
+    profile_completed = Column(Boolean, default=False)  # Step 2
+    tutorial_completed = Column(Boolean, default=False)  # Step 3
+    current_step = Column(String, default="welcome")  # welcome, profile, tutorial, ready_for_registration
+    
+    # Legacy field for backward compatibility
     selected_scenario_id = Column(String, nullable=True)
 
     # Session metadata
