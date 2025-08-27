@@ -20,6 +20,9 @@ from app.routers import twilio_transcripts, twilio_webhooks, calls, realtime, tr
 from app.routers.validation import router as validation_router
 from app.routers.testing import router as testing_router
 from app.routers.custom_scenarios import router as custom_scenarios_router
+from app.routers.sms_webhooks import router as sms_router
+from app.routers.user_sms_webhooks import router as user_sms_router
+from app.routers.business_config import router as business_config_router
 
 
 def create_app() -> FastAPI:
@@ -71,5 +74,11 @@ def create_app() -> FastAPI:
     app.include_router(testing_router, prefix="/testing", tags=["testing"])
     # ENABLED: Required for incoming custom call webhooks
     app.include_router(custom_scenarios_router, tags=["custom-scenarios"])
+    # SMS Bot: Required for SMS customer support
+    app.include_router(sms_router, tags=["sms"])
+    # Multi-Tenant SMS: User-specific SMS bot endpoints
+    app.include_router(user_sms_router, tags=["user-sms"])
+    # Business Configuration: User business setup for SMS bots
+    app.include_router(business_config_router, tags=["business-config"])
 
     return app
