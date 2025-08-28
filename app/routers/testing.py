@@ -456,6 +456,552 @@ if IS_DEV:
             logger.error(f"🧪 User SMS webhook simulation error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"SMS webhook simulation failed: {str(e)}")
 
+    # =================================================================
+    # PHASE 1: UNIFIED CALENDAR SERVICE TESTING ENDPOINTS
+    # =================================================================
+    
+    @router.get("/test-unified-calendar-config")
+    async def test_unified_calendar_config():
+        """🧪 TESTING ONLY: Check Unified Calendar Service configuration."""
+        try:
+            return {
+                "status": "✅ UNIFIED CALENDAR CONFIG CHECK",
+                "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "NOT_SET")[:20] + "..." if os.getenv("GOOGLE_CLIENT_ID") else "NOT_SET",
+                "google_client_secret": "SET" if os.getenv("GOOGLE_CLIENT_SECRET") else "NOT_SET",
+                "google_redirect_uri": os.getenv("GOOGLE_REDIRECT_URI", "NOT_SET"),
+                "data_encryption_key": "SET" if os.getenv("DATA_ENCRYPTION_KEY") else "NOT_SET",
+                "environment_status": {
+                    "all_required_vars": all([
+                        os.getenv("GOOGLE_CLIENT_ID"),
+                        os.getenv("GOOGLE_CLIENT_SECRET"),
+                        os.getenv("GOOGLE_REDIRECT_URI"),
+                        os.getenv("DATA_ENCRYPTION_KEY")
+                    ])
+                },
+                "message": "📅 Unified Calendar Service configuration status check"
+            }
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar config test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar config test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-credentials")
+    async def test_unified_calendar_credentials(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Check if user has Google Calendar credentials for Unified Service."""
+        try:
+            from app.models import GoogleCalendarCredentials
+            
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == current_user.id
+            ).first()
+            
+            if credentials:
+                return {
+                    "status": "✅ UNIFIED CALENDAR CREDENTIALS FOUND",
+                    "user_id": current_user.id,
+                    "has_token": bool(credentials.token),
+                    "has_refresh_token": bool(credentials.refresh_token),
+                    "token_expiry": credentials.token_expiry.isoformat() if credentials.token_expiry else None,
+                    "created_at": credentials.created_at.isoformat() if credentials.created_at else None,
+                    "updated_at": credentials.updated_at.isoformat() if credentials.updated_at else None,
+                    "message": "📅 User has Google Calendar credentials for Unified Service"
+                }
+            else:
+                return {
+                    "status": "⚠️ NO UNIFIED CALENDAR CREDENTIALS",
+                    "user_id": current_user.id,
+                    "message": "📅 User needs to authenticate with Google Calendar",
+                    "next_step": "Visit /google-calendar/auth to authenticate"
+                }
+                
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar credentials test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar credentials test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-read")
+    async def test_unified_calendar_read(
+        max_results: int = 5,
+        days_ahead: int = 7,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test reading calendar events with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            events = await calendar_service.read_upcoming_events(
+                db, max_results=max_results, days_ahead=days_ahead
+            )
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR READ SUCCESS",
+                "user_id": current_user.id,
+                "event_count": len(events),
+                "events": events,
+                "max_results": max_results,
+                "days_ahead": days_ahead,
+                "message": f"📅 Retrieved {len(events)} events using Unified Calendar Service"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar read test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar read test failed: {str(e)}")
+
+    @router.post("/test-unified-calendar-create")
+    async def test_unified_calendar_create(
+        title: str = "Unified Test Event",
+        start_time: str = None,  # ISO format or natural language
+        duration_minutes: int = 30,
+        description: str = "Test event created via Unified Calendar Service",
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test creating calendar events with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            from dateutil import parser
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            
+            # Parse start time
+            if start_time:
+                try:
+                    parsed_start = parser.parse(start_time)
+                except:
+                    parsed_start = datetime.now() + timedelta(hours=1)
+            else:
+                parsed_start = datetime.now() + timedelta(hours=1)
+            
+            # Prepare event details
+            event_details = {
+                "summary": title,
+                "description": f"{description} - Created at {datetime.now()}",
+                "start_time": parsed_start,
+                "end_time": parsed_start + timedelta(minutes=duration_minutes)
+            }
+            
+            # Create the event
+            result = await calendar_service.create_event(db, event_details)
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR CREATE SUCCESS" if result["success"] else "❌ UNIFIED CALENDAR CREATE FAILED",
+                "user_id": current_user.id,
+                "event_details": event_details,
+                "result": result,
+                "message": f"📅 Calendar event creation test completed - {'Success' if result['success'] else 'Failed'}"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar create test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar create test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-availability")
+    async def test_unified_calendar_availability(
+        start_time: str = None,  # ISO format or natural language
+        duration_minutes: int = 30,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test checking availability with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            from dateutil import parser
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            
+            # Parse start time
+            if start_time:
+                try:
+                    parsed_start = parser.parse(start_time)
+                except:
+                    parsed_start = datetime.now() + timedelta(hours=1)
+            else:
+                parsed_start = datetime.now() + timedelta(hours=1)
+            
+            # Check availability
+            availability = await calendar_service.check_availability(
+                db, parsed_start, duration_minutes
+            )
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR AVAILABILITY SUCCESS",
+                "user_id": current_user.id,
+                "requested_time": parsed_start.isoformat(),
+                "duration_minutes": duration_minutes,
+                "availability": availability,
+                "message": f"📅 Availability check completed - {'Available' if availability.get('available') else 'Not Available'}"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar availability test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar availability test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-free-slots")
+    async def test_unified_calendar_free_slots(
+        days_ahead: int = 7,
+        max_results: int = 5,
+        min_duration: int = 30,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test finding free slots with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            
+            # Find free slots
+            free_slots = await calendar_service.find_free_slots(
+                db, 
+                days_ahead=days_ahead,
+                max_results=max_results,
+                min_duration_minutes=min_duration
+            )
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR FREE SLOTS SUCCESS",
+                "user_id": current_user.id,
+                "days_ahead": days_ahead,
+                "max_results": max_results,
+                "min_duration_minutes": min_duration,
+                "free_slots_count": len(free_slots),
+                "free_slots": free_slots,
+                "message": f"📅 Found {len(free_slots)} free time slots"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar free slots test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar free slots test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-parse-time")
+    async def test_unified_calendar_parse_time(
+        message: str,
+        current_user: User = Depends(get_current_user)
+    ):
+        """🧪 TESTING ONLY: Test natural language time parsing with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            
+            # Parse natural language time
+            parsed_time = await calendar_service.parse_natural_language_time(message)
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR TIME PARSE SUCCESS" if parsed_time else "⚠️ UNIFIED CALENDAR TIME PARSE FAILED",
+                "user_id": current_user.id,
+                "input_message": message,
+                "parsed_time": parsed_time.isoformat() if parsed_time else None,
+                "formatted_time": parsed_time.strftime('%A, %B %d, %Y at %I:%M %p') if parsed_time else None,
+                "message": f"📅 Time parsing test completed - {'Success' if parsed_time else 'Failed'}"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar time parse test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar time parse test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-ai-context")
+    async def test_unified_calendar_ai_context(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test AI context generation with Unified Calendar Service."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            
+            # Get calendar context for AI
+            ai_context = await calendar_service.get_calendar_context_for_ai(db)
+            
+            return {
+                "status": "✅ UNIFIED CALENDAR AI CONTEXT SUCCESS",
+                "user_id": current_user.id,
+                "ai_context": ai_context,
+                "context_length": len(ai_context),
+                "message": "📅 AI context generation test completed successfully"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar AI context test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar AI context test failed: {str(e)}")
+
+    @router.get("/test-unified-calendar-comprehensive")
+    async def test_unified_calendar_comprehensive(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Comprehensive test of all Unified Calendar Service features."""
+        try:
+            from app.services.unified_calendar_service import UnifiedCalendarService
+            
+            calendar_service = UnifiedCalendarService(current_user.id)
+            test_results = {}
+            
+            # Test 1: Read events
+            try:
+                events = await calendar_service.read_upcoming_events(db, max_results=3)
+                test_results["read_events"] = {"success": True, "count": len(events), "events": events}
+            except Exception as e:
+                test_results["read_events"] = {"success": False, "error": str(e)}
+            
+            # Test 2: Check availability
+            try:
+                test_time = datetime.now() + timedelta(hours=2)
+                availability = await calendar_service.check_availability(db, test_time, 30)
+                test_results["check_availability"] = {"success": True, "availability": availability}
+            except Exception as e:
+                test_results["check_availability"] = {"success": False, "error": str(e)}
+            
+            # Test 3: Find free slots
+            try:
+                free_slots = await calendar_service.find_free_slots(db, days_ahead=3, max_results=3)
+                test_results["find_free_slots"] = {"success": True, "count": len(free_slots), "slots": free_slots}
+            except Exception as e:
+                test_results["find_free_slots"] = {"success": False, "error": str(e)}
+            
+            # Test 4: Parse natural language
+            try:
+                test_phrases = ["tomorrow at 2pm", "next Friday at 10am", "Monday morning"]
+                parse_results = {}
+                for phrase in test_phrases:
+                    parsed = await calendar_service.parse_natural_language_time(phrase)
+                    parse_results[phrase] = parsed.isoformat() if parsed else None
+                test_results["parse_natural_language"] = {"success": True, "results": parse_results}
+            except Exception as e:
+                test_results["parse_natural_language"] = {"success": False, "error": str(e)}
+            
+            # Test 5: AI context
+            try:
+                ai_context = await calendar_service.get_calendar_context_for_ai(db)
+                test_results["ai_context"] = {"success": True, "context": ai_context}
+            except Exception as e:
+                test_results["ai_context"] = {"success": False, "error": str(e)}
+            
+            # Test 6: Create event (optional - only if user confirms)
+            test_results["create_event"] = {"success": False, "note": "Skipped - use specific create test to avoid unwanted events"}
+            
+            # Summary
+            successful_tests = sum(1 for test in test_results.values() if test.get("success", False))
+            total_tests = len(test_results)
+            
+            return {
+                "status": f"✅ UNIFIED CALENDAR COMPREHENSIVE TEST {'SUCCESS' if successful_tests == total_tests else 'PARTIAL SUCCESS'}",
+                "user_id": current_user.id,
+                "summary": {
+                    "successful_tests": successful_tests,
+                    "total_tests": total_tests,
+                    "success_rate": f"{(successful_tests/total_tests)*100:.1f}%"
+                },
+                "test_results": test_results,
+                "message": f"📅 Comprehensive calendar test completed - {successful_tests}/{total_tests} tests passed"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Unified Calendar comprehensive test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar comprehensive test failed: {str(e)}")
+
+    # =================================================================
+    # PHASE 2 & 3: SMS CALENDAR AND CUSTOM SCENARIO TESTING ENDPOINTS
+    # =================================================================
+    
+    @router.get("/test-sms-calendar-fixed")
+    async def test_sms_calendar_fixed(
+        message: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Test FIXED SMS calendar with real calendar integration."""
+        try:
+            from app.services.sms_calendar_service import SMSCalendarService
+            
+            calendar_service = SMSCalendarService()
+            
+            # Parse datetime from message
+            parsed_datetime = await calendar_service.parse_datetime_from_message(message)
+            
+            if parsed_datetime:
+                # Test the FIXED schedule_demo method with user context
+                result = await calendar_service.schedule_demo(
+                    customer_phone="+1234567890",
+                    customer_email="test@example.com",
+                    requested_datetime=parsed_datetime,
+                    customer_name="Test Customer",
+                    user_id=current_user.id,
+                    db_session=db
+                )
+                
+                return {
+                    "status": "✅ FIXED SMS CALENDAR TEST SUCCESS" if result["success"] else "❌ SMS CALENDAR TEST FAILED",
+                    "user_id": current_user.id,
+                    "input_message": message,
+                    "parsed_datetime": parsed_datetime.isoformat(),
+                    "scheduling_result": result,
+                    "calendar_created": result.get("calendar_created", False),
+                    "message": f"📅 SMS calendar test completed - {'Real calendar event created!' if result.get('calendar_created') else 'Simulated booking (no calendar access)'}" 
+                }
+            else:
+                return {
+                    "status": "⚠️ CALENDAR PARSE FAILED",
+                    "user_id": current_user.id,
+                    "input_message": message,
+                    "parsed_datetime": None,
+                    "message": "Could not parse date/time from message",
+                    "suggestion": "Try: 'tomorrow at 2pm', 'Friday morning', 'next Tuesday 3:30'"
+                }
+            
+        except Exception as e:
+            logger.error(f"🧪 Fixed SMS calendar test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"SMS calendar test failed: {str(e)}")
+
+    @router.get("/test-custom-scenario-calendar-check")
+    async def test_custom_scenario_calendar_check(
+        scenario_id: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Check if a custom scenario has calendar access."""
+        try:
+            from app.models import CustomScenario, GoogleCalendarCredentials
+            
+            # Find the custom scenario
+            custom_scenario = db.query(CustomScenario).filter(
+                CustomScenario.scenario_id == scenario_id
+            ).first()
+            
+            if not custom_scenario:
+                return {
+                    "status": "❌ SCENARIO NOT FOUND",
+                    "scenario_id": scenario_id,
+                    "message": "Custom scenario not found"
+                }
+            
+            # Check if scenario owner has calendar credentials
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == custom_scenario.user_id
+            ).first()
+            
+            has_calendar = bool(credentials)
+            
+            # Determine which endpoint would be used
+            endpoint_type = "media-stream-custom-calendar" if has_calendar else "media-stream-custom"
+            
+            return {
+                "status": "✅ CUSTOM SCENARIO CALENDAR CHECK SUCCESS",
+                "scenario_id": scenario_id,
+                "scenario_owner_id": custom_scenario.user_id,
+                "has_calendar_access": has_calendar,
+                "endpoint_type": endpoint_type,
+                "calendar_enhanced": has_calendar,
+                "webhook_url": f"incoming-custom-call/{scenario_id}",
+                "websocket_endpoint": f"{endpoint_type}/{scenario_id}",
+                "message": f"📅 Scenario {'WILL' if has_calendar else 'will NOT'} use calendar-enhanced features"
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Custom scenario calendar check error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar check failed: {str(e)}")
+
+    @router.post("/test-create-calendar-scenario")
+    async def test_create_calendar_scenario(
+        persona: str = "Calendar Assistant",
+        prompt: str = "You are a helpful calendar assistant who can schedule meetings and check availability.",
+        voice_type: str = "alloy",
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Create a test custom scenario for calendar testing."""
+        try:
+            from app.models import CustomScenario
+            from app.app_config import VOICES
+            import time
+            
+            if voice_type not in VOICES:
+                voice_type = "alloy"  # Default fallback
+            
+            # Generate unique ID
+            scenario_id = f"test_cal_{current_user.id}_{int(time.time())}"
+            
+            # Store in database
+            db_custom_scenario = CustomScenario(
+                scenario_id=scenario_id,
+                user_id=current_user.id,
+                persona=persona,
+                prompt=prompt,
+                voice_type=voice_type,
+                temperature=0.7
+            )
+            
+            db.add(db_custom_scenario)
+            db.commit()
+            db.refresh(db_custom_scenario)
+            
+            return {
+                "status": "✅ TEST CALENDAR SCENARIO CREATED",
+                "scenario_id": scenario_id,
+                "user_id": current_user.id,
+                "persona": persona,
+                "voice_type": voice_type,
+                "webhook_url": f"incoming-custom-call/{scenario_id}",
+                "test_url": f"http://localhost:5051/testing/test-custom-scenario-calendar-check?scenario_id={scenario_id}",
+                "message": "📅 Test calendar scenario created successfully! Use the test_url to check calendar integration."
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Create calendar scenario test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Create calendar scenario failed: {str(e)}")
+
+    @router.get("/test-calendar-integration-status")
+    async def test_calendar_integration_status(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING ONLY: Check overall calendar integration status for current user."""
+        try:
+            from app.models import GoogleCalendarCredentials, CustomScenario
+            
+            # Check if user has calendar credentials
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == current_user.id
+            ).first()
+            
+            # Get user's custom scenarios
+            scenarios = db.query(CustomScenario).filter(
+                CustomScenario.user_id == current_user.id
+            ).all()
+            
+            scenario_list = []
+            for scenario in scenarios:
+                scenario_list.append({
+                    "scenario_id": scenario.scenario_id,
+                    "persona": scenario.persona[:50] + "..." if len(scenario.persona) > 50 else scenario.persona,
+                    "calendar_enhanced": bool(credentials),
+                    "endpoint": f"media-stream-custom{'calendar' if credentials else ''}/{scenario.scenario_id}"
+                })
+            
+            return {
+                "status": "✅ CALENDAR INTEGRATION STATUS",
+                "user_id": current_user.id,
+                "has_google_calendar": bool(credentials),
+                "calendar_token_expiry": credentials.token_expiry.isoformat() if credentials and credentials.token_expiry else None,
+                "total_scenarios": len(scenarios),
+                "calendar_enhanced_scenarios": len(scenarios) if credentials else 0,
+                "scenarios": scenario_list,
+                "features": {
+                    "sms_calendar_integration": bool(credentials),
+                    "voice_calendar_integration": bool(credentials),
+                    "custom_scenario_calendar": bool(credentials)
+                },
+                "message": f"📅 User {'HAS' if credentials else 'does NOT have'} Google Calendar integration. {len(scenarios)} custom scenarios {'will use' if credentials else 'cannot use'} calendar features."
+            }
+            
+        except Exception as e:
+            logger.error(f"🧪 Calendar integration status test error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Calendar integration status failed: {str(e)}")
+
 else:
     # Production - create empty router
     router = APIRouter()

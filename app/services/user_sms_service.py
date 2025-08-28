@@ -16,6 +16,7 @@ from app.models import (
     SMSPlan, ResponseTone
 )
 from app.services.twilio_client import get_twilio_client
+from app.services.sms_calendar_service import SMSCalendarService
 from app.utils.log_helpers import sanitize_text
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class UserSMSService:
         self.user_id = user_id
         self.twilio_client = get_twilio_client()
         self.ai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.calendar_service = SMSCalendarService()  # Add calendar integration
         
     async def get_or_create_business_config(self, db: Session) -> UserBusinessConfig:
         """Get user's business configuration or create default one"""
@@ -124,15 +126,30 @@ class UserSMSService:
             # Get conversation context
             context = self._get_conversation_context(conversation.id, db)
             
-            # Generate AI response using business configuration
-            ai_response = await self._generate_business_response(
-                body, context, business_config
-            )
+            # Check for calendar/scheduling requests BEFORE generating response
+            calendar_handled = False
+            if business_config.calendar_integration_enabled:
+                calendar_result = await self._handle_calendar_request(
+                    body, conversation, from_number, db
+                )
+                if calendar_result:
+                    ai_response = calendar_result["response"]
+                    calendar_handled = True
+            
+            # Generate regular AI response if calendar didn't handle it
+            if not calendar_handled:
+                ai_response = await self._generate_business_response(
+                    body, context, business_config
+                )
             
             # Update message with AI response
             incoming_message.ai_response = ai_response
             incoming_message.processed_at = datetime.utcnow()
             incoming_message.status = "responded"
+            
+            # Add calendar context flag if calendar was used
+            if calendar_handled:
+                incoming_message.calendar_processed = True
             
             # Update conversation
             conversation.total_messages += 1
@@ -264,6 +281,7 @@ RESPONSE GUIDELINES:
 - If asked about services, mention: {services_str}
 - For complex questions, offer to connect with our team
 - Stay in character as {business_config.bot_name}
+{"- CALENDAR: Help with scheduling appointments when requested" if business_config.calendar_integration_enabled else ""}
 
 CUSTOMER MESSAGE: "{message}"
 
@@ -409,3 +427,75 @@ Respond as {business_config.bot_name} would, representing {business_config.compa
         except Exception as e:
             logger.error(f"Error getting usage stats for user {self.user_id}: {str(e)}")
             return {"error": str(e)}
+    
+    async def _handle_calendar_request(
+        self,
+        message: str,
+        conversation: SMSConversation,
+        customer_phone: str,
+        db: Session
+    ) -> Optional[Dict]:
+        """Handle calendar/scheduling requests in SMS"""
+        try:
+            # Check if message contains scheduling keywords
+            scheduling_keywords = [
+                "schedule", "book", "appointment", "meeting", "demo", 
+                "call", "available", "free", "calendar", "time"
+            ]
+            
+            message_lower = message.lower()
+            if not any(keyword in message_lower for keyword in scheduling_keywords):
+                return None  # Not a scheduling request
+            
+            # Try to parse date/time from message
+            parsed_datetime = await self.calendar_service.parse_datetime_from_message(message)
+            
+            if parsed_datetime:
+                # Attempt to schedule
+                customer_name = conversation.customer_name or "SMS Customer"
+                customer_email = conversation.customer_email
+                
+                booking_result = await self.calendar_service.schedule_demo(
+                    customer_phone=customer_phone,
+                    customer_email=customer_email,
+                    requested_datetime=parsed_datetime,
+                    customer_name=customer_name,
+                    user_id=self.user_id,
+                    db_session=db
+                )
+                
+                if booking_result["success"]:
+                    if booking_result.get("calendar_created", False):
+                        response = f"✅ Perfect! I've scheduled your appointment for {parsed_datetime.strftime('%A, %B %d at %I:%M %p')}. You'll receive a calendar invite shortly!"
+                    else:
+                        response = f"✅ Great! I've noted your appointment for {parsed_datetime.strftime('%A, %B %d at %I:%M %p')}. Our team will confirm the details with you soon."
+                    
+                    # Update conversation with scheduling info
+                    conversation.customer_interest = "Demo/Appointment Scheduled"
+                    conversation.lead_score = min(conversation.lead_score + 20, 100)
+                    conversation.conversion_status = "qualified_lead"
+                    
+                else:
+                    # Booking failed - suggest alternatives
+                    suggested_times = booking_result.get("suggested_times", [])
+                    if suggested_times:
+                        response = f"That time isn't available. How about: {', '.join(suggested_times[:2])}?"
+                    else:
+                        response = "I'm having trouble with that time. What other times work for you?"
+                
+                db.commit()
+                return {"response": response, "calendar_handled": True}
+            
+            else:
+                # Couldn't parse time - ask for clarification
+                if any(word in message_lower for word in ["schedule", "book", "appointment"]):
+                    return {
+                        "response": "I'd be happy to help schedule that! What day and time works best for you? (e.g., 'tomorrow at 2pm' or 'Friday morning')",
+                        "calendar_handled": True
+                    }
+            
+            return None  # Let regular AI handle it
+            
+        except Exception as e:
+            logger.error(f"Error handling calendar request for user {self.user_id}: {str(e)}")
+            return None  # Fall back to regular AI response

@@ -444,6 +444,7 @@ class SMSMessage(Base):
     # Status tracking
     status = Column(String, default="received")  # received, processing, responded, failed
     error_message = Column(String, nullable=True)  # If processing failed
+    calendar_processed = Column(Boolean, default=False)  # If message was handled by calendar service
     
     # Relationships
     conversation = relationship("SMSConversation", back_populates="messages")

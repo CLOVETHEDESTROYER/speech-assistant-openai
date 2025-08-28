@@ -316,6 +316,141 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
             db.close()
 
 
+@router.websocket("/media-stream-custom-calendar/{scenario_id}")
+async def handle_custom_calendar_media_stream(websocket: WebSocket, scenario_id: str):
+    """Handle custom scenarios WITH Google Calendar integration"""
+    try:
+        # Get database session
+        db = next(get_db())
+
+        # Find the custom scenario and its owner
+        custom_scenario = db.query(CustomScenario).filter(
+            CustomScenario.scenario_id == scenario_id
+        ).first()
+
+        if not custom_scenario:
+            logger.error(f"Custom scenario not found: {scenario_id}")
+            await websocket.close(code=4004, reason="Scenario not found")
+            return
+
+        # Get the user who owns this scenario
+        from app.models import User
+        user = db.query(User).filter(
+            User.id == custom_scenario.user_id).first()
+        if not user:
+            logger.error(f"User not found for scenario: {scenario_id}")
+            await websocket.close(code=4004, reason="User not found")
+            return
+
+        # Check if user has Google Calendar credentials
+        from app.models import GoogleCalendarCredentials
+        credentials = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == user.id
+        ).first()
+
+        if not credentials:
+            logger.warning(
+                f"No Google Calendar credentials for user {user.id} - falling back to regular custom scenario")
+            # Fall back to regular custom scenario handling WITHOUT accepting websocket
+            await handle_custom_media_stream(websocket, scenario_id)
+            return
+
+        # Get calendar context using UnifiedCalendarService
+        from app.services.unified_calendar_service import UnifiedCalendarService
+        calendar_service = UnifiedCalendarService(user.id)
+
+        try:
+            # Read upcoming events
+            events = await calendar_service.read_upcoming_events(db, max_results=5)
+
+            # Get calendar context for AI
+            calendar_context = await calendar_service.get_calendar_context_for_ai(db)
+
+            # Find free slots
+            free_slots = await calendar_service.find_free_slots(db, days_ahead=7, max_results=3)
+
+            # Format free slots
+            slots_context = ""
+            if free_slots:
+                slots_context = "Available time slots in the user's calendar:\\n"
+                for slot in free_slots:
+                    slots_context += f"- {slot['formatted_start']} to {slot['formatted_end']}\\n"
+            else:
+                slots_context = "No free time slots found in the next week."
+
+        except Exception as e:
+            logger.error(f"Error getting calendar data: {e}")
+            calendar_context = "Unable to access calendar information."
+            slots_context = ""
+
+        # Enhanced prompt with calendar integration
+        enhanced_prompt = f"""
+{custom_scenario.prompt}
+
+CALENDAR INTEGRATION:
+You now have access to this user's Google Calendar. Here's their calendar information:
+
+{calendar_context}
+
+{slots_context}
+
+CALENDAR CAPABILITIES:
+- You can check the user's availability 
+- You can suggest free time slots
+- When the user asks to schedule something, collect all details (title, date, time, duration) and confirm you'll add it to their calendar
+- Our system will automatically create calendar events when you mention scheduling something
+
+IMPORTANT: If someone asks to schedule a meeting or event:
+1. Get all the details (what, when, how long)
+2. Check if that time appears available based on the calendar info above
+3. Confirm the details and say "I'll add that to your calendar right away"
+4. The system will handle the actual calendar creation
+
+Remember to be helpful with calendar-related questions while maintaining your original persona and purpose.
+"""
+
+        # Create enhanced scenario data
+        from app.constants import VOICES
+        mapped_voice = VOICES.get(custom_scenario.voice_type, "alloy")
+        valid_voices = ["alloy", "ash", "ballad",
+                        "coral", "echo", "sage", "shimmer", "verse"]
+        if mapped_voice not in valid_voices:
+            mapped_voice = "alloy"
+
+        enhanced_scenario = {
+            "persona": custom_scenario.persona,
+            "prompt": enhanced_prompt,
+            "voice_config": {
+                "voice": mapped_voice,
+                "temperature": custom_scenario.temperature
+            },
+            "calendar_enabled": True,
+            "user_id": user.id
+        }
+
+        # Add to SCENARIOS temporarily
+        enhanced_scenario_key = f"cal_{scenario_id}"
+        SCENARIOS[enhanced_scenario_key] = enhanced_scenario
+
+        logger.info(
+            f"📅 Calendar-enhanced custom scenario started: {scenario_id} for user {user.email}")
+
+        # Use the main media stream logic with enhanced scenario (this will accept the websocket)
+        await handle_media_stream(websocket, enhanced_scenario_key)
+
+        # Clean up
+        if enhanced_scenario_key in SCENARIOS:
+            del SCENARIOS[enhanced_scenario_key]
+
+    except Exception as e:
+        logger.error(
+            f"Error in calendar-enhanced custom media stream: {str(e)}", exc_info=True)
+        await websocket.close(code=1011, reason="Internal error")
+    finally:
+        if 'db' in locals():
+            db.close()
+
+
 @router.websocket("/calendar-media-stream")
 async def handle_calendar_media_stream(websocket: WebSocket):
     caller = websocket.query_params.get("caller", "unknown")

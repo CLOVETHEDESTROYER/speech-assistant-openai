@@ -15,6 +15,9 @@ from app.utils.url_helpers import clean_and_validate_url
 from app.app_config import USER_CONFIG, DEVELOPMENT_MODE, SCENARIOS, VOICES
 from app.utils.log_helpers import sanitize_text
 from twilio.base.exceptions import TwilioRestException
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -236,11 +239,30 @@ async def handle_custom_incoming_call(
         direction = request.query_params.get("direction", "inbound")
         user_name = request.query_params.get("user_name", "")
 
+        # Get Twilio form data if available (for incoming calls)
+        form_data = None
+        call_sid = None
+        from_phone = None
+        to_phone = None
+        
+        try:
+            form_data = await request.form()
+            call_sid = form_data.get("CallSid")
+            from_phone = form_data.get("From")
+            to_phone = form_data.get("To")
+        except:
+            # No form data available (might be a GET request)
+            pass
+
         # Create TwiML response
         from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
         response = VoiceResponse()
 
+        # Find the custom scenario and its owner
+        custom_scenario = None
+        scenario_user_id = None
+        
         # Check if scenario exists in database or global SCENARIOS
         if scenario_id not in SCENARIOS:
             # Try to load from database
@@ -249,6 +271,7 @@ async def handle_custom_incoming_call(
             ).first()
 
             if custom_scenario:
+                scenario_user_id = custom_scenario.user_id
                 # Add to global SCENARIOS with safe voice mapping
                 # Map voice_type to actual OpenAI voice, with fallback to alloy
                 mapped_voice = VOICES.get(
@@ -272,9 +295,64 @@ async def handle_custom_incoming_call(
                 response.say(
                     "We're sorry, the requested scenario could not be found. Using default conversation mode.")
                 scenario_id = "default"
+        else:
+            # Scenario exists in SCENARIOS, try to find its owner
+            custom_scenario = db.query(CustomScenario).filter(
+                CustomScenario.scenario_id == scenario_id
+            ).first()
+            if custom_scenario:
+                scenario_user_id = custom_scenario.user_id
 
-        # Connect to WebSocket for realtime conversation
-        connect = Connect()
+        # 🔧 CREATE CONVERSATION RECORD FOR INCOMING CALLS
+        if call_sid and direction == "inbound" and scenario_user_id:
+            try:
+                # Check if conversation already exists
+                existing_conversation = db.query(Conversation).filter(
+                    Conversation.call_sid == call_sid
+                ).first()
+                
+                if not existing_conversation:
+                    # Create new conversation record
+                    conversation = Conversation(
+                        user_id=scenario_user_id,
+                        scenario=scenario_id,
+                        phone_number=from_phone,
+                        direction="inbound",
+                        status="in-progress",
+                        call_sid=call_sid
+                    )
+                    db.add(conversation)
+                    db.commit()
+                    logger.info(f"✅ Created conversation record for incoming call: {call_sid[:4]}...{call_sid[-4:]}")
+                else:
+                    logger.info(f"📞 Conversation already exists for call: {call_sid[:4]}...{call_sid[-4:]}")
+                    
+            except Exception as conv_error:
+                logger.error(f"⚠️ Failed to create conversation record: {str(conv_error)}")
+                # Continue anyway - don't fail the call
+
+        # Check if the scenario owner has Google Calendar credentials
+        has_calendar = False
+        try:
+            if custom_scenario:
+                from app.models import GoogleCalendarCredentials
+                credentials = db.query(GoogleCalendarCredentials).filter(
+                    GoogleCalendarCredentials.user_id == custom_scenario.user_id
+                ).first()
+                has_calendar = bool(credentials)
+                
+        except Exception as e:
+            # Log error but continue with standard endpoint
+            logger.error(f"Error checking calendar credentials: {e}")
+            has_calendar = False
+        
+        # Use calendar-enhanced endpoint if user has calendar access
+        if has_calendar:
+            endpoint = f"media-stream-custom-calendar/{scenario_id}"
+            logger.info(f"Using calendar-enhanced endpoint for scenario {scenario_id}")
+        else:
+            endpoint = f"media-stream-custom/{scenario_id}"
+            logger.info(f"Using standard endpoint for scenario {scenario_id}")
 
         # Get the correct host - use the host header from the request
         host = request.headers.get('host', 'localhost:5050')
@@ -282,12 +360,13 @@ async def handle_custom_incoming_call(
         # For production, ensure we're using the right protocol and host
         if 'localhost' in host or '127.0.0.1' in host:
             # Development - might be HTTP
-            stream_url = f"ws://{host}/media-stream-custom/{scenario_id}"
+            stream_url = f"ws://{host}/{endpoint}"
         else:
             # Production - use secure WebSocket
-            stream_url = f"wss://{host}/media-stream-custom/{scenario_id}"
+            stream_url = f"wss://{host}/{endpoint}"
 
         stream = Stream(url=stream_url)
+        connect = Connect()
         connect.append(stream)
         response.append(connect)
 
@@ -295,6 +374,7 @@ async def handle_custom_incoming_call(
         return FastAPIResponse(content=str(response), media_type="application/xml")
 
     except Exception as e:
+        logger.error(f"Error in incoming custom call handler: {str(e)}")
         # Return error TwiML as XML
         from twilio.twiml.voice_response import VoiceResponse, Say
         response = VoiceResponse()

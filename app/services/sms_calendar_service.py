@@ -11,6 +11,7 @@ from dateutil.parser import parse as parse_date
 from dateutil.relativedelta import relativedelta
 
 from app.services.google_calendar import GoogleCalendarService
+from app.services.unified_calendar_service import UnifiedCalendarService
 from app.business_config import BUSINESS_HOURS
 import pytz
 
@@ -247,7 +248,9 @@ class SMSCalendarService:
         customer_phone: str, 
         customer_email: Optional[str],
         requested_datetime: datetime,
-        customer_name: Optional[str] = None
+        customer_name: Optional[str] = None,
+        user_id: Optional[int] = None,
+        db_session = None
     ) -> Dict:
         """
         Schedule a demo call in the calendar
@@ -285,22 +288,92 @@ Demo Focus:
 - Real-time voice technology demonstration
 """
             
-            # TODO: Actually create the calendar event
-            # For now, simulate successful booking
-            event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
-            
-            logger.info(f"Demo scheduled for {customer_phone} at {requested_datetime}")
-            
-            return {
-                "success": True,
-                "event_id": event_id,
-                "datetime": requested_datetime,
-                "title": title,
-                "description": description,
-                "customer_phone": customer_phone,
-                "customer_email": customer_email,
-                "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}"
-            }
+            # FIXED: Actually create the calendar event using UnifiedCalendarService
+            if user_id and db_session:
+                try:
+                    # Use UnifiedCalendarService for real calendar creation
+                    unified_calendar = UnifiedCalendarService(user_id)
+                    
+                    # Prepare event details
+                    event_details = {
+                        "summary": title,
+                        "description": description,
+                        "start_time": requested_datetime,
+                        "end_time": requested_datetime + timedelta(minutes=30)  # 30-minute demo
+                    }
+                    
+                    # Create the actual calendar event
+                    calendar_result = await unified_calendar.create_event(db_session, event_details)
+                    
+                    if calendar_result["success"]:
+                        logger.info(f"✅ Real calendar event created for SMS demo: {calendar_result.get('event_id', 'Unknown ID')}")
+                        
+                        return {
+                            "success": True,
+                            "event_id": calendar_result.get("event_id", ""),
+                            "datetime": requested_datetime,
+                            "title": title,
+                            "description": description,
+                            "customer_phone": customer_phone,
+                            "customer_email": customer_email,
+                            "calendar_link": calendar_result.get("html_link", ""),
+                            "google_event_id": calendar_result.get("event_id", ""),
+                            "calendar_created": True,
+                            "calendar_service": "UnifiedCalendarService"
+                        }
+                    else:
+                        logger.warning(f"Failed to create calendar event: {calendar_result.get('error', 'Unknown error')}")
+                        # Fall back to simulated booking
+                        event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
+                        return {
+                            "success": True,
+                            "event_id": event_id,
+                            "datetime": requested_datetime,
+                            "title": title,
+                            "description": description,
+                            "customer_phone": customer_phone,
+                            "customer_email": customer_email,
+                            "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}",
+                            "calendar_created": False,
+                            "calendar_error": calendar_result.get('error', 'Unknown error'),
+                            "fallback": "simulated_booking"
+                        }
+                        
+                except Exception as calendar_error:
+                    logger.error(f"Failed to create calendar event via UnifiedCalendarService: {str(calendar_error)}")
+                    # Fall back to simulated booking
+                    event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
+                    return {
+                        "success": True,
+                        "event_id": event_id,
+                        "datetime": requested_datetime,
+                        "title": title,
+                        "description": description,
+                        "customer_phone": customer_phone,
+                        "customer_email": customer_email,
+                        "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}",
+                        "calendar_created": False,
+                        "calendar_error": str(calendar_error),
+                        "fallback": "simulated_booking"
+                    }
+            else:
+                # No user_id or db_session provided - fall back to simulated booking
+                event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
+                logger.info(f"Demo scheduled for {customer_phone} at {requested_datetime} (simulated - no user context)")
+                
+                return {
+                    "success": True,
+                    "event_id": event_id,
+                    "datetime": requested_datetime,
+                    "title": title,
+                    "description": description,
+                    "customer_phone": customer_phone,
+                    "customer_email": customer_email,
+                    "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}",
+                    "calendar_created": False,
+                    "note": "No user context provided for calendar creation",
+                    "fallback": "simulated_booking"
+                }
             
         except Exception as e:
             logger.error(f"Error scheduling demo: {str(e)}")
