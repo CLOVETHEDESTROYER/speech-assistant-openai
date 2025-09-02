@@ -1084,7 +1084,7 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
                                 import aiohttp
                                 async with aiohttp.ClientSession() as session:
                                     async with session.post(
-                                        "http://localhost:5051/tools/createCalendarEvent",
+                                        f"{os.getenv('PUBLIC_URL', 'https://voice.hyperlabsai.com')}/tools/createCalendarEvent",
                                         json=args
                                     ) as response:
                                         if response.status == 200:
