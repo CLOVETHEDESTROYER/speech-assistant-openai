@@ -9,8 +9,9 @@ from fastapi import HTTPException
 
 class GoogleCalendarService:
     def __init__(self):
-        # Full calendar access for read/write
-        self.scopes = ['https://www.googleapis.com/auth/calendar']
+        # Calendar access - using broader scope to match Google's response
+        self.scopes = ['https://www.googleapis.com/auth/calendar.events',
+                       'https://www.googleapis.com/auth/calendar']
         self.api_version = 'v3'
 
         # Validate environment variables

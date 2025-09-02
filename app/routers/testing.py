@@ -14,7 +14,7 @@ from twilio.base.exceptions import TwilioRestException
 
 from app.auth import get_current_user
 from app.db import get_db
-from app.models import User, Conversation
+from app.models import User, Conversation, GoogleCalendarCredentials
 from app import config
 from app.app_config import SCENARIOS
 from app.utils.url_helpers import clean_and_validate_url
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Security check - only create endpoints in development
 if IS_DEV:
     router = APIRouter()
-    
+
     @router.get("/test-call/{phone_number}")
     async def test_call_no_limits(
         phone_number: str,
@@ -37,8 +37,9 @@ if IS_DEV:
     ):
         """🧪 TESTING ONLY: Make a call without rate limits or usage checks."""
         try:
-            logger.info(f"🧪 TEST CALL: User {current_user.id} → {phone_number} [{scenario}]")
-            
+            logger.info(
+                f"🧪 TEST CALL: User {current_user.id} → {phone_number} [{scenario}]")
+
             # Get system phone number
             from_number = os.getenv('TWILIO_PHONE_NUMBER')
             if not from_number:
@@ -97,10 +98,12 @@ if IS_DEV:
 
         except TwilioRestException as e:
             logger.error(f"🧪 Twilio error: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Twilio error: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Twilio error: {str(e)}")
         except Exception as e:
             logger.error(f"🧪 Test call error: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Test call failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Test call failed: {str(e)}")
 
     @router.post("/test-fast-call")
     async def test_fast_call(
@@ -112,25 +115,27 @@ if IS_DEV:
         """🧪 TESTING ONLY: Ultra-fast call endpoint for rapid testing."""
         try:
             from_number = os.getenv('TWILIO_PHONE_NUMBER')
-            client = Client(os.getenv('TWILIO_ACCOUNT_SID'), os.getenv('TWILIO_AUTH_TOKEN'))
+            client = Client(os.getenv('TWILIO_ACCOUNT_SID'),
+                            os.getenv('TWILIO_AUTH_TOKEN'))
             base_url = clean_and_validate_url(config.PUBLIC_URL)
-            
+
             call = client.calls.create(
                 to=phone_number,
                 from_=from_number,
                 url=f"{base_url}/outgoing-call/{scenario}",
                 method='POST'
             )
-            
+
             return {
-                "call_sid": call.sid, 
+                "call_sid": call.sid,
                 "status": "🚀 FAST CALL INITIATED",
                 "phone_number": phone_number,
                 "scenario": scenario,
                 "message": "Rapid test call - no rate limits"
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Fast call failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Fast call failed: {str(e)}")
 
     @router.get("/test-scenarios")
     async def test_list_scenarios():
@@ -178,22 +183,24 @@ if IS_DEV:
         try:
             from app.services.sms_service import SMSService
             from app.services.sms_ai_service import SMSAIService
-            
+
             sms_service = SMSService()
             ai_service = SMSAIService()
-            
+
             # Get or create test conversation
             conversation = await sms_service.get_or_create_conversation(
-                phone_number, os.getenv('TWILIO_PHONE_NUMBER', '+18557480210'), db
+                phone_number, os.getenv(
+                    'TWILIO_PHONE_NUMBER', '+18557480210'), db
             )
-            
+
             # Get conversation context
-            context = sms_service._get_conversation_context(conversation.id, db)
+            context = sms_service._get_conversation_context(
+                conversation.id, db)
             customer_info = sms_service._extract_customer_info(conversation)
-            
+
             # Generate AI response
             ai_result = await ai_service.generate_response(message, context, customer_info)
-            
+
             return {
                 "status": "✅ SMS BOT TEST SUCCESS",
                 "input_message": message,
@@ -206,10 +213,11 @@ if IS_DEV:
                 "lead_score": conversation.lead_score,
                 "message": "🤖 SMS bot test completed successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 SMS bot test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"SMS bot test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"SMS bot test failed: {str(e)}")
 
     @router.get("/test-sms-calendar")
     async def test_sms_calendar(
@@ -219,24 +227,25 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test SMS calendar parsing and booking."""
         try:
             from app.services.sms_calendar_service import SMSCalendarService
-            
+
             calendar_service = SMSCalendarService()
-            
+
             # Parse datetime from message
             parsed_datetime = await calendar_service.parse_datetime_from_message(message)
-            
+
             if parsed_datetime:
                 # Check availability
                 availability = await calendar_service.check_availability(parsed_datetime)
-                
+
                 return {
                     "status": "✅ CALENDAR TEST SUCCESS",
                     "input_message": message,
                     "parsed_datetime": parsed_datetime.isoformat() if parsed_datetime else None,
                     "availability": availability,
                     "formatted_response": calendar_service.format_availability_response(
-                        availability, 
-                        parsed_datetime.strftime('%A at %I:%M %p') if parsed_datetime else message
+                        availability,
+                        parsed_datetime.strftime(
+                            '%A at %I:%M %p') if parsed_datetime else message
                     ),
                     "message": "📅 Calendar parsing test completed"
                 }
@@ -248,29 +257,31 @@ if IS_DEV:
                     "message": "Could not parse date/time from message",
                     "suggestion": "Try: 'tomorrow at 2pm', 'Friday morning', 'next Tuesday 3:30'"
                 }
-            
+
         except Exception as e:
             logger.error(f"🧪 SMS calendar test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar test failed: {str(e)}")
 
     @router.get("/test-sms-stats")
     async def test_sms_stats(db: Session = Depends(get_db)):
         """🧪 TESTING ONLY: Get SMS bot statistics."""
         try:
             from app.services.sms_service import SMSService
-            
+
             sms_service = SMSService()
             stats = sms_service.get_conversation_stats(db)
-            
+
             return {
                 "status": "✅ SMS STATS SUCCESS",
                 "stats": stats,
                 "message": "📊 SMS statistics retrieved successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 SMS stats test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Stats test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Stats test failed: {str(e)}")
 
     @router.post("/test-send-sms")
     async def test_send_sms(
@@ -281,16 +292,17 @@ if IS_DEV:
         """🧪 TESTING ONLY: Send actual SMS via Twilio."""
         try:
             from app.services.sms_service import SMSService
-            
+
             sms_service = SMSService()
             from_number = os.getenv('TWILIO_PHONE_NUMBER')
-            
+
             if not from_number:
-                raise HTTPException(status_code=500, detail="TWILIO_PHONE_NUMBER not configured")
-            
+                raise HTTPException(
+                    status_code=500, detail="TWILIO_PHONE_NUMBER not configured")
+
             # Send SMS
             success = await sms_service.send_sms_response(from_number, to_number, message)
-            
+
             if success:
                 return {
                     "status": "✅ SMS SENT SUCCESS",
@@ -300,11 +312,13 @@ if IS_DEV:
                     "result": "SMS sent successfully via Twilio"
                 }
             else:
-                raise HTTPException(status_code=500, detail="Failed to send SMS")
-                
+                raise HTTPException(
+                    status_code=500, detail="Failed to send SMS")
+
         except Exception as e:
             logger.error(f"🧪 SMS send test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"SMS send test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"SMS send test failed: {str(e)}")
 
     @router.get("/test-sms-config")
     async def test_sms_config():
@@ -321,7 +335,7 @@ if IS_DEV:
             "business_hours_only": os.getenv("SMS_BUSINESS_HOURS_ONLY", "false").lower() == "true",
             "message": "🤖 SMS bot configuration check complete"
         }
-    
+
     @router.post("/test-user-business-config")
     async def test_create_user_business_config(
         current_user: User = Depends(get_current_user),
@@ -330,10 +344,10 @@ if IS_DEV:
         """🧪 TESTING ONLY: Create default business config for current user."""
         try:
             from app.services.user_sms_service import UserSMSService
-            
+
             user_sms_service = UserSMSService(current_user.id)
             business_config = await user_sms_service.get_or_create_business_config(db)
-            
+
             return {
                 "status": "✅ USER BUSINESS CONFIG TEST SUCCESS",
                 "user_id": current_user.id,
@@ -345,11 +359,12 @@ if IS_DEV:
                 "monthly_limit": business_config.monthly_conversation_limit,
                 "message": "🏢 Business config created/retrieved successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 User business config test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Business config test failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Business config test failed: {str(e)}")
+
     @router.get("/test-user-sms-bot")
     async def test_user_sms_bot(
         message: str,
@@ -360,23 +375,24 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test user-specific SMS bot response."""
         try:
             from app.services.user_sms_service import UserSMSService
-            
+
             user_sms_service = UserSMSService(current_user.id)
             business_config = await user_sms_service.get_or_create_business_config(db)
-            
+
             # Get or create conversation
             conversation = await user_sms_service.get_or_create_conversation(
-                phone_number, 
-                os.getenv('TWILIO_PHONE_NUMBER', '+18557480210'), 
+                phone_number,
+                os.getenv('TWILIO_PHONE_NUMBER', '+18557480210'),
                 db
             )
-            
+
             # Get context and generate response
-            context = user_sms_service._get_conversation_context(conversation.id, db)
+            context = user_sms_service._get_conversation_context(
+                conversation.id, db)
             ai_response = await user_sms_service._generate_business_response(
                 message, context, business_config
             )
-            
+
             return {
                 "status": "✅ USER SMS BOT TEST SUCCESS",
                 "user_id": current_user.id,
@@ -392,8 +408,9 @@ if IS_DEV:
 
         except Exception as e:
             logger.error(f"🧪 User SMS bot test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"User SMS bot test failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"User SMS bot test failed: {str(e)}")
+
     @router.get("/test-user-usage-stats")
     async def test_user_usage_stats(
         current_user: User = Depends(get_current_user),
@@ -402,20 +419,21 @@ if IS_DEV:
         """🧪 TESTING ONLY: Get user SMS usage statistics."""
         try:
             from app.services.user_sms_service import UserSMSService
-            
+
             user_sms_service = UserSMSService(current_user.id)
             usage_stats = user_sms_service.get_usage_stats(db)
-            
+
             return {
                 "status": "✅ USER USAGE STATS TEST SUCCESS",
                 "usage_stats": usage_stats,
                 "message": "📊 User usage statistics retrieved successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 User usage stats test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Usage stats test failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Usage stats test failed: {str(e)}")
+
     @router.post("/test-simulate-user-sms-webhook")
     async def test_simulate_user_sms_webhook(
         user_id: int,
@@ -428,14 +446,14 @@ if IS_DEV:
         try:
             from app.services.user_sms_service import UserSMSService
             import uuid
-            
+
             if not to_phone:
                 to_phone = os.getenv('TWILIO_PHONE_NUMBER', '+18557480210')
-            
+
             # Simulate SMS processing
             user_sms_service = UserSMSService(user_id)
             fake_message_sid = f"test_{uuid.uuid4().hex[:10]}"
-            
+
             result = await user_sms_service.handle_incoming_sms(
                 from_number=from_phone,
                 to_number=to_phone,
@@ -443,7 +461,7 @@ if IS_DEV:
                 message_sid=fake_message_sid,
                 db=db
             )
-            
+
             return {
                 "status": "✅ USER SMS WEBHOOK SIMULATION SUCCESS",
                 "user_id": user_id,
@@ -451,15 +469,16 @@ if IS_DEV:
                 "webhook_url": f"http://localhost:5051/sms/{user_id}/webhook",
                 "message": "📱 SMS webhook simulation completed successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 User SMS webhook simulation error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"SMS webhook simulation failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"SMS webhook simulation failed: {str(e)}")
 
     # =================================================================
     # PHASE 1: UNIFIED CALENDAR SERVICE TESTING ENDPOINTS
     # =================================================================
-    
+
     @router.get("/test-unified-calendar-config")
     async def test_unified_calendar_config():
         """🧪 TESTING ONLY: Check Unified Calendar Service configuration."""
@@ -482,7 +501,8 @@ if IS_DEV:
             }
         except Exception as e:
             logger.error(f"🧪 Unified Calendar config test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar config test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar config test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-credentials")
     async def test_unified_calendar_credentials(
@@ -492,11 +512,11 @@ if IS_DEV:
         """🧪 TESTING ONLY: Check if user has Google Calendar credentials for Unified Service."""
         try:
             from app.models import GoogleCalendarCredentials
-            
+
             credentials = db.query(GoogleCalendarCredentials).filter(
                 GoogleCalendarCredentials.user_id == current_user.id
             ).first()
-            
+
             if credentials:
                 return {
                     "status": "✅ UNIFIED CALENDAR CREDENTIALS FOUND",
@@ -515,10 +535,12 @@ if IS_DEV:
                     "message": "📅 User needs to authenticate with Google Calendar",
                     "next_step": "Visit /google-calendar/auth to authenticate"
                 }
-                
+
         except Exception as e:
-            logger.error(f"🧪 Unified Calendar credentials test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar credentials test failed: {str(e)}")
+            logger.error(
+                f"🧪 Unified Calendar credentials test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar credentials test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-read")
     async def test_unified_calendar_read(
@@ -530,12 +552,12 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test reading calendar events with Unified Calendar Service."""
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
             events = await calendar_service.read_upcoming_events(
                 db, max_results=max_results, days_ahead=days_ahead
             )
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR READ SUCCESS",
                 "user_id": current_user.id,
@@ -545,10 +567,11 @@ if IS_DEV:
                 "days_ahead": days_ahead,
                 "message": f"📅 Retrieved {len(events)} events using Unified Calendar Service"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Unified Calendar read test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar read test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar read test failed: {str(e)}")
 
     @router.post("/test-unified-calendar-create")
     async def test_unified_calendar_create(
@@ -563,9 +586,9 @@ if IS_DEV:
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
             from dateutil import parser
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
-            
+
             # Parse start time
             if start_time:
                 try:
@@ -574,7 +597,7 @@ if IS_DEV:
                     parsed_start = datetime.now() + timedelta(hours=1)
             else:
                 parsed_start = datetime.now() + timedelta(hours=1)
-            
+
             # Prepare event details
             event_details = {
                 "summary": title,
@@ -582,10 +605,10 @@ if IS_DEV:
                 "start_time": parsed_start,
                 "end_time": parsed_start + timedelta(minutes=duration_minutes)
             }
-            
+
             # Create the event
             result = await calendar_service.create_event(db, event_details)
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR CREATE SUCCESS" if result["success"] else "❌ UNIFIED CALENDAR CREATE FAILED",
                 "user_id": current_user.id,
@@ -593,10 +616,11 @@ if IS_DEV:
                 "result": result,
                 "message": f"📅 Calendar event creation test completed - {'Success' if result['success'] else 'Failed'}"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Unified Calendar create test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar create test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar create test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-availability")
     async def test_unified_calendar_availability(
@@ -609,9 +633,9 @@ if IS_DEV:
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
             from dateutil import parser
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
-            
+
             # Parse start time
             if start_time:
                 try:
@@ -620,12 +644,12 @@ if IS_DEV:
                     parsed_start = datetime.now() + timedelta(hours=1)
             else:
                 parsed_start = datetime.now() + timedelta(hours=1)
-            
+
             # Check availability
             availability = await calendar_service.check_availability(
                 db, parsed_start, duration_minutes
             )
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR AVAILABILITY SUCCESS",
                 "user_id": current_user.id,
@@ -634,10 +658,12 @@ if IS_DEV:
                 "availability": availability,
                 "message": f"📅 Availability check completed - {'Available' if availability.get('available') else 'Not Available'}"
             }
-            
+
         except Exception as e:
-            logger.error(f"🧪 Unified Calendar availability test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar availability test failed: {str(e)}")
+            logger.error(
+                f"🧪 Unified Calendar availability test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar availability test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-free-slots")
     async def test_unified_calendar_free_slots(
@@ -650,17 +676,17 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test finding free slots with Unified Calendar Service."""
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
-            
+
             # Find free slots
             free_slots = await calendar_service.find_free_slots(
-                db, 
+                db,
                 days_ahead=days_ahead,
                 max_results=max_results,
                 min_duration_minutes=min_duration
             )
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR FREE SLOTS SUCCESS",
                 "user_id": current_user.id,
@@ -671,10 +697,11 @@ if IS_DEV:
                 "free_slots": free_slots,
                 "message": f"📅 Found {len(free_slots)} free time slots"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Unified Calendar free slots test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar free slots test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar free slots test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-parse-time")
     async def test_unified_calendar_parse_time(
@@ -684,12 +711,12 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test natural language time parsing with Unified Calendar Service."""
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
-            
+
             # Parse natural language time
             parsed_time = await calendar_service.parse_natural_language_time(message)
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR TIME PARSE SUCCESS" if parsed_time else "⚠️ UNIFIED CALENDAR TIME PARSE FAILED",
                 "user_id": current_user.id,
@@ -698,10 +725,11 @@ if IS_DEV:
                 "formatted_time": parsed_time.strftime('%A, %B %d, %Y at %I:%M %p') if parsed_time else None,
                 "message": f"📅 Time parsing test completed - {'Success' if parsed_time else 'Failed'}"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Unified Calendar time parse test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar time parse test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar time parse test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-ai-context")
     async def test_unified_calendar_ai_context(
@@ -711,12 +739,12 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test AI context generation with Unified Calendar Service."""
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
-            
+
             # Get calendar context for AI
             ai_context = await calendar_service.get_calendar_context_for_ai(db)
-            
+
             return {
                 "status": "✅ UNIFIED CALENDAR AI CONTEXT SUCCESS",
                 "user_id": current_user.id,
@@ -724,10 +752,11 @@ if IS_DEV:
                 "context_length": len(ai_context),
                 "message": "📅 AI context generation test completed successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Unified Calendar AI context test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar AI context test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar AI context test failed: {str(e)}")
 
     @router.get("/test-unified-calendar-comprehensive")
     async def test_unified_calendar_comprehensive(
@@ -737,57 +766,71 @@ if IS_DEV:
         """🧪 TESTING ONLY: Comprehensive test of all Unified Calendar Service features."""
         try:
             from app.services.unified_calendar_service import UnifiedCalendarService
-            
+
             calendar_service = UnifiedCalendarService(current_user.id)
             test_results = {}
-            
+
             # Test 1: Read events
             try:
                 events = await calendar_service.read_upcoming_events(db, max_results=3)
-                test_results["read_events"] = {"success": True, "count": len(events), "events": events}
+                test_results["read_events"] = {
+                    "success": True, "count": len(events), "events": events}
             except Exception as e:
-                test_results["read_events"] = {"success": False, "error": str(e)}
-            
+                test_results["read_events"] = {
+                    "success": False, "error": str(e)}
+
             # Test 2: Check availability
             try:
                 test_time = datetime.now() + timedelta(hours=2)
                 availability = await calendar_service.check_availability(db, test_time, 30)
-                test_results["check_availability"] = {"success": True, "availability": availability}
+                test_results["check_availability"] = {
+                    "success": True, "availability": availability}
             except Exception as e:
-                test_results["check_availability"] = {"success": False, "error": str(e)}
-            
+                test_results["check_availability"] = {
+                    "success": False, "error": str(e)}
+
             # Test 3: Find free slots
             try:
                 free_slots = await calendar_service.find_free_slots(db, days_ahead=3, max_results=3)
-                test_results["find_free_slots"] = {"success": True, "count": len(free_slots), "slots": free_slots}
+                test_results["find_free_slots"] = {
+                    "success": True, "count": len(free_slots), "slots": free_slots}
             except Exception as e:
-                test_results["find_free_slots"] = {"success": False, "error": str(e)}
-            
+                test_results["find_free_slots"] = {
+                    "success": False, "error": str(e)}
+
             # Test 4: Parse natural language
             try:
-                test_phrases = ["tomorrow at 2pm", "next Friday at 10am", "Monday morning"]
+                test_phrases = ["tomorrow at 2pm",
+                                "next Friday at 10am", "Monday morning"]
                 parse_results = {}
                 for phrase in test_phrases:
                     parsed = await calendar_service.parse_natural_language_time(phrase)
-                    parse_results[phrase] = parsed.isoformat() if parsed else None
-                test_results["parse_natural_language"] = {"success": True, "results": parse_results}
+                    parse_results[phrase] = parsed.isoformat(
+                    ) if parsed else None
+                test_results["parse_natural_language"] = {
+                    "success": True, "results": parse_results}
             except Exception as e:
-                test_results["parse_natural_language"] = {"success": False, "error": str(e)}
-            
+                test_results["parse_natural_language"] = {
+                    "success": False, "error": str(e)}
+
             # Test 5: AI context
             try:
                 ai_context = await calendar_service.get_calendar_context_for_ai(db)
-                test_results["ai_context"] = {"success": True, "context": ai_context}
+                test_results["ai_context"] = {
+                    "success": True, "context": ai_context}
             except Exception as e:
-                test_results["ai_context"] = {"success": False, "error": str(e)}
-            
+                test_results["ai_context"] = {
+                    "success": False, "error": str(e)}
+
             # Test 6: Create event (optional - only if user confirms)
-            test_results["create_event"] = {"success": False, "note": "Skipped - use specific create test to avoid unwanted events"}
-            
+            test_results["create_event"] = {
+                "success": False, "note": "Skipped - use specific create test to avoid unwanted events"}
+
             # Summary
-            successful_tests = sum(1 for test in test_results.values() if test.get("success", False))
+            successful_tests = sum(
+                1 for test in test_results.values() if test.get("success", False))
             total_tests = len(test_results)
-            
+
             return {
                 "status": f"✅ UNIFIED CALENDAR COMPREHENSIVE TEST {'SUCCESS' if successful_tests == total_tests else 'PARTIAL SUCCESS'}",
                 "user_id": current_user.id,
@@ -799,15 +842,17 @@ if IS_DEV:
                 "test_results": test_results,
                 "message": f"📅 Comprehensive calendar test completed - {successful_tests}/{total_tests} tests passed"
             }
-            
+
         except Exception as e:
-            logger.error(f"🧪 Unified Calendar comprehensive test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar comprehensive test failed: {str(e)}")
+            logger.error(
+                f"🧪 Unified Calendar comprehensive test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar comprehensive test failed: {str(e)}")
 
     # =================================================================
     # PHASE 2 & 3: SMS CALENDAR AND CUSTOM SCENARIO TESTING ENDPOINTS
     # =================================================================
-    
+
     @router.get("/test-sms-calendar-fixed")
     async def test_sms_calendar_fixed(
         message: str,
@@ -817,12 +862,12 @@ if IS_DEV:
         """🧪 TESTING ONLY: Test FIXED SMS calendar with real calendar integration."""
         try:
             from app.services.sms_calendar_service import SMSCalendarService
-            
+
             calendar_service = SMSCalendarService()
-            
+
             # Parse datetime from message
             parsed_datetime = await calendar_service.parse_datetime_from_message(message)
-            
+
             if parsed_datetime:
                 # Test the FIXED schedule_demo method with user context
                 result = await calendar_service.schedule_demo(
@@ -833,7 +878,7 @@ if IS_DEV:
                     user_id=current_user.id,
                     db_session=db
                 )
-                
+
                 return {
                     "status": "✅ FIXED SMS CALENDAR TEST SUCCESS" if result["success"] else "❌ SMS CALENDAR TEST FAILED",
                     "user_id": current_user.id,
@@ -841,7 +886,7 @@ if IS_DEV:
                     "parsed_datetime": parsed_datetime.isoformat(),
                     "scheduling_result": result,
                     "calendar_created": result.get("calendar_created", False),
-                    "message": f"📅 SMS calendar test completed - {'Real calendar event created!' if result.get('calendar_created') else 'Simulated booking (no calendar access)'}" 
+                    "message": f"📅 SMS calendar test completed - {'Real calendar event created!' if result.get('calendar_created') else 'Simulated booking (no calendar access)'}"
                 }
             else:
                 return {
@@ -852,10 +897,11 @@ if IS_DEV:
                     "message": "Could not parse date/time from message",
                     "suggestion": "Try: 'tomorrow at 2pm', 'Friday morning', 'next Tuesday 3:30'"
                 }
-            
+
         except Exception as e:
             logger.error(f"🧪 Fixed SMS calendar test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"SMS calendar test failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"SMS calendar test failed: {str(e)}")
 
     @router.get("/test-custom-scenario-calendar-check")
     async def test_custom_scenario_calendar_check(
@@ -866,29 +912,29 @@ if IS_DEV:
         """🧪 TESTING ONLY: Check if a custom scenario has calendar access."""
         try:
             from app.models import CustomScenario, GoogleCalendarCredentials
-            
+
             # Find the custom scenario
             custom_scenario = db.query(CustomScenario).filter(
                 CustomScenario.scenario_id == scenario_id
             ).first()
-            
+
             if not custom_scenario:
                 return {
                     "status": "❌ SCENARIO NOT FOUND",
                     "scenario_id": scenario_id,
                     "message": "Custom scenario not found"
                 }
-            
+
             # Check if scenario owner has calendar credentials
             credentials = db.query(GoogleCalendarCredentials).filter(
                 GoogleCalendarCredentials.user_id == custom_scenario.user_id
             ).first()
-            
+
             has_calendar = bool(credentials)
-            
+
             # Determine which endpoint would be used
             endpoint_type = "media-stream-custom-calendar" if has_calendar else "media-stream-custom"
-            
+
             return {
                 "status": "✅ CUSTOM SCENARIO CALENDAR CHECK SUCCESS",
                 "scenario_id": scenario_id,
@@ -900,10 +946,11 @@ if IS_DEV:
                 "websocket_endpoint": f"{endpoint_type}/{scenario_id}",
                 "message": f"📅 Scenario {'WILL' if has_calendar else 'will NOT'} use calendar-enhanced features"
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Custom scenario calendar check error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar check failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar check failed: {str(e)}")
 
     @router.post("/test-create-calendar-scenario")
     async def test_create_calendar_scenario(
@@ -918,13 +965,13 @@ if IS_DEV:
             from app.models import CustomScenario
             from app.app_config import VOICES
             import time
-            
+
             if voice_type not in VOICES:
                 voice_type = "alloy"  # Default fallback
-            
+
             # Generate unique ID
             scenario_id = f"test_cal_{current_user.id}_{int(time.time())}"
-            
+
             # Store in database
             db_custom_scenario = CustomScenario(
                 scenario_id=scenario_id,
@@ -934,11 +981,11 @@ if IS_DEV:
                 voice_type=voice_type,
                 temperature=0.7
             )
-            
+
             db.add(db_custom_scenario)
             db.commit()
             db.refresh(db_custom_scenario)
-            
+
             return {
                 "status": "✅ TEST CALENDAR SCENARIO CREATED",
                 "scenario_id": scenario_id,
@@ -949,10 +996,11 @@ if IS_DEV:
                 "test_url": f"http://localhost:5051/testing/test-custom-scenario-calendar-check?scenario_id={scenario_id}",
                 "message": "📅 Test calendar scenario created successfully! Use the test_url to check calendar integration."
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Create calendar scenario test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Create calendar scenario failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Create calendar scenario failed: {str(e)}")
 
     @router.get("/test-calendar-integration-status")
     async def test_calendar_integration_status(
@@ -962,17 +1010,17 @@ if IS_DEV:
         """🧪 TESTING ONLY: Check overall calendar integration status for current user."""
         try:
             from app.models import GoogleCalendarCredentials, CustomScenario
-            
+
             # Check if user has calendar credentials
             credentials = db.query(GoogleCalendarCredentials).filter(
                 GoogleCalendarCredentials.user_id == current_user.id
             ).first()
-            
+
             # Get user's custom scenarios
             scenarios = db.query(CustomScenario).filter(
                 CustomScenario.user_id == current_user.id
             ).all()
-            
+
             scenario_list = []
             for scenario in scenarios:
                 scenario_list.append({
@@ -981,7 +1029,7 @@ if IS_DEV:
                     "calendar_enhanced": bool(credentials),
                     "endpoint": f"media-stream-custom{'calendar' if credentials else ''}/{scenario.scenario_id}"
                 })
-            
+
             return {
                 "status": "✅ CALENDAR INTEGRATION STATUS",
                 "user_id": current_user.id,
@@ -997,10 +1045,266 @@ if IS_DEV:
                 },
                 "message": f"📅 User {'HAS' if credentials else 'does NOT have'} Google Calendar integration. {len(scenarios)} custom scenarios {'will use' if credentials else 'cannot use'} calendar features."
             }
-            
+
         except Exception as e:
             logger.error(f"🧪 Calendar integration status test error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Calendar integration status failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Calendar integration status failed: {str(e)}")
+
+    # =================================================================
+    # AUTOMATIC CALENDAR CREATION TESTING ENDPOINTS
+    # =================================================================
+
+    @router.post("/test-conversation-calendar-processing")
+    async def test_conversation_calendar_processing(
+        conversation_text: str,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Test conversation analysis and calendar event creation"""
+        try:
+            from app.services.calendar_event_creator import CalendarEventCreator
+
+            # Test conversation analysis
+            calendar_creator = CalendarEventCreator()
+            result = await calendar_creator.process_conversation(conversation_text, current_user.id, db)
+
+            if result:
+                return {
+                    "status": "✅ SUCCESS",
+                    "message": "Calendar event created successfully",
+                    "event_details": result,
+                    "analysis": "Scheduling commitment detected and processed"
+                }
+            else:
+                return {
+                    "status": "ℹ️ NO ACTION",
+                    "message": "No scheduling commitments detected",
+                    "analysis": "Conversation does not contain calendar booking requests"
+                }
+
+        except Exception as e:
+            logger.error(f"Error testing conversation processing: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to process conversation: {str(e)}")
+
+    @router.post("/test-post-call-processing")
+    async def test_post_call_processing(
+        call_sid: str = "test_call_123",
+        scenario_id: str = "custom_1_test",
+        conversation_text: str = "AI: Hello! How can I help you today?\nUser: Hi, I'd like to schedule a consultation for tomorrow at 2 PM.\nAI: Perfect! I'll add that to your calendar right away. Let me get your details.\nUser: My name is John Doe and my number is 555-1234.\nAI: Great! I've scheduled your consultation for tomorrow at 2 PM.",
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Test full post-call processing pipeline"""
+        try:
+            from app.services.post_call_processor import post_call_processor
+
+            # Test the full post-call processing
+            result = await post_call_processor.process_call_end(
+                call_sid=call_sid,
+                user_id=current_user.id,
+                scenario_id=scenario_id,
+                conversation_content=conversation_text
+            )
+
+            return {
+                "status": "✅ SUCCESS",
+                "message": "Post-call processing completed",
+                "processing_result": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error testing post-call processing: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to test post-call processing: {str(e)}")
+
+    @router.post("/test-reprocess-pending-transcripts")
+    async def test_reprocess_pending_transcripts(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Reprocess any pending conversation transcripts"""
+        try:
+            from app.services.post_call_processor import post_call_processor
+
+            result = await post_call_processor.reprocess_pending_transcripts()
+
+            return {
+                "status": "✅ SUCCESS",
+                "message": "Reprocessing completed",
+                "reprocessing_result": result
+            }
+
+        except Exception as e:
+            logger.error(f"Error testing reprocessing: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to test reprocessing: {str(e)}")
+
+    @router.post("/test-sms-calendar-integration")
+    async def test_sms_calendar_integration(
+        customer_message: str = "Hi, I'd like to schedule a consultation for tomorrow at 2 PM",
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Test SMS calendar integration end-to-end"""
+        try:
+            from app.services.user_sms_service import UserSMSService
+            from app.models import GoogleCalendarCredentials
+
+            # Check if user has calendar credentials
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == current_user.id
+            ).first()
+
+            if not credentials:
+                return {
+                    "status": "⚠️ NO CALENDAR CREDENTIALS",
+                    "message": "User needs to authorize Google Calendar first",
+                    "setup_url": "/google-calendar/authorize"
+                }
+
+            # Test SMS processing
+            sms_service = UserSMSService(current_user.id)
+
+            # Simulate an SMS webhook call
+            result = await sms_service.handle_incoming_sms(
+                from_number="+15551234567",
+                to_number="+15559876543",
+                body=customer_message,
+                message_sid=f"test_sms_{datetime.utcnow().timestamp()}",
+                db=db
+            )
+
+            return {
+                "status": "✅ SMS CALENDAR INTEGRATION TEST",
+                "user_id": current_user.id,
+                "customer_message": customer_message,
+                "sms_result": result,
+                "has_calendar_credentials": True,
+                "message": "SMS calendar integration test completed"
+            }
+
+        except Exception as e:
+            logger.error(f"🧪 SMS calendar integration test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"SMS calendar integration test failed: {str(e)}")
+
+    @router.post("/test-transcript-webhook-processing")
+    async def test_transcript_webhook_processing(
+        transcript_text: str = "Customer: Hi, I'd like to book a meeting for tomorrow at 3 PM. Assistant: Perfect! I'll add that to your calendar right away. Your meeting is scheduled for tomorrow at 3 PM.",
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Test transcript webhook calendar processing"""
+        try:
+            from app.routers.twilio_webhooks import should_process_for_calendar
+            from app.models import Conversation, GoogleCalendarCredentials
+
+            # Create a test conversation
+            test_conversation = Conversation(
+                user_id=current_user.id,
+                scenario="custom_test",
+                phone_number="+15551234567",
+                direction="inbound",
+                status="completed",
+                call_sid=f"test_call_{datetime.utcnow().timestamp()}",
+                transcript=transcript_text
+            )
+            db.add(test_conversation)
+            db.commit()
+            db.refresh(test_conversation)
+
+            # Check calendar processing eligibility
+            should_process = await should_process_for_calendar(db, test_conversation)
+
+            if should_process:
+                from app.services.post_call_processor import PostCallProcessor
+
+                processor = PostCallProcessor()
+                calendar_result = await processor.process_call_end(
+                    call_sid=test_conversation.call_sid,
+                    user_id=current_user.id,
+                    scenario_id="custom_test",
+                    conversation_content=transcript_text
+                )
+
+                # Clean up test conversation
+                db.delete(test_conversation)
+                db.commit()
+
+                return {
+                    "status": "✅ TRANSCRIPT WEBHOOK PROCESSING TEST",
+                    "user_id": current_user.id,
+                    "should_process_calendar": should_process,
+                    "calendar_result": calendar_result,
+                    "message": "Transcript webhook processing test completed"
+                }
+            else:
+                # Clean up test conversation
+                db.delete(test_conversation)
+                db.commit()
+
+                return {
+                    "status": "⚠️ CALENDAR NOT ENABLED",
+                    "user_id": current_user.id,
+                    "should_process_calendar": should_process,
+                    "message": "User doesn't have calendar integration enabled"
+                }
+
+        except Exception as e:
+            logger.error(
+                f"🧪 Transcript webhook processing test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Transcript webhook processing test failed: {str(e)}")
+
+    @router.get("/test-complete-calendar-flow")
+    async def test_complete_calendar_flow(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+    ):
+        """🧪 TESTING: Test complete calendar integration flow status"""
+        try:
+            from app.models import GoogleCalendarCredentials, UserBusinessConfig
+
+            # Check prerequisites
+            calendar_creds = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == current_user.id
+            ).first()
+
+            business_config = db.query(UserBusinessConfig).filter(
+                UserBusinessConfig.user_id == current_user.id
+            ).first()
+
+            return {
+                "status": "✅ COMPLETE CALENDAR FLOW STATUS",
+                "user_id": current_user.id,
+                "prerequisites": {
+                    "google_calendar_connected": bool(calendar_creds),
+                    "business_config_exists": bool(business_config),
+                    "calendar_integration_enabled": business_config.calendar_integration_enabled if business_config else False
+                },
+                "features_available": {
+                    "voice_calendar": bool(calendar_creds),
+                    "sms_calendar": bool(calendar_creds and business_config and business_config.calendar_integration_enabled),
+                    "automatic_event_creation": bool(calendar_creds)
+                },
+                "test_endpoints": {
+                    "sms_test": "/testing/test-sms-calendar-integration",
+                    "voice_test": "/testing/test-transcript-webhook-processing",
+                    "conversation_test": "/testing/test-conversation-calendar-processing"
+                },
+                "setup_urls": {
+                    "google_calendar_auth": "/google-calendar/authorize",
+                    "business_config": "/business/config"
+                },
+                "message": f"Calendar integration {'READY' if calendar_creds else 'REQUIRES SETUP'}"
+            }
+
+        except Exception as e:
+            logger.error(f"🧪 Complete calendar flow test error: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Complete calendar flow test failed: {str(e)}")
 
 else:
     # Production - create empty router

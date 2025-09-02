@@ -52,6 +52,17 @@ async def create_custom_scenario(
                 detail="You have reached the maximum limit of 20 custom scenarios. Please delete some scenarios before creating new ones."
             )
 
+        # Check if user has calendar credentials for function calling
+        calendar_enabled = False
+        try:
+            from app.models import GoogleCalendarCredentials
+            credentials = db.query(GoogleCalendarCredentials).filter(
+                GoogleCalendarCredentials.user_id == current_user.id
+            ).first()
+            calendar_enabled = bool(credentials)
+        except Exception as e:
+            logger.warning(f"Could not check calendar credentials: {e}")
+
         # Create scenario in same format as SCENARIOS dictionary
         custom_scenario = {
             "persona": persona,
@@ -59,7 +70,9 @@ async def create_custom_scenario(
             "voice_config": {
                 "voice": VOICES[voice_type],
                 "temperature": temperature
-            }
+            },
+            "calendar_enabled": calendar_enabled,
+            "user_id": current_user.id
         }
 
         # Generate unique ID
@@ -244,7 +257,7 @@ async def handle_custom_incoming_call(
         call_sid = None
         from_phone = None
         to_phone = None
-        
+
         try:
             form_data = await request.form()
             call_sid = form_data.get("CallSid")
@@ -262,7 +275,7 @@ async def handle_custom_incoming_call(
         # Find the custom scenario and its owner
         custom_scenario = None
         scenario_user_id = None
-        
+
         # Check if scenario exists in database or global SCENARIOS
         if scenario_id not in SCENARIOS:
             # Try to load from database
@@ -282,13 +295,27 @@ async def handle_custom_incoming_call(
                 if mapped_voice not in valid_voices:
                     mapped_voice = "alloy"
 
+                # Check if user has calendar credentials for function calling
+                calendar_enabled = False
+                try:
+                    from app.models import GoogleCalendarCredentials
+                    credentials = db.query(GoogleCalendarCredentials).filter(
+                        GoogleCalendarCredentials.user_id == custom_scenario.user_id
+                    ).first()
+                    calendar_enabled = bool(credentials)
+                except Exception as e:
+                    logger.warning(
+                        f"Could not check calendar credentials: {e}")
+
                 SCENARIOS[scenario_id] = {
                     "persona": custom_scenario.persona,
                     "prompt": custom_scenario.prompt,
                     "voice_config": {
                         "voice": mapped_voice,
                         "temperature": custom_scenario.temperature
-                    }
+                    },
+                    "calendar_enabled": calendar_enabled,
+                    "user_id": custom_scenario.user_id
                 }
             else:
                 # Use default scenario if custom scenario not found
@@ -310,7 +337,7 @@ async def handle_custom_incoming_call(
                 existing_conversation = db.query(Conversation).filter(
                     Conversation.call_sid == call_sid
                 ).first()
-                
+
                 if not existing_conversation:
                     # Create new conversation record
                     conversation = Conversation(
@@ -323,12 +350,15 @@ async def handle_custom_incoming_call(
                     )
                     db.add(conversation)
                     db.commit()
-                    logger.info(f"✅ Created conversation record for incoming call: {call_sid[:4]}...{call_sid[-4:]}")
+                    logger.info(
+                        f"✅ Created conversation record for incoming call: {call_sid[:4]}...{call_sid[-4:]}")
                 else:
-                    logger.info(f"📞 Conversation already exists for call: {call_sid[:4]}...{call_sid[-4:]}")
-                    
+                    logger.info(
+                        f"📞 Conversation already exists for call: {call_sid[:4]}...{call_sid[-4:]}")
+
             except Exception as conv_error:
-                logger.error(f"⚠️ Failed to create conversation record: {str(conv_error)}")
+                logger.error(
+                    f"⚠️ Failed to create conversation record: {str(conv_error)}")
                 # Continue anyway - don't fail the call
 
         # Check if the scenario owner has Google Calendar credentials
@@ -340,19 +370,21 @@ async def handle_custom_incoming_call(
                     GoogleCalendarCredentials.user_id == custom_scenario.user_id
                 ).first()
                 has_calendar = bool(credentials)
-                
+
         except Exception as e:
             # Log error but continue with standard endpoint
             logger.error(f"Error checking calendar credentials: {e}")
             has_calendar = False
-        
-        # Use calendar-enhanced endpoint if user has calendar access
+
+        # ✅ FIXED: Use standard OpenAI Realtime API endpoint to avoid WebSocket protocol errors
+        # Calendar processing will happen via post-call transcript analysis
+        endpoint = f"media-stream-custom/{scenario_id}"
         if has_calendar:
-            endpoint = f"media-stream-custom-calendar/{scenario_id}"
-            logger.info(f"Using calendar-enhanced endpoint for scenario {scenario_id}")
+            logger.info(
+                f"Using OpenAI Realtime API with post-call calendar processing for scenario {scenario_id}")
         else:
-            endpoint = f"media-stream-custom/{scenario_id}"
-            logger.info(f"Using standard endpoint for scenario {scenario_id}")
+            logger.info(
+                f"Using OpenAI Realtime API for scenario {scenario_id}")
 
         # Get the correct host - use the host header from the request
         host = request.headers.get('host', 'localhost:5050')

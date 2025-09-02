@@ -48,13 +48,14 @@ class AnonymousOnboardingSession(Base):
     phone_number = Column(String, nullable=True)  # Step 2: Profile
     preferred_voice = Column(String, nullable=True)  # Step 2: Profile
     notifications_enabled = Column(Boolean, default=True)  # Step 2: Profile
-    
+
     # Step tracking for mobile flow
     welcome_completed = Column(Boolean, default=False)  # Step 1
     profile_completed = Column(Boolean, default=False)  # Step 2
     tutorial_completed = Column(Boolean, default=False)  # Step 3
-    current_step = Column(String, default="welcome")  # welcome, profile, tutorial, ready_for_registration
-    
+    # welcome, profile, tutorial, ready_for_registration
+    current_step = Column(String, default="welcome")
+
     # Legacy field for backward compatibility
     selected_scenario_id = Column(String, nullable=True)
 
@@ -90,11 +91,13 @@ class User(Base):
     # "email", "apple", "google"
     auth_provider = Column(String, default="email")
     email_verified = Column(Boolean, default=False)
-    
+
     # User profile fields
     full_name = Column(String, nullable=True)  # General name field
-    preferred_voice = Column(String, nullable=True)  # Voice preference for AI calls
-    notifications_enabled = Column(Boolean, default=True)  # Notification preferences
+    # Voice preference for AI calls
+    preferred_voice = Column(String, nullable=True)
+    notifications_enabled = Column(
+        Boolean, default=True)  # Notification preferences
 
     call_schedules = relationship("CallSchedule", back_populates="user")
     tokens = relationship("Token", back_populates="user")
@@ -114,6 +117,8 @@ class User(Base):
         "AnonymousOnboardingSession", back_populates="user", uselist=False)
     business_config = relationship(
         "UserBusinessConfig", back_populates="user", uselist=False)
+    conversation_transcripts = relationship(
+        "ConversationTranscript", back_populates="user")
 
 
 class CallSchedule(Base):
@@ -224,6 +229,22 @@ class GoogleCalendarCredentials(Base):
                         onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="google_credentials")
+
+
+class ConversationTranscript(Base):
+    __tablename__ = "conversation_transcripts"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    call_sid = Column(String, unique=True, index=True)
+    scenario_id = Column(String)
+    transcript = Column(Text)
+    calendar_processed = Column(Boolean, default=False)
+    calendar_event_created = Column(Boolean, default=False)
+    calendar_event_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="conversation_transcripts")
 
 
 class StoredTwilioTranscript(Base):
@@ -391,29 +412,36 @@ class SMSConversation(Base):
     __tablename__ = "sms_conversations"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who owns this conversation
-    phone_number = Column(String, nullable=False, index=True)  # Customer's phone
+    # User who owns this conversation
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    phone_number = Column(String, nullable=False,
+                          index=True)  # Customer's phone
     twilio_phone_number = Column(String, nullable=False)  # Our Twilio number
-    conversation_context = Column(JSON, default=list)  # List of recent messages for AI context
-    
+    # List of recent messages for AI context
+    conversation_context = Column(JSON, default=list)
+
     # Conversation metadata
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
     last_message_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String, default="active")  # active, closed, archived
-    
+
     # Customer information (optional, gathered during conversation)
     customer_name = Column(String, nullable=True)
     customer_email = Column(String, nullable=True)
-    customer_interest = Column(String, nullable=True)  # mobile, business, demo, etc.
-    
+    # mobile, business, demo, etc.
+    customer_interest = Column(String, nullable=True)
+
     # Business intelligence
     total_messages = Column(Integer, default=0)
     lead_score = Column(Integer, default=0)  # 0-100 based on engagement
-    conversion_status = Column(String, default="prospect")  # prospect, demo_scheduled, converted
-    
+    # prospect, demo_scheduled, converted
+    conversion_status = Column(String, default="prospect")
+
     # Relationships
-    messages = relationship("SMSMessage", back_populates="conversation", cascade="all, delete-orphan")
+    messages = relationship(
+        "SMSMessage", back_populates="conversation", cascade="all, delete-orphan")
     user = relationship("User")
 
 
@@ -421,31 +449,40 @@ class SMSMessage(Base):
     __tablename__ = "sms_messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    conversation_id = Column(Integer, ForeignKey("sms_conversations.id"), nullable=False)
-    message_sid = Column(String, unique=True, nullable=False)  # Twilio's unique message ID
-    
+    conversation_id = Column(Integer, ForeignKey(
+        "sms_conversations.id"), nullable=False)
+    # Twilio's unique message ID
+    message_sid = Column(String, unique=True, nullable=False)
+
     # Message details
     direction = Column(String, nullable=False)  # 'inbound' or 'outbound'
     from_number = Column(String, nullable=False)
     to_number = Column(String, nullable=False)
     body = Column(Text, nullable=False)
-    
+
     # AI processing
-    ai_response = Column(Text, nullable=True)  # The AI-generated response (for inbound messages)
-    intent_detected = Column(String, nullable=True)  # pricing, demo, support, etc.
+    # The AI-generated response (for inbound messages)
+    ai_response = Column(Text, nullable=True)
+    # pricing, demo, support, etc.
+    intent_detected = Column(String, nullable=True)
     sentiment_score = Column(Float, nullable=True)  # -1.0 to 1.0
-    entities_extracted = Column(JSON, nullable=True)  # Names, dates, email addresses, etc.
-    
+    # Names, dates, email addresses, etc.
+    entities_extracted = Column(JSON, nullable=True)
+
     # Timing
     created_at = Column(DateTime, default=datetime.utcnow)
-    processed_at = Column(DateTime, nullable=True)  # When AI response was generated
-    sent_at = Column(DateTime, nullable=True)  # When response was sent via Twilio
-    
+    # When AI response was generated
+    processed_at = Column(DateTime, nullable=True)
+    # When response was sent via Twilio
+    sent_at = Column(DateTime, nullable=True)
+
     # Status tracking
-    status = Column(String, default="received")  # received, processing, responded, failed
+    # received, processing, responded, failed
+    status = Column(String, default="received")
     error_message = Column(String, nullable=True)  # If processing failed
-    calendar_processed = Column(Boolean, default=False)  # If message was handled by calendar service
-    
+    # If message was handled by calendar service
+    calendar_processed = Column(Boolean, default=False)
+
     # Relationships
     conversation = relationship("SMSConversation", back_populates="messages")
 
@@ -455,9 +492,12 @@ __all__ = ["User", "Token", "Base", "CallSchedule",
            "StoredTwilioTranscript", "UserPhoneNumber", "UserOnboardingStatus",
            "UsageLimits", "ProviderCredentials", "SMSConversation", "SMSMessage",
            "UserBusinessConfig", "SMSUsageLog", "SMSPlan", "ResponseTone",
-           "AppType", "SubscriptionTier", "SubscriptionStatus", "AnonymousOnboardingSession"]
+           "AppType", "SubscriptionTier", "SubscriptionStatus", "AnonymousOnboardingSession",
+           "ConversationTranscript"]
 
 # Add new enums for SMS bot features
+
+
 class SMSPlan(enum.Enum):
     """SMS Bot subscription plans"""
     FREE_TRIAL = "free_trial"           # 10 conversations/month
@@ -477,48 +517,56 @@ class ResponseTone(enum.Enum):
 
 class UserBusinessConfig(Base):
     __tablename__ = "user_business_configs"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
-    
+    user_id = Column(Integer, ForeignKey("users.id"),
+                     nullable=False, unique=True)
+
     # Business Information
     company_name = Column(String, nullable=False)
     tagline = Column(String, nullable=True)
     description = Column(Text, nullable=True)
-    industry = Column(String, nullable=True)  # e.g., "Technology", "Healthcare"
+    # e.g., "Technology", "Healthcare"
+    industry = Column(String, nullable=True)
     website = Column(String, nullable=True)
-    
+
     # Services and Pricing (JSON arrays/objects)
-    services = Column(JSON, nullable=True)  # List of services: ["Web Development", "Consulting"]
+    # List of services: ["Web Development", "Consulting"]
+    services = Column(JSON, nullable=True)
     pricing_info = Column(JSON, nullable=True)  # Pricing structure with plans
-    contact_info = Column(JSON, nullable=True)  # {"email": "...", "phone": "...", "address": "..."}
-    
+    # {"email": "...", "phone": "...", "address": "..."}
+    contact_info = Column(JSON, nullable=True)
+
     # Bot Persona Configuration
     bot_name = Column(String, default="Assistant")
-    bot_personality = Column(Text, nullable=True)  # Detailed personality description
-    response_tone = Column(Enum(ResponseTone), default=ResponseTone.PROFESSIONAL)
+    # Detailed personality description
+    bot_personality = Column(Text, nullable=True)
+    response_tone = Column(
+        Enum(ResponseTone), default=ResponseTone.PROFESSIONAL)
     custom_greeting = Column(Text, nullable=True)  # Custom welcome message
-    
+
     # SMS Bot Settings
     sms_enabled = Column(Boolean, default=True)
     auto_responses_enabled = Column(Boolean, default=True)
     calendar_integration_enabled = Column(Boolean, default=True)
     lead_scoring_enabled = Column(Boolean, default=True)
-    
+
     # Business Hours (JSON)
-    business_hours = Column(JSON, nullable=True)  # {"monday": {"start": "09:00", "end": "17:00"}, ...}
+    # {"monday": {"start": "09:00", "end": "17:00"}, ...}
+    business_hours = Column(JSON, nullable=True)
     timezone = Column(String, default="America/Los_Angeles")
-    
+
     # Custom Response Templates (JSON)
-    custom_responses = Column(JSON, nullable=True)  # {"pricing": "Custom pricing message", ...}
-    
+    # {"pricing": "Custom pricing message", ...}
+    custom_responses = Column(JSON, nullable=True)
+
     # Usage and Plan Information
     sms_plan = Column(Enum(SMSPlan), default=SMSPlan.FREE_TRIAL)
     monthly_conversation_limit = Column(Integer, default=10)
     conversations_used_this_month = Column(Integer, default=0)
     plan_start_date = Column(DateTime, nullable=True)
     plan_end_date = Column(DateTime, nullable=True)
-    
+
     # Analytics and Performance
     total_conversations = Column(Integer, default=0)
     total_leads_generated = Column(Integer, default=0)
@@ -526,50 +574,56 @@ class UserBusinessConfig(Base):
     average_response_time = Column(Float, default=0.0)  # seconds
     customer_satisfaction = Column(Float, default=0.0)  # 0-5 rating
     conversion_rate = Column(Float, default=0.0)  # percentage
-    
+
     # Feature Flags
     advanced_analytics = Column(Boolean, default=False)
     white_label_enabled = Column(Boolean, default=False)
     api_access_enabled = Column(Boolean, default=False)
-    
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
     # Relationships
     user = relationship("User", back_populates="business_config")
-    sms_usage_logs = relationship("SMSUsageLog", back_populates="business_config")
+    sms_usage_logs = relationship(
+        "SMSUsageLog", back_populates="business_config")
 
 
 class SMSUsageLog(Base):
     __tablename__ = "sms_usage_logs"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    business_config_id = Column(Integer, ForeignKey("user_business_configs.id"), nullable=False)
-    
+    business_config_id = Column(Integer, ForeignKey(
+        "user_business_configs.id"), nullable=False)
+
     # Usage tracking
-    conversation_id = Column(Integer, ForeignKey("sms_conversations.id"), nullable=True)
+    conversation_id = Column(Integer, ForeignKey(
+        "sms_conversations.id"), nullable=True)
     customer_phone = Column(String, nullable=False)
     messages_exchanged = Column(Integer, default=0)
-    conversation_duration = Column(Integer, nullable=True)  # seconds from first to last message
-    
+    # seconds from first to last message
+    conversation_duration = Column(Integer, nullable=True)
+
     # Business intelligence
     intent_detected = Column(String, nullable=True)
     lead_quality_score = Column(Integer, default=0)  # 0-100
     conversion_achieved = Column(Boolean, default=False)
-    outcome = Column(String, nullable=True)  # "demo_booked", "info_provided", "escalated", etc.
-    
+    # "demo_booked", "info_provided", "escalated", etc.
+    outcome = Column(String, nullable=True)
+
     # Cost tracking
     estimated_cost = Column(Float, default=0.0)  # OpenAI + Twilio costs
-    
+
     # Timestamps
     conversation_started_at = Column(DateTime, default=datetime.utcnow)
     conversation_ended_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     user = relationship("User")
-    business_config = relationship("UserBusinessConfig", back_populates="sms_usage_logs")
+    business_config = relationship(
+        "UserBusinessConfig", back_populates="sms_usage_logs")
     sms_conversation = relationship("SMSConversation")
-

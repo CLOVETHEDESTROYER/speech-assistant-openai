@@ -898,10 +898,20 @@ async def schedule_call(
 async def receive_from_twilio(ws_manager, openai_ws, shared_state):
     """Receive messages from Twilio and forward audio to OpenAI."""
     try:
+        # ✅ DEBUG: Log function start
+        logger.info("🎤 receive_from_twilio function started")
+
         while not shared_state["should_stop"]:
+            # ✅ DEBUG: Log each message receive attempt
+            logger.debug("⏳ Waiting for Twilio WebSocket message...")
+
             message = await ws_manager.receive_text()
             if not message:
+                logger.debug("📭 Received empty message from Twilio")
                 continue
+
+            # ✅ DEBUG: Log received message
+            logger.info(f"📨 RECEIVED FROM TWILIO: {message}")
 
             data = json.loads(message)
             if data.get("event") == "media":
@@ -913,7 +923,7 @@ async def receive_from_twilio(ws_manager, openai_ws, shared_state):
                 logger.debug("Forwarded audio to OpenAI")
             elif data.get("event") == "start":
                 shared_state["stream_sid"] = data.get("streamSid")
-                logger.info(f"Stream started: {shared_state['stream_sid']}")
+                logger.info(f"🎬 Stream started: {shared_state['stream_sid']}")
 
                 # Get scenario name for VAD optimization
                 scenario_name = shared_state.get("scenario_name", "default")
@@ -987,13 +997,26 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
                         logger.debug("Skipping audio delta - user is speaking")
                         continue
 
-                    await ws_manager.send_json({
+                    # ✅ FIX: Validate streamSid before sending
+                    stream_sid = shared_state.get("stream_sid")
+                    if not stream_sid:
+                        logger.warning(
+                            "No streamSid available, skipping audio delta")
+                        continue
+
+                    twilio_message = {
                         "event": "media",
-                        "streamSid": shared_state["stream_sid"],
+                        "streamSid": stream_sid,
                         "media": {
                             "payload": data["delta"]
                         }
-                    })
+                    }
+
+                    # ✅ DEBUG: Log the exact message being sent
+                    logger.info(
+                        f"🔍 SENDING TO TWILIO: {json.dumps(twilio_message)}")
+
+                    await ws_manager.send_json(twilio_message)
                     logger.debug("Sent audio delta to Twilio")
 
                 # Handle response completion
@@ -1007,6 +1030,79 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
                     if shared_state.get("stream_sid"):
                         await send_mark(ws_manager, shared_state)
                         logger.info("Mark event sent to Twilio")
+
+                # Handle function calls from OpenAI Realtime API
+                elif data.get("type") == "response.function_call_arguments.done":
+                    function_call_id = data.get("call_id")
+                    function_name = data.get("name")
+                    arguments = data.get("arguments")
+
+                    logger.info(
+                        f"📞 Function call received: {function_name} with ID: {function_call_id}")
+
+                    if function_name == "createCalendarEvent":
+                        try:
+                            # Parse function arguments
+                            args = json.loads(arguments) if isinstance(
+                                arguments, str) else arguments
+
+                            # Add user_id from shared_state
+                            scenario = shared_state.get("scenario", {})
+                            user_id = scenario.get("user_id")
+
+                            if not user_id:
+                                logger.error(
+                                    "No user_id found in scenario for calendar function call")
+                                function_result = {"error": "User not found"}
+                            else:
+                                args["user_id"] = user_id
+
+                                # Call our calendar endpoint directly
+                                import aiohttp
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.post(
+                                        "http://localhost:5051/tools/createCalendarEvent",
+                                        json=args
+                                    ) as response:
+                                        if response.status == 200:
+                                            function_result = await response.json()
+                                            logger.info(
+                                                f"✅ Calendar event created: {function_result.get('id')}")
+                                        else:
+                                            error_text = await response.text()
+                                            logger.error(
+                                                f"❌ Calendar creation failed: {error_text}")
+                                            function_result = {
+                                                "error": f"Failed to create calendar event: {error_text}"}
+
+                            # Send function call result back to OpenAI
+                            function_response = {
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "function_call_output",
+                                    "call_id": function_call_id,
+                                    "output": json.dumps(function_result)
+                                }
+                            }
+
+                            await openai_ws.send(json.dumps(function_response))
+
+                            # Request a new response to continue the conversation
+                            await openai_ws.send(json.dumps({"type": "response.create"}))
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error handling calendar function call: {e}", exc_info=True)
+                            # Send error back to OpenAI
+                            error_response = {
+                                "type": "conversation.item.create",
+                                "item": {
+                                    "type": "function_call_output",
+                                    "call_id": function_call_id,
+                                    "output": json.dumps({"error": str(e)})
+                                }
+                            }
+                            await openai_ws.send(json.dumps(error_response))
 
                 # Handle speech detection
                 elif data.get("type") == "input_audio_buffer.speech_started":
@@ -1082,21 +1178,117 @@ async def send_session_update(openai_ws, scenario):
         scenario_name = scenario.get("name", "default")
         vad_config = VADConfig.get_scenario_vad_config(scenario_name)
 
+        # Base session configuration
+        session_config = {
+            "turn_detection": vad_config,
+            "input_audio_format": "g711_ulaw",
+            "output_audio_format": "g711_ulaw",
+            "instructions": (
+                f"{SYSTEM_MESSAGE}\n\n"
+                f"CRITICAL CONVERSATION RULES - FOLLOW THESE STRICTLY:\n"
+                f"- STOP TALKING IMMEDIATELY when the other person starts speaking\n"
+                f"- Keep responses SHORT and CONCISE (1-2 sentences max)\n"
+                f"- NEVER ramble or go on long monologues\n"
+                f"- Wait for clear pauses before responding\n"
+                f"- Listen and acknowledge what they say before continuing\n"
+                f"- Be direct and to the point\n"
+                f"- Respect turn-taking - let them finish speaking\n\n"
+                f"Persona: {scenario['persona']}\n\n"
+                f"Scenario: {scenario['prompt']}\n\n"
+                f"{scenario.get('additional_instructions', '')}\n\n"
+                + ("IMPORTANT: Greet the caller immediately when the call connects. "
+                   "Introduce yourself as specified in your persona and ask how you can help."
+                   if scenario.get('direction') == "inbound" else
+                   "IMPORTANT: Follow the scenario prompt exactly. Address the user by name if known. Be responsive and natural in conversation.")
+            ),
+            "voice": scenario["voice_config"]["voice"],
+            "modalities": ["text", "audio"],
+            "temperature": 0.8
+        }
+
+        # Add calendar function calling if scenario has calendar enabled
+        if scenario.get("calendar_enabled"):
+            logger.info(
+                f"📅 Adding calendar function calling to session for user {scenario.get('user_id')}")
+
+            # Add calendar creation tool
+            session_config["tools"] = [
+                {
+                    "type": "function",
+                    "name": "createCalendarEvent",
+                    "description": "Create a new calendar event when the user wants to schedule something",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {
+                                "type": "string",
+                                "description": "The title/summary of the event (e.g., 'Consultation: John Smith')"
+                            },
+                            "start_iso": {
+                                "type": "string",
+                                "description": "Start time in RFC3339 format with timezone (e.g., '2025-09-02T14:00:00-06:00')"
+                            },
+                            "end_iso": {
+                                "type": "string",
+                                "description": "End time in RFC3339 format with timezone (e.g., '2025-09-02T14:30:00-06:00')"
+                            },
+                            "timezone": {
+                                "type": "string",
+                                "description": "IANA timezone identifier (default: 'America/Denver')",
+                                "default": "America/Denver"
+                            },
+                            "customer_name": {
+                                "type": "string",
+                                "description": "Customer's name if provided"
+                            },
+                            "customer_phone": {
+                                "type": "string",
+                                "description": "Customer's phone number if available"
+                            },
+                            "attendee_email": {
+                                "type": "string",
+                                "description": "Email to send calendar invite to"
+                            },
+                            "location": {
+                                "type": "string",
+                                "description": "Meeting location or 'Phone Call'"
+                            },
+                            "notes": {
+                                "type": "string",
+                                "description": "Additional notes about the appointment"
+                            }
+                        },
+                        "required": ["summary", "start_iso", "end_iso"]
+                    }
+                }
+            ]
+
+            # Enhanced instructions for calendar scenarios
+            session_config["instructions"] += """
+
+CALENDAR SCHEDULING CAPABILITIES:
+You can create calendar events for users who want to schedule appointments.
+
+When a user wants to schedule something:
+1. Collect ALL required details: name, purpose, date, time, duration
+2. Convert their natural language to specific datetime (use RFC3339 format with timezone)
+3. Confirm the details by reading them back: "I have Tuesday September 2nd, 2:00-2:30 PM Mountain Time - is that correct?"
+4. Once confirmed, call the createCalendarEvent function
+5. After creating the event, confirm: "Perfect! I've added that to your calendar and you should receive a calendar invitation."
+
+Default timezone is America/Denver (Mountain Time).
+Always confirm details before creating events.
+Be conversational and helpful."""
+
         session_data = {
             "type": "session.update",
-            "session": {
-                "turn_detection": vad_config,
-                "input_audio_format": "g711_ulaw",
-                "output_audio_format": "g711_ulaw",
-                "instructions": f"{SYSTEM_MESSAGE}\n\nPersona: {scenario['persona']}\n\nScenario: {scenario['prompt']}",
-                "voice": scenario["voice_config"]["voice"],
-                "modalities": ["text", "audio"],
-                "temperature": 0.8
-            }
+            "session": session_config
         }
 
         logger.info(
             f"Sending enhanced session update with VAD config: {vad_config}")
+        if scenario.get("calendar_enabled"):
+            logger.info("📅 Calendar function calling enabled in session")
         await openai_ws.send(json.dumps(session_data))
         logger.info(f"Session update sent for persona: {scenario['persona']}")
     except Exception as e:
@@ -1340,45 +1532,15 @@ async def initialize_session(openai_ws, scenario, is_incoming=True, user_name=No
         elif direction == "inbound":
             additional_instructions = "Ask for the caller's name if appropriate for the conversation."
 
-        # Get optimized VAD configuration for this scenario
-        scenario_name = scenario.get("name", "default")
-        vad_config = VADConfig.get_scenario_vad_config(scenario_name)
+        # Add additional instructions to scenario for proper context
+        enhanced_scenario = scenario.copy()
+        enhanced_scenario["additional_instructions"] = additional_instructions
+        enhanced_scenario["direction"] = direction
 
-        # Generate session update payload with enhanced VAD
-        session_data = {
-            "type": "session.update",
-            "session": {
-                "turn_detection": vad_config,
-                "input_audio_format": "g711_ulaw",
-                "output_audio_format": "g711_ulaw",
-                "instructions": (
-                    f"{SYSTEM_MESSAGE}\n\n"
-                    f"CRITICAL CONVERSATION RULES - FOLLOW THESE STRICTLY:\n"
-                    f"- STOP TALKING IMMEDIATELY when the other person starts speaking\n"
-                    f"- Keep responses SHORT and CONCISE (1-2 sentences max)\n"
-                    f"- NEVER ramble or go on long monologues\n"
-                    f"- Wait for clear pauses before responding\n"
-                    f"- Listen and acknowledge what they say before continuing\n"
-                    f"- Be direct and to the point\n"
-                    f"- Respect turn-taking - let them finish speaking\n\n"
-                    f"Persona: {scenario['persona']}\n\n"
-                    f"Scenario: {scenario['prompt']}\n\n"
-                    f"{additional_instructions}\n\n"
-                    + ("IMPORTANT: Greet the caller immediately when the call connects. "
-                       "Introduce yourself as specified in your persona and ask how you can help."
-                       if direction == "inbound" else
-                       "IMPORTANT: Follow the scenario prompt exactly. Address the user by name if known. Be responsive and natural in conversation.")
-                ),
-                "voice": scenario["voice_config"]["voice"],
-                "modalities": ["text", "audio"],
-                "temperature": scenario["voice_config"].get("temperature", 0.8)
-            }
-        }
-
+        # Use send_session_update which includes calendar function calling
+        await send_session_update(openai_ws, enhanced_scenario)
         logger.info(
-            f"Sending enhanced session update with VAD config: {vad_config}")
-        await openai_ws.send(json.dumps(session_data))
-        logger.info(f"Session update sent for persona: {scenario['persona']}")
+            f"Session initialized with calendar support for persona: {scenario['persona']}")
     except Exception as e:
         logger.error(f"Error sending session update: {e}")
         raise
@@ -1467,6 +1629,11 @@ async def send_mark(connection, stream_sid):
             "streamSid": actual_stream_sid,
             "mark": {"name": "responsePart"}
         }
+
+        # ✅ DEBUG: Log the exact message being sent
+        logger.info(
+            f"🔍 SENDING RESPONSE MARK TO TWILIO: {json.dumps(mark_event)}")
+
         await connection.send_json(mark_event)
         return 'responsePart'
 
@@ -1542,11 +1709,20 @@ async def enhanced_handle_speech_started_event(websocket, openai_ws, shared_stat
 async def enhanced_clear_audio_buffers(websocket, stream_sid):
     """Enhanced audio buffer clearing with better timing"""
     try:
+        # ✅ FIX: Validate streamSid before sending
+        if not stream_sid:
+            logger.warning("No streamSid available, skipping buffer clear")
+            return
+
         # Clear Twilio's audio buffer
         clear_event = {
             "event": "clear",
             "streamSid": stream_sid
         }
+
+        # ✅ DEBUG: Log the exact message being sent
+        logger.info(f"🔍 SENDING CLEAR TO TWILIO: {json.dumps(clear_event)}")
+
         await websocket.send_json(clear_event)
         logger.info(f"Cleared Twilio audio buffer for streamSid: {stream_sid}")
 
@@ -1556,6 +1732,10 @@ async def enhanced_clear_audio_buffers(websocket, stream_sid):
             "streamSid": stream_sid,
             "mark": {"name": "user_interrupt_handled"}
         }
+
+        # ✅ DEBUG: Log the exact message being sent
+        logger.info(f"🔍 SENDING MARK TO TWILIO: {json.dumps(mark_event)}")
+
         await websocket.send_json(mark_event)
 
         # Brief pause for clean audio transition

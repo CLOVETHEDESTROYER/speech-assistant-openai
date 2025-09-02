@@ -19,6 +19,9 @@ import logging
 import base64
 import struct
 from datetime import datetime
+import os
+from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +143,8 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
                             "greeting_sent": False,
                             "reconnecting": False,
                             "ai_speaking": False,
-                            "user_speaking": False
+                            "user_speaking": False,
+                            "scenario": selected_scenario  # Add scenario for function calling
                         }
 
                         # Initialize conversation state for enhanced interruption handling
@@ -172,6 +176,11 @@ async def handle_media_stream(websocket: WebSocket, scenario: str):
 
                         # Create tasks for receiving and sending with enhanced state management
                         from app.main import receive_from_twilio, send_to_twilio
+
+                        # ✅ DEBUG: Log that we're starting WebSocket tasks
+                        logger.info(
+                            f"🚀 Starting WebSocket tasks for scenario: {scenario}")
+
                         receive_task = asyncio.create_task(
                             receive_from_twilio(ws, openai_ws, shared_state))
                         send_task = asyncio.create_task(
@@ -270,37 +279,60 @@ async def handle_custom_media_stream(websocket: WebSocket, scenario_id: str):
         ).first()
 
         if custom_scenario:
-            # Convert custom scenario to standard format with proper voice mapping
-            from app.constants import VOICES
+            # Check if scenario already exists in SCENARIOS (with calendar info)
+            if scenario_id in SCENARIOS:
+                # Use existing scenario with calendar information
+                await handle_media_stream(websocket, scenario_id)
+            else:
+                # Convert custom scenario to standard format with proper voice mapping
+                from app.constants import VOICES
 
-            # Map voice_type to actual OpenAI voice, with fallback to alloy
-            mapped_voice = VOICES.get(
-                custom_scenario.voice_type, custom_scenario.voice_type)
-            # If still not a valid OpenAI voice, fallback to alloy
-            valid_voices = ["alloy", "ash", "ballad",
-                            "coral", "echo", "sage", "shimmer", "verse"]
-            if mapped_voice not in valid_voices:
-                mapped_voice = "alloy"
+                # Map voice_type to actual OpenAI voice, with fallback to alloy
+                mapped_voice = VOICES.get(
+                    custom_scenario.voice_type, custom_scenario.voice_type)
+                # If still not a valid OpenAI voice, fallback to alloy
+                valid_voices = ["alloy", "ash", "ballad",
+                                "coral", "echo", "sage", "shimmer", "verse"]
+                if mapped_voice not in valid_voices:
+                    mapped_voice = "alloy"
 
-            scenario_data = {
-                "persona": custom_scenario.persona,
-                "prompt": custom_scenario.prompt,
-                "voice_config": {
-                    "voice": mapped_voice,
-                    "temperature": custom_scenario.temperature
+                # Check if user has calendar credentials
+                calendar_enabled = False
+                user_id = custom_scenario.user_id
+                try:
+                    from app.models import GoogleCalendarCredentials
+                    credentials = db.query(GoogleCalendarCredentials).filter(
+                        GoogleCalendarCredentials.user_id == custom_scenario.user_id
+                    ).first()
+                    calendar_enabled = bool(credentials)
+                    if calendar_enabled:
+                        logger.info(
+                            f"📅 Calendar integration enabled for user {user_id}")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not check calendar credentials: {e}")
+
+                scenario_data = {
+                    "persona": custom_scenario.persona,
+                    "prompt": custom_scenario.prompt,
+                    "voice_config": {
+                        "voice": mapped_voice,
+                        "temperature": custom_scenario.temperature
+                    },
+                    "calendar_enabled": calendar_enabled,
+                    "user_id": user_id
                 }
-            }
 
-            # Add to SCENARIOS temporarily for this call
-            temp_scenario_key = f"temp_{scenario_id}"
-            SCENARIOS[temp_scenario_key] = scenario_data
+                # Add to SCENARIOS temporarily for this call
+                temp_scenario_key = f"temp_{scenario_id}"
+                SCENARIOS[temp_scenario_key] = scenario_data
 
-            # Reuse the main media stream logic
-            await handle_media_stream(websocket, temp_scenario_key)
+                # Reuse the main media stream logic
+                await handle_media_stream(websocket, temp_scenario_key)
 
-            # Clean up temporary scenario
-            if temp_scenario_key in SCENARIOS:
-                del SCENARIOS[temp_scenario_key]
+                # Clean up temporary scenario
+                if temp_scenario_key in SCENARIOS:
+                    del SCENARIOS[temp_scenario_key]
         else:
             # If not found in database, try to use as direct scenario name
             if scenario_id in SCENARIOS:
@@ -355,33 +387,76 @@ async def handle_custom_calendar_media_stream(websocket: WebSocket, scenario_id:
             await handle_custom_media_stream(websocket, scenario_id)
             return
 
-        # Get calendar context using UnifiedCalendarService
-        from app.services.unified_calendar_service import UnifiedCalendarService
-        calendar_service = UnifiedCalendarService(user.id)
+        # Get calendar context using GoogleCalendarService
+        from app.services.google_calendar import GoogleCalendarService
+        from app.utils.crypto import decrypt_string
+        import json
+
+        calendar_service = GoogleCalendarService()
+        calendar_context = "No calendar information available."
+        slots_context = "No free time slots available."
 
         try:
-            # Read upcoming events
-            events = await calendar_service.read_upcoming_events(db, max_results=5)
+            # Decrypt the stored credentials
+            decrypted_token = decrypt_string(credentials.token)
+            decrypted_refresh_token = decrypt_string(
+                credentials.refresh_token) if credentials.refresh_token else None
 
-            # Get calendar context for AI
-            calendar_context = await calendar_service.get_calendar_context_for_ai(db)
+            # Create Google credentials object
+            google_creds = Credentials(
+                token=decrypted_token,
+                refresh_token=decrypted_refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.getenv("GOOGLE_CLIENT_ID"),
+                client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+                scopes=['https://www.googleapis.com/auth/calendar']
+            )
 
-            # Find free slots
-            free_slots = await calendar_service.find_free_slots(db, days_ahead=7, max_results=3)
+            # Build the calendar service
+            service = build('calendar', 'v3', credentials=google_creds)
 
-            # Format free slots
-            slots_context = ""
-            if free_slots:
-                slots_context = "Available time slots in the user's calendar:\\n"
-                for slot in free_slots:
-                    slots_context += f"- {slot['formatted_start']} to {slot['formatted_end']}\\n"
+            # Get upcoming events
+            events = await calendar_service.get_upcoming_events(service, max_results=5)
+
+            # Format calendar context
+            if events:
+                calendar_context = "Upcoming events:\\n"
+                for event in events:
+                    start = event.get('start', {}).get(
+                        'dateTime', event.get('start', {}).get('date', 'Unknown time'))
+                    summary = event.get('summary', 'No title')
+                    calendar_context += f"- {summary} at {start}\\n"
             else:
-                slots_context = "No free time slots found in the next week."
+                calendar_context = "No upcoming events found."
+
+            # Get basic free time info (simplified)
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            tomorrow = now + timedelta(days=1)
+
+            # Check availability for next day, 9 AM - 5 PM slots
+            available_slots = []
+            for hour in [9, 11, 14, 16]:  # 9 AM, 11 AM, 2 PM, 4 PM
+                slot_start = tomorrow.replace(
+                    hour=hour, minute=0, second=0, microsecond=0)
+                slot_end = slot_start + timedelta(hours=1)
+
+                is_available = await calendar_service.check_availability(service, slot_start, slot_end)
+                if is_available:
+                    available_slots.append(
+                        f"{slot_start.strftime('%Y-%m-%d at %I:%M %p')}")
+
+            if available_slots:
+                slots_context = "Available time slots tomorrow:\\n"
+                for slot in available_slots[:3]:  # Limit to 3 slots
+                    slots_context += f"- {slot}\\n"
+            else:
+                slots_context = "No free time slots found tomorrow."
 
         except Exception as e:
             logger.error(f"Error getting calendar data: {e}")
             calendar_context = "Unable to access calendar information."
-            slots_context = ""
+            slots_context = "Calendar temporarily unavailable."
 
         # Enhanced prompt with calendar integration
         enhanced_prompt = f"""
@@ -417,6 +492,7 @@ Remember to be helpful with calendar-related questions while maintaining your or
         if mapped_voice not in valid_voices:
             mapped_voice = "alloy"
 
+        # Create enhanced scenario with function calling
         enhanced_scenario = {
             "persona": custom_scenario.persona,
             "prompt": enhanced_prompt,
@@ -425,7 +501,41 @@ Remember to be helpful with calendar-related questions while maintaining your or
                 "temperature": custom_scenario.temperature
             },
             "calendar_enabled": True,
-            "user_id": user.id
+            "user_id": user.id,
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "create_calendar_event",
+                    "description": "Create a new calendar event",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "The title/summary of the event"
+                            },
+                            "date": {
+                                "type": "string",
+                                "description": "The date in YYYY-MM-DD format"
+                            },
+                            "start_time": {
+                                "type": "string",
+                                "description": "Start time in HH:MM format (24-hour)"
+                            },
+                            "duration_minutes": {
+                                "type": "integer",
+                                "description": "Duration in minutes (default 60)",
+                                "default": 60
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Additional details about the event"
+                            }
+                        },
+                        "required": ["title", "date", "start_time"]
+                    }
+                }
+            ]
         }
 
         # Add to SCENARIOS temporarily

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Body
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.services.google_calendar import GoogleCalendarService
@@ -21,6 +21,8 @@ from uuid import uuid4
 from datetime import timedelta
 from fastapi import BackgroundTasks
 from app.limiter import rate_limit
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,30 @@ async def google_auth(request: Request, current_user: User = Depends(get_current
     combined = f"{state}:{current_user.id}:{nonce}"
     secure_state = encrypt_string(combined)
     return {"authorization_url": authorization_url.replace(f"state={state}", f"state={secure_state}")}
+
+
+@router.get("/auth/google")
+async def google_auth_simple(request: Request, current_user: User = Depends(get_current_user)):
+    """Simple Google OAuth route as per requirements"""
+    calendar_service = GoogleCalendarService()
+    flow = calendar_service.create_oauth_flow()
+
+    # Build authorization URL with required parameters
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+
+    # Create secure state
+    nonce = str(uuid4())
+    combined = f"{state}:{current_user.id}:{nonce}"
+    secure_state = encrypt_string(combined)
+
+    # Return redirect URL
+    redirect_url = authorization_url.replace(
+        f"state={state}", f"state={secure_state}")
+    return {"authorization_url": redirect_url}
 
 
 @router.get("/callback")
@@ -269,6 +295,168 @@ async def google_callback(
         """
 
         return HTMLResponse(content=error_html)
+
+
+@router.get("/google-calendar/callback")
+async def google_callback_simple(
+    code: str,
+    state: str,
+    db: Session = Depends(get_db)
+):
+    """Simple Google OAuth callback as per requirements"""
+    try:
+        # Decrypt and validate state
+        try:
+            decrypted = decrypt_string(state)
+        except Exception:
+            logger.error("Failed to decrypt state parameter")
+            raise HTTPException(
+                status_code=400, detail="Invalid state parameter")
+
+        state_parts = decrypted.split(":")
+        if len(state_parts) < 3:
+            logger.error(f"Invalid state parameter structure: {decrypted}")
+            raise HTTPException(
+                status_code=400, detail="Invalid state parameter")
+
+        user_id = state_parts[1]
+        logger.info(
+            f"Processing Google Calendar callback for user ID: {user_id}")
+
+        # Get user from database
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if not current_user:
+            logger.error(f"User not found for ID: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Process OAuth callback
+        calendar_service = GoogleCalendarService()
+        flow = calendar_service.create_oauth_flow()
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+
+        # Save tokens to database
+        existing_creds = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == current_user.id
+        ).first()
+
+        if existing_creds:
+            # Update existing credentials
+            existing_creds.token = encrypt_string(credentials.token)
+            existing_creds.refresh_token = encrypt_string(
+                credentials.refresh_token)
+            existing_creds.token_expiry = credentials.expiry
+            existing_creds.updated_at = datetime.utcnow()
+            logger.info(
+                f"Updated Google Calendar credentials for user {current_user.email}")
+        else:
+            # Create new credentials
+            google_creds = GoogleCalendarCredentials(
+                user_id=current_user.id,
+                token=encrypt_string(credentials.token),
+                refresh_token=encrypt_string(credentials.refresh_token),
+                token_expiry=credentials.expiry
+            )
+            db.add(google_creds)
+            logger.info(
+                f"Created new Google Calendar credentials for user {current_user.email}")
+
+        db.commit()
+
+        # Log tokens (as per requirements)
+        logger.info(f"Access token: {credentials.token[:20]}...")
+        logger.info(
+            f"Refresh token: {credentials.refresh_token[:20] if credentials.refresh_token else 'None'}...")
+
+        return {"message": "Google Calendar connected!"}
+
+    except Exception as e:
+        logger.error(f"Error in Google Calendar callback: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Failed to connect Google Calendar")
+
+
+async def createCalendarEvent(start: str, end: str, summary: str, user_id: int, db: Session):
+    """
+    Simple helper function to create calendar events
+    Args:
+        start: RFC3339 datetime string (e.g., "2025-09-02T14:00:00-06:00")
+        end: RFC3339 datetime string (e.g., "2025-09-02T14:30:00-06:00") 
+        summary: Event title
+        user_id: User ID
+        db: Database session
+    """
+    try:
+        # Get user's calendar credentials
+        credentials = db.query(GoogleCalendarCredentials).filter(
+            GoogleCalendarCredentials.user_id == user_id
+        ).first()
+
+        if not credentials:
+            raise Exception("No Google Calendar credentials found")
+
+        # Create Google Calendar service
+        calendar_service = GoogleCalendarService()
+        google_creds = Credentials(
+            token=decrypt_string(credentials.token),
+            refresh_token=decrypt_string(
+                credentials.refresh_token) if credentials.refresh_token else None,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            scopes=['https://www.googleapis.com/auth/calendar.events',
+                    'https://www.googleapis.com/auth/calendar']
+        )
+
+        service = build('calendar', 'v3', credentials=google_creds)
+
+        # Create event
+        event_body = {
+            "summary": summary,
+            "start": {
+                "dateTime": start,
+                "timeZone": "America/Denver"  # Default timezone
+            },
+            "end": {
+                "dateTime": end,
+                "timeZone": "America/Denver"
+            }
+        }
+
+        # Insert event
+        created_event = service.events().insert(
+            calendarId='primary',
+            body=event_body
+        ).execute()
+
+        # Log event details (as per requirements)
+        event_id = created_event.get('id')
+        html_link = created_event.get('htmlLink')
+        logger.info(f"Calendar event created - ID: {event_id}")
+        logger.info(f"Calendar event created - Link: {html_link}")
+
+        return {
+            "success": True,
+            "event_id": event_id,
+            "html_link": html_link
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating calendar event: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/test-create-event")
+async def test_create_event(
+    start: str = Body(...),
+    end: str = Body(...),
+    summary: str = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Test route to create calendar events"""
+    result = await createCalendarEvent(start, end, summary, current_user.id, db)
+    return result
 
 
 @router.post("/schedule")

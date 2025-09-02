@@ -23,6 +23,7 @@ from app.routers.custom_scenarios import router as custom_scenarios_router
 from app.routers.sms_webhooks import router as sms_router
 from app.routers.user_sms_webhooks import router as user_sms_router
 from app.routers.business_config import router as business_config_router
+from app.routers.calendar_tools import router as calendar_tools_router
 
 
 def create_app() -> FastAPI:
@@ -80,5 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(user_sms_router, tags=["user-sms"])
     # Business Configuration: User business setup for SMS bots
     app.include_router(business_config_router, tags=["business-config"])
+    # Calendar Tools: Real-time calendar function calling
+    app.include_router(calendar_tools_router, tags=["calendar-tools"])
 
     return app
