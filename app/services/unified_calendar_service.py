@@ -91,21 +91,57 @@ class UnifiedCalendarService:
             return []
     
     async def check_availability(self, db: Session, start_time: datetime, duration_minutes: int = 30) -> Dict:
-        """Check if a specific time slot is available"""
+        """Check if a specific time slot is available with employee-based booking limits"""
         try:
             service = await self.get_user_calendar_service(db)
             end_time = start_time + timedelta(minutes=duration_minutes)
             
-            # Check availability using the existing method
-            available = await self.google_calendar_service.check_availability(
-                service, start_time, end_time
-            )
+            # Ensure timezone-aware datetime for Google Calendar API
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            
+            # Get user's business configuration for booking limits
+            from app.models import UserBusinessConfig
+            
+            business_config = db.query(UserBusinessConfig).filter(
+                UserBusinessConfig.user_id == self.user_id
+            ).first()
+            
+            # Set default values if no business config exists
+            employee_count = business_config.employee_count if business_config else 1
+            max_concurrent_bookings = business_config.max_concurrent_bookings if business_config else 1
+            booking_policy = business_config.booking_policy if business_config else "strict"
+            allow_overbooking = business_config.allow_overbooking if business_config else False
+            
+            # Get existing events in the time slot
+            existing_events = service.events().list(
+                calendarId='primary',
+                timeMin=start_time.isoformat(),
+                timeMax=end_time.isoformat(),
+                singleEvents=True
+            ).execute()
+            
+            current_bookings = len(existing_events.get('items', []))
+            
+            # Check if we can accommodate this booking
+            can_book = False
+            if booking_policy == "unlimited" or allow_overbooking:
+                can_book = True
+            elif booking_policy == "flexible" and current_bookings < max_concurrent_bookings:
+                can_book = True
+            elif booking_policy == "strict" and current_bookings == 0:
+                can_book = True
             
             return {
-                "available": available,
+                "available": can_book,
                 "start_time": start_time,
                 "end_time": end_time,
-                "duration_minutes": duration_minutes
+                "duration_minutes": duration_minutes,
+                "current_bookings": current_bookings,
+                "max_concurrent_bookings": max_concurrent_bookings,
+                "booking_policy": booking_policy
             }
             
         except Exception as e:
@@ -118,7 +154,7 @@ class UnifiedCalendarService:
             }
     
     async def create_event(self, db: Session, event_details: Dict) -> Dict:
-        """Create a calendar event"""
+        """Create a calendar event with employee-based booking limits"""
         try:
             service = await self.get_user_calendar_service(db)
             
@@ -132,12 +168,76 @@ class UnifiedCalendarService:
             if "end_time" not in event_details:
                 event_details["end_time"] = event_details["start_time"] + timedelta(minutes=30)
             
-            # Create the event
+            # Check for conflicts using employee-based booking configuration
+            from app.models import UserBusinessConfig
+            
+            business_config = db.query(UserBusinessConfig).filter(
+                UserBusinessConfig.user_id == self.user_id
+            ).first()
+            
+            # Set default values if no business config exists
+            employee_count = business_config.employee_count if business_config else 1
+            max_concurrent_bookings = business_config.max_concurrent_bookings if business_config else 1
+            booking_policy = business_config.booking_policy if business_config else "strict"
+            allow_overbooking = business_config.allow_overbooking if business_config else False
+            
+            logger.info(f"📊 SMS Booking config: {employee_count} employees, max {max_concurrent_bookings} concurrent, policy: {booking_policy}")
+            
+            # Get existing events in the time slot
+            start_time = event_details["start_time"]
+            end_time = event_details["end_time"]
+            
+            # Ensure timezone-aware datetime for Google Calendar API
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
+            
+            existing_events = service.events().list(
+                calendarId='primary',
+                timeMin=start_time.isoformat(),
+                timeMax=end_time.isoformat(),
+                singleEvents=True
+            ).execute()
+            
+            current_bookings = len(existing_events.get('items', []))
+            
+            # Check if we can accommodate this booking
+            can_book = False
+            if booking_policy == "unlimited" or allow_overbooking:
+                can_book = True
+            elif booking_policy == "flexible" and current_bookings < max_concurrent_bookings:
+                can_book = True
+            elif booking_policy == "strict" and current_bookings == 0:
+                can_book = True
+            
+            if not can_book:
+                # Get conflicting events for better error message
+                conflicting_events = []
+                for event in existing_events.get('items', []):
+                    event_summary = event.get('summary', 'Untitled Event')
+                    event_start = event.get('start', {}).get('dateTime', 'Unknown time')
+                    conflicting_events.append(f"'{event_summary}' at {event_start}")
+                
+                conflict_message = f"Time slot has {current_bookings} existing bookings (max: {max_concurrent_bookings})"
+                logger.warning(f"SMS Calendar conflict detected for {event_details['summary']}: {conflict_message}")
+                
+                return {
+                    "success": False,
+                    "error": "Time slot is not available",
+                    "conflicting_events": conflicting_events,
+                    "current_bookings": current_bookings,
+                    "max_concurrent_bookings": max_concurrent_bookings,
+                    "booking_policy": booking_policy,
+                    "message": f"Sorry, that time slot is already booked ({current_bookings}/{max_concurrent_bookings} slots filled). Conflicting events: {', '.join(conflicting_events)}"
+                }
+            
+            # Create the event if no conflicts
             result = await self.google_calendar_service.create_calendar_event(
                 service, event_details
             )
             
-            logger.info(f"✅ Created calendar event for user {self.user_id}: {result.get('id', 'Unknown ID')}")
+            logger.info(f"✅ Created SMS calendar event for user {self.user_id}: {result.get('id', 'Unknown ID')}")
             
             return {
                 "success": True,

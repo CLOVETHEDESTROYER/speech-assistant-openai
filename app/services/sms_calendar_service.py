@@ -209,7 +209,14 @@ class SMSCalendarService:
                 }
             
             # Check if it's too soon (less than 2 hours from now)
-            if requested_datetime <= datetime.now() + timedelta(hours=2):
+            # Handle timezone-aware datetime comparison
+            now = datetime.now()
+            if requested_datetime.tzinfo is not None:
+                # If requested_datetime is timezone-aware, make now timezone-aware too
+                import pytz
+                now = pytz.utc.localize(now)
+            
+            if requested_datetime <= now + timedelta(hours=2):
                 return {
                     "available": False,
                     "reason": "too_soon",
@@ -322,22 +329,39 @@ Demo Focus:
                             "calendar_service": "UnifiedCalendarService"
                         }
                     else:
-                        logger.warning(f"Failed to create calendar event: {calendar_result.get('error', 'Unknown error')}")
-                        # Fall back to simulated booking
-                        event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
-                        return {
-                            "success": True,
-                            "event_id": event_id,
-                            "datetime": requested_datetime,
-                            "title": title,
-                            "description": description,
-                            "customer_phone": customer_phone,
-                            "customer_email": customer_email,
-                            "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}",
-                            "calendar_created": False,
-                            "calendar_error": calendar_result.get('error', 'Unknown error'),
-                            "fallback": "simulated_booking"
-                        }
+                        # Check if this is a conflict (time slot not available)
+                        if calendar_result.get("error") == "Time slot is not available":
+                            logger.warning(f"SMS Calendar conflict detected: {calendar_result.get('message', 'Unknown conflict')}")
+                            
+                            # Find alternative times
+                            suggested_times = await self.find_alternative_times(requested_datetime, db_session)
+                            
+                            return {
+                                "success": False,
+                                "error": "Time slot is not available",
+                                "conflicting_events": calendar_result.get("conflicting_events", []),
+                                "current_bookings": calendar_result.get("current_bookings", 0),
+                                "max_concurrent_bookings": calendar_result.get("max_concurrent_bookings", 1),
+                                "suggested_times": suggested_times,
+                                "message": f"That time is already booked ({calendar_result.get('current_bookings', 0)}/{calendar_result.get('max_concurrent_bookings', 1)} slots filled). How about: {', '.join(suggested_times[:2]) if suggested_times else 'What other times work for you?'}"
+                            }
+                        else:
+                            # Other error - fall back to simulated booking
+                            logger.warning(f"Failed to create calendar event: {calendar_result.get('error', 'Unknown error')}")
+                            event_id = f"sms_demo_{int(requested_datetime.timestamp())}"
+                            return {
+                                "success": True,
+                                "event_id": event_id,
+                                "datetime": requested_datetime,
+                                "title": title,
+                                "description": description,
+                                "customer_phone": customer_phone,
+                                "customer_email": customer_email,
+                                "calendar_link": f"Demo scheduled for {requested_datetime.strftime('%Y-%m-%d at %I:%M %p')}",
+                                "calendar_created": False,
+                                "calendar_error": calendar_result.get('error', 'Unknown error'),
+                                "fallback": "simulated_booking"
+                            }
                         
                 except Exception as calendar_error:
                     logger.error(f"Failed to create calendar event via UnifiedCalendarService: {str(calendar_error)}")
@@ -478,3 +502,15 @@ Demo Focus:
             return f"That time isn't available. How about: {', '.join(suggestions[:2])}?"
         
         return "I couldn't book that time. When else works for you?"
+    
+    async def find_alternative_times(self, requested_datetime: datetime, db_session) -> List[str]:
+        """Find alternative available times near the requested time"""
+        try:
+            # For now, use basic business hours suggestions to avoid timezone issues
+            # TODO: Implement proper free slot finding with timezone handling
+            return self._suggest_business_hours_alternatives(requested_datetime)
+            
+        except Exception as e:
+            logger.error(f"Error finding alternative times: {str(e)}")
+            # Fall back to basic suggestions
+            return self._suggest_business_hours_alternatives(requested_datetime)
