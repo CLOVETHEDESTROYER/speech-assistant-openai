@@ -15,7 +15,6 @@ import pytz
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tools")
 
-
 class CreateCalendarEventRequest(BaseModel):
     summary: str
     start_iso: str  # RFC3339 format
@@ -28,44 +27,37 @@ class CreateCalendarEventRequest(BaseModel):
     notes: Optional[str] = None
     user_id: int  # Passed from the Realtime session
 
-
 @router.post("/createCalendarEvent")
 async def create_calendar_event_tool(
     request: CreateCalendarEventRequest,
     db: Session = Depends(get_db)
 ):
-    """Real-time calendar event creation tool called by OpenAI Realtime API with employee-based booking limits"""
+    """Real-time calendar event creation tool called by OpenAI Realtime API"""
     try:
-        logger.info(
-            f"📅 Creating calendar event for user {request.user_id}: {request.summary}")
-
+        logger.info(f"📅 Creating calendar event for user {request.user_id}: {request.summary}")
+        
         # Get user and validate calendar credentials
         user = db.query(User).filter(User.id == request.user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-
+        
         credentials = db.query(GoogleCalendarCredentials).filter(
             GoogleCalendarCredentials.user_id == request.user_id
         ).first()
-
+        
         if not credentials:
-            raise HTTPException(
-                status_code=400, detail="No Google Calendar access configured")
-
+            raise HTTPException(status_code=400, detail="No Google Calendar access configured")
+        
         # Parse and validate datetime
         try:
-            start_dt = datetime.fromisoformat(
-                request.start_iso.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(
-                request.end_iso.replace('Z', '+00:00'))
+            start_dt = datetime.fromisoformat(request.start_iso.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(request.end_iso.replace('Z', '+00:00'))
         except ValueError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid datetime format: {e}")
-
+            raise HTTPException(status_code=400, detail=f"Invalid datetime format: {e}")
+        
         if end_dt <= start_dt:
-            raise HTTPException(
-                status_code=400, detail="End time must be after start time")
-
+            raise HTTPException(status_code=400, detail="End time must be after start time")
+        
         # Validate timezone
         try:
             tz = pytz.timezone(request.timezone)
@@ -73,91 +65,59 @@ async def create_calendar_event_tool(
             # Default to America/Denver as specified in requirements
             request.timezone = "America/Denver"
             logger.warning(f"Invalid timezone, defaulting to America/Denver")
-
+        
         # Create Google Calendar service
         google_creds = Credentials(
             token=decrypt_string(credentials.token),
-            refresh_token=decrypt_string(
-                credentials.refresh_token) if credentials.refresh_token else None,
+            refresh_token=decrypt_string(credentials.refresh_token) if credentials.refresh_token else None,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-            # Minimal scope as specified
-            scopes=['https://www.googleapis.com/auth/calendar.events']
+            scopes=['https://www.googleapis.com/auth/calendar.events']  # Minimal scope as specified
         )
-
+        
         service = build('calendar', 'v3', credentials=google_creds)
-
-        # Check for conflicts using employee-based booking configuration
+        
+        # Check for conflicts using proper availability checking
         try:
             from app.services.google_calendar import GoogleCalendarService
             calendar_service = GoogleCalendarService()
-
-            # Get user's business configuration for booking limits
-            business_config = db.query(UserBusinessConfig).filter(
-                UserBusinessConfig.user_id == request.user_id
-            ).first()
-
-            # Set default values if no business config exists
-            employee_count = business_config.employee_count if business_config else 1
-            max_concurrent_bookings = business_config.max_concurrent_bookings if business_config else 1
-            booking_policy = business_config.booking_policy if business_config else "strict"
-            allow_overbooking = business_config.allow_overbooking if business_config else False
-
-            logger.info(
-                f"📊 Booking config: {employee_count} employees, max {max_concurrent_bookings} concurrent, policy: {booking_policy}")
-
-            # Get existing events in the time slot
-            existing_events = service.events().list(
-                calendarId='primary',
-                timeMin=start_dt.isoformat(),
-                timeMax=end_dt.isoformat(),
-                singleEvents=True
-            ).execute()
-
-            current_bookings = len(existing_events.get('items', []))
-
-            # Check if we can accommodate this booking
-            can_book = False
-            if booking_policy == "unlimited" or allow_overbooking:
-                can_book = True
-            elif booking_policy == "flexible" and current_bookings < max_concurrent_bookings:
-                can_book = True
-            elif booking_policy == "strict" and current_bookings == 0:
-                can_book = True
-
-            if not can_book:
+            
+            # Use the proper availability check method
+            is_available = await calendar_service.check_availability(service, start_dt, end_dt)
+            
+            if not is_available:
                 # Get conflicting events for better error message
+                conflicts = service.events().list(
+                    calendarId='primary',
+                    timeMin=start_dt.isoformat(),
+                    timeMax=end_dt.isoformat(),
+                    singleEvents=True
+                ).execute()
+                
                 conflicting_events = []
-                for event in existing_events.get('items', []):
+                for event in conflicts.get('items', []):
                     event_summary = event.get('summary', 'Untitled Event')
-                    event_start = event.get('start', {}).get(
-                        'dateTime', 'Unknown time')
-                    conflicting_events.append(
-                        f"'{event_summary}' at {event_start}")
-
-                conflict_message = f"Time slot has {current_bookings} existing bookings (max: {max_concurrent_bookings})"
-                logger.warning(
-                    f"Calendar conflict detected for {request.summary}: {conflict_message}")
-
-                # Return error response with booking policy information
+                    event_start = event.get('start', {}).get('dateTime', 'Unknown time')
+                    conflicting_events.append(f"'{event_summary}' at {event_start}")
+                
+                conflict_message = f"Time slot is not available. Conflicting events: {', '.join(conflicting_events)}"
+                logger.warning(f"Calendar conflict detected for {request.summary}: {conflict_message}")
+                
+                # Return error response instead of creating the event
                 return {
                     "status": "conflict",
                     "error": "Time slot is not available",
                     "conflicting_events": conflicting_events,
-                    "current_bookings": current_bookings,
-                    "max_concurrent_bookings": max_concurrent_bookings,
-                    "booking_policy": booking_policy,
-                    "message": f"Sorry, that time slot is already booked ({current_bookings}/{max_concurrent_bookings} slots filled). Conflicting events: {', '.join(conflicting_events)}"
+                    "message": f"Sorry, that time slot is already booked. Conflicting events: {', '.join(conflicting_events)}"
                 }
-
+                
         except Exception as e:
             logger.error(f"Error checking availability: {e}")
             # For now, allow creation if availability check fails
             # In production, you might want to be more strict
-            logger.warning(
-                "Availability check failed, proceeding with event creation")
-
+            logger.warning("Availability check failed, proceeding with event creation")
+        
         # Create event body as per specification
         description = "Set by voice agent."
         if request.customer_name:
@@ -166,7 +126,7 @@ async def create_calendar_event_tool(
             description += f"\\nPhone: {request.customer_phone}"
         if request.notes:
             description += f"\\nNotes: {request.notes}"
-
+        
         event_body = {
             "summary": request.summary,
             "description": description,
@@ -182,19 +142,19 @@ async def create_calendar_event_tool(
             "attendees": [{"email": request.attendee_email}] if request.attendee_email else [],
             "reminders": {"useDefault": True}
         }
-
+        
         # Create the event
         created_event = service.events().insert(
             calendarId='primary',
             body=event_body,
             sendUpdates='all' if request.attendee_email else 'none'
         ).execute()
-
+        
         logger.info(f"✅ Calendar event created: {created_event.get('id')}")
-
+        
         # Format response for voice confirmation
         start_formatted = start_dt.strftime("%A, %B %d at %I:%M %p")
-
+        
         return {
             "status": "created",
             "id": created_event.get('id'),
@@ -205,13 +165,12 @@ async def create_calendar_event_tool(
             "formatted_time": start_formatted,
             "message": f"Calendar event '{request.summary}' created for {start_formatted}"
         }
-
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating calendar event: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create calendar event: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create calendar event: {str(e)}")
 
 
 @router.get("/health")

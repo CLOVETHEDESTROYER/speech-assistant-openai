@@ -23,6 +23,42 @@ This application provides a complete SaaS backend that powers two different type
 - **Custom Scenarios**: Create unlimited personalized conversation flows
 - **Advanced Features**: Transcripts, analytics, calendar integration, dedicated phone numbers
 
+## 📅 Google Calendar Integration
+
+### **Real-Time Calendar Booking**
+
+The system now supports **real-time calendar event creation** during voice calls using OpenAI's function calling capability:
+
+#### **Features:**
+
+- ✅ **Conflict Detection**: Prevents double-booking by checking existing events
+- ✅ **Employee-Based Limits**: Configurable booking policies (strict, flexible, unlimited)
+- ✅ **Real-Time Integration**: AI agent can create calendar events during live calls
+- ✅ **Smart Conflict Resolution**: AI suggests alternative times when conflicts occur
+
+#### **Booking Policies:**
+
+- **Strict**: Only 1 booking per time slot (default for single employee)
+- **Flexible**: Multiple bookings allowed up to employee limit
+- **Unlimited**: No booking restrictions
+
+#### **API Endpoints:**
+
+- `POST /tools/createCalendarEvent` - Real-time event creation (called by AI)
+- `GET /booking/config` - Get current booking configuration
+- `PUT /booking/config` - Update booking policies and limits
+
+#### **Configuration:**
+
+```json
+{
+  "employee_count": 1,
+  "max_concurrent_bookings": 1,
+  "booking_policy": "strict",
+  "allow_overbooking": false
+}
+```
+
 ---
 
 ## 🏗️ Architecture Decision: Single Backend

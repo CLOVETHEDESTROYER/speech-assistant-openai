@@ -82,8 +82,6 @@ def create_app() -> FastAPI:
     # Business Configuration: User business setup for SMS bots
     app.include_router(business_config_router, tags=["business-config"])
     # Calendar Tools: Real-time calendar function calling
-    app.include_router(calendar_tools_router, tags=["calendar-tools"])
-    # Booking Configuration: Employee-based booking limits
-    app.include_router(booking_config.router, tags=["booking-config"])
+    app.include_router(calendar_tools_router, tags=["calendar-tools"])n    # Booking Configuration: Employee-based booking limitsn    app.include_router(booking_config.router, tags=["booking-config"])
 
     return app

@@ -575,6 +575,12 @@ class UserBusinessConfig(Base):
     customer_satisfaction = Column(Float, default=0.0)  # 0-5 rating
     conversion_rate = Column(Float, default=0.0)  # percentage
 
+    # Employee-Based Booking Configuration
+    employee_count = Column(Integer, default=1)
+    max_concurrent_bookings = Column(Integer, default=1)
+    booking_policy = Column(String, default="strict")  # strict, flexible, unlimited
+    allow_overbooking = Column(Boolean, default=False)
+
     # Feature Flags
     advanced_analytics = Column(Boolean, default=False)
     white_label_enabled = Column(Boolean, default=False)

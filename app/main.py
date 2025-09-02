@@ -1042,9 +1042,32 @@ async def send_to_twilio(ws_manager, openai_ws, shared_state, conversation_state
 
                     if function_name == "createCalendarEvent":
                         try:
-                            # Parse function arguments
-                            args = json.loads(arguments) if isinstance(
-                                arguments, str) else arguments
+                            # Parse function arguments with better error handling
+                            logger.info(
+                                f"📋 Raw arguments received: {arguments}")
+                            if isinstance(arguments, str):
+                                try:
+                                    args = json.loads(arguments)
+                                except json.JSONDecodeError as json_err:
+                                    logger.error(
+                                        f"❌ JSON decode error: {json_err}")
+                                    logger.error(
+                                        f"❌ Malformed JSON: {arguments}")
+                                    # Try to fix common JSON issues
+                                    # Replace single quotes with double quotes
+                                    fixed_args = arguments.replace("'", '"')
+                                    try:
+                                        args = json.loads(fixed_args)
+                                        logger.info(
+                                            "✅ Fixed JSON by replacing single quotes")
+                                    except:
+                                        # If still failing, create a basic structure
+                                        args = {"summary": "Calendar Event",
+                                                "start_iso": "", "end_iso": ""}
+                                        logger.warning(
+                                            "⚠️ Using fallback arguments due to JSON parse failure")
+                            else:
+                                args = arguments
 
                             # Add user_id from shared_state
                             scenario = shared_state.get("scenario", {})
