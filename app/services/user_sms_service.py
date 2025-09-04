@@ -506,6 +506,11 @@ Respond as {business_config.bot_name} would, representing {business_config.compa
 
                 db.commit()
                 return {"response": response, "calendar_handled": True}
+            else:
+                # No specific time provided, but scheduling keywords detected
+                # Ask for specific time preferences
+                response = "I'd be happy to help you schedule something! What time works best for you? (e.g., 'tomorrow 2pm', 'Friday morning', or 'next week Tuesday')"
+                return {"response": response, "calendar_handled": True}
 
             else:
                 # Couldn't parse time - ask for clarification
