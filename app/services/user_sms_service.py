@@ -509,16 +509,12 @@ Respond as {business_config.bot_name} would, representing {business_config.compa
             else:
                 # No specific time provided, but scheduling keywords detected
                 # Ask for specific time preferences
-                response = "I'd be happy to help you schedule something! What time works best for you? (e.g., 'tomorrow 2pm', 'Friday morning', or 'next week Tuesday')"
-                return {"response": response, "calendar_handled": True}
-
-            else:
-                # Couldn't parse time - ask for clarification
                 if any(word in message_lower for word in ["schedule", "book", "appointment"]):
-                    return {
-                        "response": "I'd be happy to help schedule that! What day and time works best for you? (e.g., 'tomorrow at 2pm' or 'Friday morning')",
-                        "calendar_handled": True
-                    }
+                    response = "I'd be happy to help schedule that! What day and time works best for you? (e.g., 'tomorrow at 2pm' or 'Friday morning')"
+                    return {"response": response, "calendar_handled": True}
+                else:
+                    response = "I'd be happy to help you schedule something! What time works best for you? (e.g., 'tomorrow 2pm', 'Friday morning', or 'next week Tuesday')"
+                    return {"response": response, "calendar_handled": True}
 
             return None  # Let regular AI handle it
 
