@@ -1,0 +1,189 @@
+{
+  "test_timestamp": "2025-09-06T00:29:02.242443",
+  "total_tests": 17,
+  "passed_tests": 15,
+  "failed_tests": 2,
+  "test_results": [
+    {
+      "test_name": "Configuration: TWILIO_ACCOUNT_SID",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "TWILIO_ACCOUNT_SID configured: True",
+      "details": {}
+    },
+    {
+      "test_name": "Configuration: TWILIO_AUTH_TOKEN",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "TWILIO_AUTH_TOKEN configured: True",
+      "details": {}
+    },
+    {
+      "test_name": "Configuration: TWILIO_VOICE_INTELLIGENCE_SID",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "TWILIO_VOICE_INTELLIGENCE_SID configured: True",
+      "details": {}
+    },
+    {
+      "test_name": "Twilio Client Initialization",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Twilio client initialized successfully",
+      "details": {}
+    },
+    {
+      "test_name": "Twilio Account Connection",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Connected to account: My first Twilio account",
+      "details": {}
+    },
+    {
+      "test_name": "Intelligence Services Router",
+      "status": "\u274c FAIL",
+      "passed": false,
+      "message": "Failed to import intelligence services router: No \"request\" or \"websocket\" argument on function \"<function delete_intelligence_service at 0x117a88ae0>\"",
+      "details": {}
+    },
+    {
+      "test_name": "Conversational Intelligence Router",
+      "status": "\u274c FAIL",
+      "passed": false,
+      "message": "Failed to import conversational intelligence router: No \"request\" or \"websocket\" argument on function \"<function get_conversation_summary at 0x117ab99e0>\"",
+      "details": {}
+    },
+    {
+      "test_name": "Twilio Transcripts Router",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Twilio transcripts router imported successfully",
+      "details": {}
+    },
+    {
+      "test_name": "TwilioIntelligenceService Initialization",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Service initialized successfully",
+      "details": {}
+    },
+    {
+      "test_name": "Voice Intelligence SID Configuration",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Voice Intelligence SID configured: True",
+      "details": {}
+    },
+    {
+      "test_name": "ConversationalIntelligenceService Initialization",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Service initialized successfully",
+      "details": {}
+    },
+    {
+      "test_name": "Sentiment Analysis",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Sentiment analysis working: True",
+      "details": {
+        "sentiment_result": {
+          "overall_sentiment": "positive",
+          "sentiment_scores": {
+            "positive": 2,
+            "negative": 1,
+            "neutral": 0
+          },
+          "sentiment_percentages": {
+            "positive": 66.67,
+            "negative": 33.33,
+            "neutral": 0.0
+          },
+          "average_confidence": 0.8
+        }
+      }
+    },
+    {
+      "test_name": "Topic Extraction",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Topic extraction working: True",
+      "details": {
+        "topic_result": {
+          "detected_topics": [
+            "product"
+          ],
+          "topic_counts": {
+            "appointment": 0,
+            "billing": 0,
+            "support": 0,
+            "product": 2,
+            "complaint": 0,
+            "compliment": 0,
+            "cancellation": 0
+          },
+          "topic_examples": {
+            "product": [
+              "This is a great product!",
+              "I love this service."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "test_name": "Conversation Insights",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Insights generation working: True",
+      "details": {
+        "insights_result": {
+          "conversation_metrics": {
+            "total_duration_seconds": 0,
+            "total_sentences": 3,
+            "average_confidence": 0.8,
+            "high_confidence_percentage": 33.33,
+            "low_confidence_percentage": 0.0
+          },
+          "speaker_analysis": {
+            "primary_speaker": 0,
+            "speaker_talk_time": {
+              "0": 0
+            },
+            "speaker_percentages": {
+              "0": 0
+            },
+            "speaker_sentence_counts": {
+              "0": 3
+            }
+          },
+          "conversation_quality": {
+            "transcription_quality": "medium",
+            "conversation_balance": "one-sided"
+          }
+        }
+      }
+    },
+    {
+      "test_name": "Mock Sentiment Analysis",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Sentiment analysis completed: positive",
+      "details": {}
+    },
+    {
+      "test_name": "Mock Topic Extraction",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Topics detected: ['appointment', 'support']",
+      "details": {}
+    },
+    {
+      "test_name": "Mock Insights Generation",
+      "status": "\u2705 PASS",
+      "passed": true,
+      "message": "Insights generated: 3 metrics",
+      "details": {}
+    }
+  ]
+}

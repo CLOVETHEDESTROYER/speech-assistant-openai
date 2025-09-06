@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body, Request
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.auth import get_current_user
@@ -7,6 +7,8 @@ from app.utils.twilio_helpers import with_twilio_retry
 from app.limiter import rate_limit
 from app.models import User
 from app.services.twilio_client import get_twilio_client
+from app import config
+from twilio.base.exceptions import TwilioException
 
 router = APIRouter()
 
@@ -116,9 +118,75 @@ async def create_transcript_with_media_url(
 
 
 @router.post("/twilio-transcripts/create-with-participants")
+@rate_limit("10/minute")
 @with_twilio_retry(max_retries=3)
 async def create_transcript_with_participants(
-    current_user: User = Depends(get_current_user),
+    request: Request,
+    recording_sid: str = Body(..., description="Twilio recording SID (starts with 'RE')"),
+    participants: List[Dict[str, Any]] = Body(..., description="List of participants with channel_participant and role"),
+    language_code: str = Body("en-US", description="Language code for transcription"),
+    redaction: bool = Body(True, description="Enable PII redaction"),
+    current_user: User = Depends(get_current_user)
 ):
-    # Placeholder to be filled with actual implementation moved from main
-    return {"status": "not_implemented"}
+    """
+    Create a transcript with custom participants for advanced conversation analysis.
+    
+    Participants should be in the format:
+    [
+        {
+            "channel_participant": "agent",
+            "role": "customer"
+        },
+        {
+            "channel_participant": "customer", 
+            "role": "customer"
+        }
+    ]
+    """
+    try:
+        # Validate the recording_sid format
+        if not recording_sid or not recording_sid.startswith("RE"):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid recording_sid format. Must start with 'RE'"
+            )
+
+        # Validate participants structure
+        for i, participant in enumerate(participants):
+            if "channel_participant" not in participant or "role" not in participant:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Participant {i} must have 'channel_participant' and 'role' fields"
+                )
+
+        # Create the transcript with participants
+        transcript = get_twilio_client().intelligence.v2.transcripts.create(
+            service_sid=config.TWILIO_VOICE_INTELLIGENCE_SID,
+            channel={
+                "media_properties": {
+                    "source_sid": recording_sid
+                },
+                "participants": participants
+            },
+            language_code=language_code,
+            redaction=redaction
+        )
+
+        return {
+            "status": "success",
+            "transcript_sid": transcript.sid,
+            "message": "Transcript creation initiated with custom participants",
+            "participants_count": len(participants),
+            "recording_sid": recording_sid
+        }
+
+    except TwilioException as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Twilio API error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )

@@ -24,6 +24,8 @@ from app.routers.sms_webhooks import router as sms_router
 from app.routers.user_sms_webhooks import router as user_sms_router
 from app.routers.business_config import router as business_config_router
 from app.routers.calendar_tools import router as calendar_tools_router
+from app.routers.twilio_intelligence_services import router as intelligence_services_router
+from app.routers.conversational_intelligence import router as conversational_intelligence_router
 
 
 def create_app() -> FastAPI:
@@ -85,5 +87,9 @@ def create_app() -> FastAPI:
     app.include_router(calendar_tools_router, tags=["calendar-tools"])
     # Booking Configuration: Employee-based booking limits
     app.include_router(booking_config.router, tags=["booking-config"])
+    # Twilio Intelligence Services: Service management and operators
+    app.include_router(intelligence_services_router, tags=["intelligence-services"])
+    # Conversational Intelligence: Advanced conversation analysis
+    app.include_router(conversational_intelligence_router, tags=["conversational-intelligence"])
 
     return app
