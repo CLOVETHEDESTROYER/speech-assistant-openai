@@ -27,7 +27,7 @@ def safe_log_twilio_sid(sid: str) -> str:
 @router.post("/twilio-transcripts/webhook-callback")
 async def handle_transcript_webhook(request: Request, db: Session = Depends(get_db)):
     """
-    Enhanced webhook to handle Twilio Voice Intelligence transcripts
+    Enhanced webhook to handle Twilio Conversational Intelligence transcripts
     and process them for automatic calendar creation
     """
     try:
@@ -47,22 +47,25 @@ async def handle_transcript_webhook(request: Request, db: Session = Depends(get_
                 raise HTTPException(
                     status_code=401, detail="Invalid signature")
 
-        # Parse webhook payload
-        payload = await request.json()
+        # Parse webhook payload (Twilio sends form-encoded data, not JSON)
+        form_data = await request.form()
+        payload = dict(form_data)
         logger.info(
-            f"📝 Transcript webhook received: {safe_log_request_data(payload)}")
+            f"📝 Conversational Intelligence webhook received: {safe_log_request_data(payload)}")
 
-        # Extract transcript information
-        transcript_sid = payload.get('transcript_sid') or payload.get('sid')
-        status = payload.get('status')
-        event_type = payload.get('event_type')
+        # Extract transcript information using correct field names
+        transcript_sid = payload.get(
+            'TranscriptSid') or payload.get('transcript_sid')
+        event_type = payload.get('EventType') or payload.get('event_type')
+        service_sid = payload.get('ServiceSid') or payload.get('service_sid')
+        call_sid = payload.get('CallSid') or payload.get('call_sid')
 
         if not transcript_sid:
             logger.error("No transcript SID provided in webhook")
             return {"status": "error", "message": "No transcript SID provided"}
 
-        # Process completed transcripts
-        if status == "completed" or event_type == "voice_intelligence_transcript_available":
+        # Handle different event types
+        if event_type == 'voice_intelligence_transcript_available':
             logger.info(
                 f"📋 Processing completed transcript: {safe_log_twilio_sid(transcript_sid)}")
 
@@ -92,7 +95,7 @@ async def handle_transcript_webhook(request: Request, db: Session = Depends(get_
                     f"📄 Extracted conversation text: {len(full_conversation)} characters")
 
                 # Find the associated conversation record
-                conversation = await find_conversation_for_transcript(db, transcript_sid, transcript)
+                conversation = await find_conversation_for_transcript(db, transcript_sid, transcript, call_sid)
 
                 if not conversation:
                     logger.warning(
@@ -109,7 +112,7 @@ async def handle_transcript_webhook(request: Request, db: Session = Depends(get_
 
                     processor = PostCallProcessor()
                     calendar_result = await processor.process_call_end(
-                        call_sid=conversation.call_sid or "unknown",
+                        call_sid=conversation.call_sid or call_sid or "unknown",
                         user_id=conversation.user_id,
                         scenario_id=conversation.scenario or "default",
                         conversation_content=full_conversation
@@ -151,10 +154,14 @@ async def handle_transcript_webhook(request: Request, db: Session = Depends(get_
                     f"Error processing transcript {transcript_sid}: {e}")
                 return {"status": "error", "message": f"Error processing transcript: {str(e)}"}
 
+        elif event_type == 'voice_intelligence_transcript_failed':
+            logger.warning(
+                f"❌ Transcript failed: {safe_log_twilio_sid(transcript_sid)}")
+            return {"status": "error", "message": "Transcript processing failed"}
+
         else:
-            logger.info(
-                f"Transcript {transcript_sid} status: {status} - not ready for processing")
-            return {"status": "success", "message": f"Transcript status: {status}"}
+            logger.info(f"Event type {event_type} - not processing")
+            return {"status": "success", "message": f"Event processed: {event_type}"}
 
     except Exception as e:
         logger.error(f"Error in transcript webhook: {e}")
@@ -262,13 +269,22 @@ async def handle_recording_callback(request: Request, db: Session = Depends(get_
         return {"status": "error", "message": str(e)}
 
 
-async def find_conversation_for_transcript(db: Session, transcript_sid: str, transcript_data) -> Optional[Conversation]:
+async def find_conversation_for_transcript(db: Session, transcript_sid: str, transcript_data, call_sid: str = None) -> Optional[Conversation]:
     """
     Find the conversation record associated with this transcript
     """
     try:
-        # Strategy: Look for the most recent completed conversation that doesn't have a transcript yet
-        # In production, you might want more robust linking using call_sid or recording_sid
+        # First try to find by call_sid if provided
+        if call_sid:
+            conversation = db.query(Conversation).filter(
+                Conversation.call_sid == call_sid
+            ).first()
+            if conversation:
+                logger.info(
+                    f"Found conversation {conversation.id} by call_sid: {safe_log_twilio_sid(call_sid)}")
+                return conversation
+
+        # Fallback: Look for the most recent completed conversation that doesn't have a transcript yet
         conversation = db.query(Conversation).filter(
             Conversation.transcript.is_(None),
             Conversation.status.in_(["completed", "in-progress"])
