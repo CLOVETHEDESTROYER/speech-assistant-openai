@@ -129,7 +129,7 @@ async def handle_transcript_webhook(request: Request, db: Session = Depends(get_
                         return {
                             "status": "success",
                             "transcript_processed": True,
-                            "calendar_events_created": calendar_result["calendar_events_created"],
+                            "calendar_events_created": calendar_result["calendar_event_created"],
                             "message": "Transcript processed and calendar events created"
                         }
                     else:
