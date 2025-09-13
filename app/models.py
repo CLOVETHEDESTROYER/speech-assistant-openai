@@ -120,6 +120,12 @@ class User(Base):
     conversation_transcripts = relationship(
         "ConversationTranscript", back_populates="user")
 
+    # Stripe relationships
+    subscription = relationship(
+        "UserSubscription", back_populates="user", uselist=False)
+    payment_records = relationship("PaymentRecord", back_populates="user")
+    usage_records = relationship("UsageRecord", back_populates="user")
+
 
 class CallSchedule(Base):
     __tablename__ = "call_schedules"
@@ -578,7 +584,8 @@ class UserBusinessConfig(Base):
     # Employee-Based Booking Configuration
     employee_count = Column(Integer, default=1)
     max_concurrent_bookings = Column(Integer, default=1)
-    booking_policy = Column(String, default="strict")  # strict, flexible, unlimited
+    # strict, flexible, unlimited
+    booking_policy = Column(String, default="strict")
     allow_overbooking = Column(Boolean, default=False)
 
     # Feature Flags
@@ -633,3 +640,105 @@ class SMSUsageLog(Base):
     business_config = relationship(
         "UserBusinessConfig", back_populates="sms_usage_logs")
     sms_conversation = relationship("SMSConversation")
+
+
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    stripe_customer_id = Column(String, nullable=False, index=True)
+    stripe_subscription_id = Column(
+        String, nullable=False, unique=True, index=True)
+    plan_name = Column(String, nullable=False)  # "basic", "pro", "enterprise"
+    plan_type = Column(String, nullable=False)  # "monthly", "yearly", "usage"
+    # "active", "canceled", "past_due", "incomplete"
+    status = Column(String, nullable=False)
+    current_period_start = Column(DateTime)
+    current_period_end = Column(DateTime)
+    cancel_at_period_end = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="subscription")
+    payment_records = relationship(
+        "PaymentRecord", back_populates="subscription")
+    usage_records = relationship("UsageRecord", back_populates="subscription")
+
+
+class PaymentRecord(Base):
+    __tablename__ = "payment_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subscription_id = Column(Integer, ForeignKey(
+        "user_subscriptions.id"), nullable=True)
+    stripe_payment_intent_id = Column(
+        String, nullable=False, unique=True, index=True)
+    stripe_invoice_id = Column(String, nullable=True, index=True)
+    amount = Column(Integer, nullable=False)  # Amount in cents
+    currency = Column(String, default="usd")
+    # "succeeded", "failed", "pending", "refunded"
+    status = Column(String, nullable=False)
+    # "subscription", "usage", "one_time"
+    payment_type = Column(String, nullable=False)
+    description = Column(String)
+    payment_metadata = Column(JSON)  # Store additional payment data
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="payment_records")
+    subscription = relationship(
+        "UserSubscription", back_populates="payment_records")
+
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subscription_id = Column(Integer, ForeignKey(
+        "user_subscriptions.id"), nullable=True)
+    # "transcription", "voice_call", "sms", "custom_scenario"
+    service_type = Column(String, nullable=False)
+    # Minutes, calls, messages, etc.
+    usage_amount = Column(Integer, nullable=False)
+    # "minutes", "calls", "messages", "characters"
+    usage_unit = Column(String, nullable=False)
+    cost_per_unit = Column(Integer, default=0)  # Cost in cents per unit
+    total_cost = Column(Integer, default=0)  # Total cost in cents
+    billing_period = Column(String)  # "2024-01", for monthly aggregation
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+    billed_at = Column(DateTime, nullable=True)
+
+    # Reference to the actual resource used
+    conversation_id = Column(Integer, ForeignKey(
+        "conversations.id"), nullable=True)
+    transcript_id = Column(Integer, ForeignKey(
+        "transcript_records.id"), nullable=True)
+    sms_conversation_id = Column(Integer, ForeignKey(
+        "sms_conversations.id"), nullable=True)
+
+    # Relationships
+    user = relationship("User", back_populates="usage_records")
+    subscription = relationship(
+        "UserSubscription", back_populates="usage_records")
+    conversation = relationship("Conversation")
+    transcript = relationship("TranscriptRecord")
+    sms_conversation = relationship("SMSConversation")
+
+
+class StripeWebhookEvent(Base):
+    __tablename__ = "stripe_webhook_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stripe_event_id = Column(String, nullable=False, unique=True, index=True)
+    # "invoice.payment_succeeded", etc.
+    event_type = Column(String, nullable=False)
+    processed = Column(Boolean, default=False)
+    processing_error = Column(String, nullable=True)
+    event_data = Column(JSON)  # Store the full Stripe event
+    created_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)

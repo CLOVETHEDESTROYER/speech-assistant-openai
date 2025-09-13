@@ -116,3 +116,15 @@ CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "true").lower() == "true"
 # Rate Limiting
 ENABLE_RATE_LIMITING = os.getenv(
     "ENABLE_RATE_LIMITING", "true").lower() == "true"
+
+# Stripe Configuration
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+# Validate Stripe configuration in production
+if os.getenv('DEVELOPMENT_MODE', 'false').lower() != 'true':
+    if not STRIPE_SECRET_KEY:
+        raise ValueError("STRIPE_SECRET_KEY environment variable must be set for production")
+    if not STRIPE_WEBHOOK_SECRET:
+        raise ValueError("STRIPE_WEBHOOK_SECRET environment variable must be set for production")
