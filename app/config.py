@@ -128,3 +128,10 @@ if os.getenv('DEVELOPMENT_MODE', 'false').lower() != 'true':
         raise ValueError("STRIPE_SECRET_KEY environment variable must be set for production")
     if not STRIPE_WEBHOOK_SECRET:
         raise ValueError("STRIPE_WEBHOOK_SECRET environment variable must be set for production")
+
+# App Store (IAP) Configuration
+APP_STORE_SHARED_SECRET = os.getenv("APP_STORE_SHARED_SECRET")
+APP_STORE_PRODUCT_ID = os.getenv("APP_STORE_PRODUCT_ID", "com.aifriendchat.premium.weekly.v2")
+APP_STORE_SUBSCRIPTION_TITLE = os.getenv("APP_STORE_SUBSCRIPTION_TITLE", "AI Friend Chat Premium Weekly")
+APP_STORE_SUBSCRIPTION_DURATION = os.getenv("APP_STORE_SUBSCRIPTION_DURATION", "1 week")
+APP_STORE_SUBSCRIPTION_GROUP = os.getenv("APP_STORE_SUBSCRIPTION_GROUP", "Premium Features")

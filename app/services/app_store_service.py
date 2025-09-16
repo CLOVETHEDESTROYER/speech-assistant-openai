@@ -20,8 +20,11 @@ class AppStoreService:
     PRODUCTION_URL = "https://buy.itunes.apple.com/verifyReceipt"
 
     @staticmethod
-    def validate_receipt(receipt_data: str, is_sandbox: bool = False) -> Dict:
-        """Validate App Store receipt with Apple's servers"""
+    def validate_receipt(receipt_data: str, is_sandbox: bool = False, retries: int = 0) -> Dict:
+        """Validate App Store receipt with Apple's servers with retry cap to avoid loops"""
+        if retries > 1:
+            raise ValueError("Receipt validation retry limit exceeded")
+
         url = AppStoreService.SANDBOX_URL if is_sandbox else AppStoreService.PRODUCTION_URL
         shared_secret = os.getenv("APP_STORE_SHARED_SECRET")
 
@@ -36,7 +39,7 @@ class AppStoreService:
         }
 
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=15)
             response.raise_for_status()
             result = response.json()
 
@@ -49,12 +52,12 @@ class AppStoreService:
                 # Sandbox receipt sent to production
                 logger.warning(
                     "Sandbox receipt sent to production, retrying with sandbox")
-                return AppStoreService.validate_receipt(receipt_data, is_sandbox=True)
+                return AppStoreService.validate_receipt(receipt_data, is_sandbox=True, retries=retries + 1)
             elif result.get("status") == 21008:
                 # Production receipt sent to sandbox
                 logger.warning(
                     "Production receipt sent to sandbox, retrying with production")
-                return AppStoreService.validate_receipt(receipt_data, is_sandbox=False)
+                return AppStoreService.validate_receipt(receipt_data, is_sandbox=False, retries=retries + 1)
             else:
                 logger.error(f"App Store validation failed: {result}")
                 raise ValueError(

@@ -11,7 +11,7 @@ from app import config
 
 # Existing routers
 from app.auth import router as auth_router
-from app.routes import google_calendar
+from app.routes import google_calendar, legal
 from app.routes.mobile_app import router as mobile_router
 from app.routes.onboarding import router as onboarding_router
 
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(auth_router, prefix="/auth", tags=["auth"])
     app.include_router(google_calendar.router, tags=["google-calendar"])
+    app.include_router(legal.router, tags=["legal"])
     app.include_router(mobile_router, tags=["mobile"])
     app.include_router(onboarding_router, tags=["onboarding"])
     app.include_router(twilio_transcripts.router, tags=["twilio"])

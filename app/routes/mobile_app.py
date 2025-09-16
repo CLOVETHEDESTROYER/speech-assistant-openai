@@ -60,7 +60,7 @@ class SubscriptionUpgradeRequest(BaseModel):
 class AppStorePurchaseRequest(BaseModel):
     receipt_data: str  # Base64 encoded receipt data
     is_sandbox: bool = False
-    product_id: str  # e.g., "speech_assistant_basic_weekly"
+    product_id: str  # e.g., "com.aifriendchat.premium.weekly.v2"
 
 
 class AppStoreWebhookRequest(BaseModel):
@@ -118,6 +118,21 @@ async def get_mobile_usage_stats(
         logger.error(f"Error getting mobile usage stats: {str(e)}")
         raise HTTPException(
             status_code=500, detail="Unable to fetch usage statistics")
+
+
+@router.get("/subscription-metadata")
+async def subscription_metadata():
+    """Provide subscription info for iOS Settings screen and App Store requirements"""
+    return {
+        "title": config.APP_STORE_SUBSCRIPTION_TITLE,
+        "duration": config.APP_STORE_SUBSCRIPTION_DURATION,
+        "group_name": config.APP_STORE_SUBSCRIPTION_GROUP,
+        "product_id": config.APP_STORE_PRODUCT_ID,
+        "privacy_url": f"{config.PUBLIC_URL}/legal/privacy",
+        "terms_url": f"{config.PUBLIC_URL}/legal/terms",
+        "auto_renew": True,
+        "manage_instructions": "Settings > Apple ID > Subscriptions"
+    }
 
 
 @router.post("/check-call-permission")
@@ -510,8 +525,9 @@ async def purchase_subscription(
         subscription_info = AppStoreService.extract_subscription_info(
             receipt_validation)
 
-        # Validate product ID
-        if subscription_info.get("product_id") != purchase_request.product_id:
+        # Validate product ID against configured expected product
+        expected_product = config.APP_STORE_PRODUCT_ID
+        if subscription_info.get("product_id") != expected_product:
             raise HTTPException(
                 status_code=400,
                 detail="Product ID mismatch"
@@ -529,24 +545,13 @@ async def purchase_subscription(
                 detail="This transaction has already been processed"
             )
 
-        # Process based on product type
-        if purchase_request.product_id == "speech_assistant_basic_weekly":
-            success = UsageService.upgrade_to_basic_subscription(
-                current_user.id, subscription_info, db
-            )
-        elif purchase_request.product_id == "speech_assistant_premium_monthly":
-            success = UsageService.upgrade_to_premium_subscription(
-                current_user.id, subscription_info, db
-            )
-        elif purchase_request.product_id == "speech_assistant_addon_calls":
-            success = UsageService.purchase_addon_calls(
-                current_user.id, subscription_info, db
-            )
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid product ID"
-            )
+        # Process single mobile weekly product
+        success = UsageService.upgrade_subscription_with_receipt(
+            current_user.id,
+            SubscriptionTier.MOBILE_WEEKLY,
+            subscription_info,
+            db
+        )
 
         if not success:
             raise HTTPException(
