@@ -65,10 +65,7 @@ from app.middleware.security_headers import add_security_headers
 from app.utils.log_helpers import safe_log_request_data, sanitize_text
 from app.utils.crypto import decrypt_string
 import logging.handlers
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.middleware import SlowAPIMiddleware
-from app.limiter import limiter, rate_limit
+from app.limiter import rate_limit
 from app.utils.websocket import websocket_manager
 from app.utils.twilio_helpers import (
     with_twilio_retry,
@@ -318,7 +315,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": "Validation error", "errors": errors}
     )
 
-app.add_middleware(SlowAPIMiddleware)
+# SlowAPIMiddleware removed - using custom rate limiting instead
 
 # Create database tables (do this only once)
 Base.metadata.create_all(bind=engine)
