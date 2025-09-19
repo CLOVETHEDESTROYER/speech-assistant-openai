@@ -1,12 +1,9 @@
 from fastapi import FastAPI
 import os
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
 
 from app.logging_config import configure_logging
 from app.middleware.security_headers import add_security_headers
-from app.limiter import limiter
 from app import config
 
 # Existing routers
@@ -45,8 +42,7 @@ def create_app() -> FastAPI:
                        "X-Captcha"],  # added X-Captcha
     )
 
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # Rate limiting is now handled by our custom decorator
 
     if config.ENABLE_SECURITY_HEADERS:
         add_security_headers(
@@ -91,8 +87,10 @@ def create_app() -> FastAPI:
     # Booking Configuration: Employee-based booking limits
     app.include_router(booking_config.router, tags=["booking-config"])
     # Twilio Intelligence Services: Service management and operators
-    app.include_router(intelligence_services_router, tags=["intelligence-services"])
+    app.include_router(intelligence_services_router,
+                       tags=["intelligence-services"])
     # Conversational Intelligence: Advanced conversation analysis
-    app.include_router(conversational_intelligence_router, tags=["conversational-intelligence"])
+    app.include_router(conversational_intelligence_router,
+                       tags=["conversational-intelligence"])
 
     return app

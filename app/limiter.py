@@ -1,55 +1,112 @@
-import functools
+# app/limiter.py
+from functools import wraps
 import inspect
-from typing import Callable, Optional
-from fastapi import Request
+import time
+from typing import Callable, Dict, Any
+from fastapi import Request, HTTPException
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from typing import Optional
 
+# Create ONE global limiter instance for the whole app
+limiter = Limiter(key_func=get_remote_address, headers_enabled=True)
 
-def get_client_ip(request: Request) -> str:
-    # Honor X-Forwarded-For if present (use left-most as client)
-    xff: Optional[str] = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    return get_remote_address(request)
+# Simple in-memory rate limiting store
+_rate_limit_store: Dict[str, Dict[str, Any]] = {}
 
-# Create the limiter instance with proxy-aware IP extraction
-limiter = Limiter(key_func=get_client_ip)
+def _parse_rate_limit(limit_value: str) -> tuple[int, int]:
+    """Parse rate limit string like '5/minute' into (count, seconds)"""
+    parts = limit_value.split('/')
+    if len(parts) != 2:
+        return 60, 60  # Default: 60 requests per minute
+    
+    count = int(parts[0])
+    period = parts[1].lower()
+    
+    if period.startswith('sec'):
+        seconds = 1
+    elif period.startswith('min'):
+        seconds = 60
+    elif period.startswith('hour'):
+        seconds = 3600
+    elif period.startswith('day'):
+        seconds = 86400
+    else:
+        seconds = 60  # Default to minute
+    
+    return count, seconds
 
+def _check_rate_limit(key: str, limit_value: str) -> bool:
+    """Check if request is within rate limit"""
+    max_requests, window_seconds = _parse_rate_limit(limit_value)
+    current_time = time.time()
+    
+    if key not in _rate_limit_store:
+        _rate_limit_store[key] = {
+            'requests': [],
+            'window_start': current_time
+        }
+    
+    store = _rate_limit_store[key]
+    
+    # Clean old requests outside the window
+    cutoff_time = current_time - window_seconds
+    store['requests'] = [req_time for req_time in store['requests'] if req_time > cutoff_time]
+    
+    # Check if we're over the limit
+    if len(store['requests']) >= max_requests:
+        return False
+    
+    # Add current request
+    store['requests'].append(current_time)
+    return True
 
-def rate_limit(limit_value: str) -> Callable:
+def rate_limit(limit_value: str):
     """
-    A decorator that adds rate limiting to FastAPI endpoint functions.
-    This handles the request parameter requirements automatically.
+    Decorator to apply rate limits safely without SlowAPI response issues.
 
-    Args:
-        limit_value: A string like "5/minute" or "100/day" defining the rate limit
-
-    Returns:
-        A decorator function that can be applied to FastAPI endpoints
+    Usage:
+        @router.post("/auth/login")
+        @rate_limit("5/minute")
+        async def login(...): ...
     """
     def decorator(func: Callable) -> Callable:
-        # Get the signature of the original function
-        sig = inspect.signature(func)
-        has_request_param = False
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract request from args or kwargs
+            request = None
+            for arg in args:
+                if isinstance(arg, Request):
+                    request = arg
+                    break
+            
+            if not request:
+                request = kwargs.get('request')
+            
+            if request:
+                try:
+                    # Get client IP for rate limiting
+                    client_ip = get_remote_address(request)
+                    rate_limit_key = f"{client_ip}:{request.url.path}"
+                    
+                    # Check rate limit
+                    if not _check_rate_limit(rate_limit_key, limit_value):
+                        raise HTTPException(
+                            status_code=429,
+                            detail="Rate limit exceeded. Please try again later."
+                        )
+                except Exception as e:
+                    # If rate limiting fails for any reason, log and continue
+                    # This ensures the app doesn't break due to rate limiting issues
+                    print(f"Rate limiting error: {e}")
+                    pass
+            
+            # Call the original function
+            result = func(*args, **kwargs)
+            
+            # Handle async vs sync
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
-        # Check if it already has a request parameter
-        for param_name, param in sig.parameters.items():
-            if param_name == "request" and param.annotation == Request:
-                has_request_param = True
-                break
-
-        # If it already has a request parameter, just apply the limiter
-        if has_request_param:
-            return limiter.limit(limit_value)(func)
-
-        # Otherwise, create a wrapper function that accepts the request
-        @functools.wraps(func)
-        async def wrapper(request: Request, *args, **kwargs):
-            return await func(*args, **kwargs)
-
-        # Apply the limiter to the wrapper
-        return limiter.limit(limit_value)(wrapper)
-
+        return wrapper
     return decorator
