@@ -425,16 +425,31 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+class NameUpdateRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str):
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("name must be a non-empty string")
+        # Trim excessive whitespace
+        return v.strip()
+
+
 # Add this endpoint for updating the user name
 @app.post("/update-user-name")
 async def update_user_name(
-    name: str = Body(...),  # Get name from request body
-    current_user: User = Depends(get_current_user),  # Keep authentication
+    payload: NameUpdateRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    USER_CONFIG["name"] = name
-    logger.info(f"Updated user name to: {name}")
-    return {"message": f"User name updated to: {name}"}
+    try:
+        USER_CONFIG["name"] = payload.name
+        logger.info(f"Updated user name to: {payload.name}")
+        return {"message": f"User name updated to: {payload.name}", "name": payload.name}
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 # Schedule Call Schemas

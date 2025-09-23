@@ -7,6 +7,9 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory debounce store to avoid rapid duplicate submissions per session
+_last_step_submission_at: dict[str, float] = {}
+
 
 class AnonymousOnboardingService:
     """Service for handling anonymous onboarding sessions before user registration"""
@@ -142,6 +145,15 @@ class AnonymousOnboardingService:
     async def complete_mobile_step(self, session_id: str, step: str, data: Optional[Dict] = None, db: Session = None) -> Dict:
         """Complete a step in the mobile 4-step onboarding flow"""
         try:
+            # Debounce: if the same session posts a step within 1 second, return idempotent status
+            now_ts = datetime.utcnow().timestamp()
+            last_ts = _last_step_submission_at.get(session_id)
+            if last_ts and (now_ts - last_ts) < 1.0:
+                logger.info(f"Session {session_id}: Debounced rapid duplicate submission for step '{step}'")
+                # Return current status idempotently
+                return await self.get_mobile_status(session_id, db)
+            _last_step_submission_at[session_id] = now_ts
+
             session = await self.get_session(session_id, db)
             if not session:
                 raise ValueError("Invalid or expired session")
@@ -155,6 +167,59 @@ class AnonymousOnboardingService:
 
             if step not in step_progression:
                 raise ValueError(f"Invalid step: {step}")
+
+            # If the step is already completed, return current status idempotently
+            if step == 'welcome' and session.welcome_completed:
+                logger.info(f"Session {session_id}: Welcome step already completed (idempotent)")
+                # calculate progress for response
+                completed_steps = sum([
+                    session.welcome_completed,
+                    session.profile_completed,
+                    session.tutorial_completed
+                ])
+                return {
+                    "step": step,
+                    "isCompleted": True,
+                    "completedAt": datetime.utcnow().isoformat(),
+                    "nextStep": step_progression[step]['next'] if step_progression[step]['next'] != 'ready_for_registration' else None,
+                    "currentStep": session.current_step,
+                    "progress": completed_steps / 3.0,
+                    "readyForRegistration": session.current_step == 'ready_for_registration'
+                }
+
+            if step == 'profile' and session.profile_completed:
+                logger.info(f"Session {session_id}: Profile step already completed (idempotent)")
+                completed_steps = sum([
+                    session.welcome_completed,
+                    session.profile_completed,
+                    session.tutorial_completed
+                ])
+                return {
+                    "step": step,
+                    "isCompleted": True,
+                    "completedAt": datetime.utcnow().isoformat(),
+                    "nextStep": step_progression[step]['next'] if step_progression[step]['next'] != 'ready_for_registration' else None,
+                    "currentStep": session.current_step,
+                    "progress": completed_steps / 3.0,
+                    "readyForRegistration": session.current_step == 'ready_for_registration'
+                }
+
+            if step == 'tutorial' and session.tutorial_completed:
+                logger.info(f"Session {session_id}: Tutorial step already completed (idempotent)")
+                completed_steps = sum([
+                    session.welcome_completed,
+                    session.profile_completed,
+                    session.tutorial_completed
+                ])
+                return {
+                    "step": step,
+                    "isCompleted": True,
+                    "completedAt": datetime.utcnow().isoformat(),
+                    "nextStep": step_progression[step]['next'] if step_progression[step]['next'] != 'ready_for_registration' else None,
+                    "currentStep": session.current_step,
+                    "progress": completed_steps / 3.0,
+                    "readyForRegistration": session.current_step == 'ready_for_registration'
+                }
 
             # Mark current step as completed and store data
             if step == 'welcome':
