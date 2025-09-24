@@ -377,8 +377,7 @@ async def apple_signin(
                 apple_email=user_info.get("email"),
                 apple_full_name=apple_request.user_full_name,
                 auth_provider="apple",
-                email_verified=user_info.get("email_verified", False),
-                app_type=AppType.MOBILE_CONSUMER  # Default for Apple Sign In
+                email_verified=user_info.get("email_verified", False)
             )
 
             db.add(new_user)
